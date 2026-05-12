@@ -1,0 +1,95 @@
+# ============== 全局 ==============
+app:
+  data_dir: ./data
+  logs_dir: ./logs
+  timezone: Asia/Shanghai
+
+# ============== 路径(NAS 友好,跨平台) ==============
+# Windows 示例: nas_root: "Z:/wxsp" 或 "\\\\server\\share\\wxsp"
+paths:
+  nas_root: /Volumes/NAS/wxsp
+  video_search_root: "{nas_root}/videos"
+  cover_search_root: "{nas_root}/covers"
+
+# ============== 账号 ==============
+accounts:
+  account_a:
+    display_name: "美食号"
+    enabled: true
+    daily_limit: 20
+    user_data_dir: ./data/chrome-profiles/account_a
+  account_b:
+    display_name: "健身号"
+    enabled: true
+    daily_limit: 20
+    user_data_dir: ./data/chrome-profiles/account_b
+  account_c:
+    display_name: "旅游号"
+    enabled: true
+    daily_limit: 20
+    user_data_dir: ./data/chrome-profiles/account_c
+  account_d:
+    display_name: "搞笑号"
+    enabled: true
+    daily_limit: 20
+    user_data_dir: ./data/chrome-profiles/account_d
+
+# ============== 调度 ==============
+scheduler:
+  daily_cron_hour: 9
+  daily_cron_minute: 0
+  strategy: round-robin
+
+# ============== 发布器 ==============
+publisher:
+  headless: false                # 视频号必须 false
+  upload_timeout_seconds: 600
+  step_pause_seconds: [1, 3]
+  screenshot_on_error: true
+  max_concurrent_accounts: 1
+
+# ============== 飞书集成 ==============
+feishu:
+  enabled: true
+  app_id: cli_xxxxxxxxxx
+  app_secret: ${FEISHU_APP_SECRET}
+  bitable:
+    app_token: xxxxxxxxxxxx
+    table_id: tblxxxxxxxx
+  field_map:
+    video_file: "视频文件"
+    title: "标题"
+    description: "描述"
+    tags: "标签"
+    cover: "封面文件"
+    topic: "合集"
+    original_claim: "原创"
+    account: "账号"
+    execute_date: "执行日期"
+    publish_at: "定时发布时间"
+    status: "状态"
+    remote_url: "已发布链接"
+    error_message: "错误信息"
+  sync:
+    write_back_enabled: true
+
+# ============== 告警 ==============
+monitoring:
+  cookie_warn_days: 1.5
+  notifiers:
+    wecom:
+      enabled: true
+      webhook: ${WECOM_BOT_WEBHOOK}
+  notify_on:
+    - cookie_expired
+    - cookie_warning
+    - risk_control
+    - task_failed
+    - element_not_found
+    - nas_unreachable
+
+# ============== Web UI ==============
+webui:
+  host: 127.0.0.1
+  port: 8765
+  open_browser_on_start: true

@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# wxsp local
+config.yaml
+data/
+logs/
+
+# Reference repos (cloned during dev, see CLAUDE.md "复用与参考")
+_ref/
+../_ref/
+
+# Editor
+.idea/
+.vscode/
+*.swp

@@ -1065,4 +1065,3 @@ Expected: 19 个测试全 PASS。
 | `{nas_root}` 模板 | config.py `_expand_nas_root_template` ✓ |
 
 无 placeholder("TBD"、"implement later"等)。每个 Step 都给出**完整可执行内容**(代码 / 命令 / 期望输出)。类型 / 命名跨任务一致(`load_settings`、`Settings`、`app` 始终如一)。
-

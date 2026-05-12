@@ -1,4 +1,5 @@
 """Tests for wxsp.config."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -79,7 +80,9 @@ def minimal_yaml() -> str:
     ).strip()
 
 
-def test_load_valid_yaml(tmp_path: Path, minimal_yaml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_valid_yaml(
+    tmp_path: Path, minimal_yaml: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("TEST_FEISHU_SECRET", "secret_value")
     monkeypatch.setenv("TEST_WECOM_WEBHOOK", "https://example.com/wecom")
     config_path = tmp_path / "config.yaml"
@@ -94,7 +97,9 @@ def test_load_valid_yaml(tmp_path: Path, minimal_yaml: str, monkeypatch: pytest.
     assert settings.accounts["account_a"].display_name == "测试号"
 
 
-def test_env_var_substitution(tmp_path: Path, minimal_yaml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_var_substitution(
+    tmp_path: Path, minimal_yaml: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("TEST_FEISHU_SECRET", "expanded_secret")
     monkeypatch.setenv("TEST_WECOM_WEBHOOK", "https://expanded.example.com")
     config_path = tmp_path / "config.yaml"
@@ -106,7 +111,9 @@ def test_env_var_substitution(tmp_path: Path, minimal_yaml: str, monkeypatch: py
     assert settings.monitoring.notifiers.wecom.webhook == "https://expanded.example.com"
 
 
-def test_nas_root_template_substitution(tmp_path: Path, minimal_yaml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_nas_root_template_substitution(
+    tmp_path: Path, minimal_yaml: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("TEST_FEISHU_SECRET", "x")
     monkeypatch.setenv("TEST_WECOM_WEBHOOK", "x")
     config_path = tmp_path / "config.yaml"
@@ -118,7 +125,9 @@ def test_nas_root_template_substitution(tmp_path: Path, minimal_yaml: str, monke
     assert str(settings.paths.cover_search_root) == "/Volumes/NAS/wxsp/covers"
 
 
-def test_missing_env_var_raises(tmp_path: Path, minimal_yaml: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_env_var_raises(
+    tmp_path: Path, minimal_yaml: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.delenv("TEST_FEISHU_SECRET", raising=False)
     monkeypatch.delenv("TEST_WECOM_WEBHOOK", raising=False)
     config_path = tmp_path / "config.yaml"

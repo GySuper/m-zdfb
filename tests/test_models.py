@@ -139,3 +139,24 @@ def test_task_status_constants_exist():
         models.TASK_STATUS_INTERRUPTED,
     }
     assert statuses == {"pending", "running", "success", "failed", "skipped", "interrupted"}
+
+
+def test_cookie_status_constants_exist_with_expected_values():
+    from wxsp.models import (
+        COOKIE_STATUS_EXPIRED,
+        COOKIE_STATUS_OK,
+        COOKIE_STATUS_UNKNOWN,
+        COOKIE_STATUS_WARN,
+    )
+
+    assert COOKIE_STATUS_OK == "ok"
+    assert COOKIE_STATUS_WARN == "warn"
+    assert COOKIE_STATUS_EXPIRED == "expired"
+    assert COOKIE_STATUS_UNKNOWN == "unknown"
+
+
+def test_account_default_cookie_status_is_unknown():
+    from wxsp.models import COOKIE_STATUS_UNKNOWN, Account
+
+    account = Account(id="a", display_name="A", user_data_dir="/tmp/a")
+    assert account.cookie_status == COOKIE_STATUS_UNKNOWN

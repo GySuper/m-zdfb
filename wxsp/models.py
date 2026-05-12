@@ -26,6 +26,12 @@ TASK_STATUS_FAILED = "failed"
 TASK_STATUS_SKIPPED = "skipped"
 TASK_STATUS_INTERRUPTED = "interrupted"
 
+# Account.cookie_status 状态机:从 wxsp login / wxsp doctor 写入
+COOKIE_STATUS_OK = "ok"
+COOKIE_STATUS_WARN = "warn"  # 预留:M7 接 cookie_warn_days 阈值后启用
+COOKIE_STATUS_EXPIRED = "expired"
+COOKIE_STATUS_UNKNOWN = "unknown"
+
 
 class Account(SQLModel, table=True):
     id: str = Field(primary_key=True)

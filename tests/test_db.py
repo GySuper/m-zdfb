@@ -194,7 +194,7 @@ def test_claim_task_concurrent_only_one_wins(engine):
             with Session(engine) as session:
                 barrier.wait(timeout=5)
                 results[idx] = claim_task(session, task_id)
-        except BaseException as exc:  # pylint: disable=broad-except
+        except BaseException as exc:  # — collect across threads
             errors.append(exc)
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(2)]

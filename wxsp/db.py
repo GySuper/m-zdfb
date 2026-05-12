@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import and_, update
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine
 
-from wxsp.models import Task
+from wxsp.models import TASK_STATUS_PENDING, TASK_STATUS_RUNNING, Task
 
 DEFAULT_DB_PATH = Path("data") / "db.sqlite"
 ENV_DB_PATH = "WXSP_DB_PATH"
@@ -65,3 +68,40 @@ def transition_task(session: Session, task_id: int, *, status: str, **fields: An
             raise AttributeError(f"Task has no field {key!r}")
         setattr(task, key, value)
     session.add(task)
+
+
+def claim_task(session: Session, task_id: int, *, lease_seconds: int = 1800) -> bool:
+    """原子地把一条 `pending` 任务标记为 `running`。
+
+    SQL 等价:
+        UPDATE task
+        SET status='running',
+            lease_token=?, lease_expires_at=?, started_at=?,
+            attempts = attempts + 1
+        WHERE id=? AND status='pending' AND execute_date <= today
+
+    SQLite 写入是串行化的,两个并发调用只有一个会让影响行数=1。
+    返回 True 表示本次调用拿到了执行权;False 表示别人在跑、状态非 pending、
+    execute_date 在未来,或 task 不存在。
+    """
+    now = datetime.now()
+    stmt = (
+        update(Task)
+        .where(
+            and_(
+                Task.id == task_id,  # type: ignore[arg-type]
+                Task.status == TASK_STATUS_PENDING,  # type: ignore[arg-type]
+                Task.execute_date <= date.today(),  # type: ignore[arg-type]
+            )
+        )
+        .values(
+            status=TASK_STATUS_RUNNING,
+            lease_token=uuid.uuid4().hex,
+            lease_expires_at=now + timedelta(seconds=lease_seconds),
+            started_at=now,
+            attempts=Task.attempts + 1,
+        )
+    )
+    result = session.execute(stmt)
+    session.commit()
+    return int(result.rowcount) == 1  # type: ignore[attr-defined]

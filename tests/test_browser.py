@@ -1,0 +1,84 @@
+"""Smoke tests on the browser module's public surface.
+
+Browser-touching code (`browser_context`, `wait_for_logged_in`) is exercised
+manually in M2 acceptance (Task 8) and by `wxsp login` against the test account
+— launching real Chromium under pytest is too heavy and not CI-safe.
+"""
+
+from __future__ import annotations
+
+
+def test_wechat_channels_home_constant_is_https():
+    from wxsp.browser import WECHAT_CHANNELS_HOME
+
+    assert WECHAT_CHANNELS_HOME.startswith("https://")
+    assert "channels.weixin.qq.com" in WECHAT_CHANNELS_HOME
+
+
+def test_logged_in_selector_targets_publish_buttons():
+    from wxsp.browser import LOGGED_IN_SELECTOR
+
+    # The selector must mention a button/text that only appears post-login.
+    assert "发表" in LOGGED_IN_SELECTOR or "发布" in LOGGED_IN_SELECTOR
+
+
+def test_public_callables_importable():
+    from wxsp.browser import browser_context, check_cookie, wait_for_logged_in
+
+    assert callable(browser_context)
+    assert callable(check_cookie)
+    assert callable(wait_for_logged_in)
+
+
+def test_check_cookie_passes_user_data_dir_through_to_browser_context(tmp_path, monkeypatch):
+    """`check_cookie` is a thin wrapper: hand `user_data_dir` to `browser_context`,
+    call `wait_for_logged_in`, return its bool.
+
+    We monkeypatch `browser_context` and `wait_for_logged_in` to record their args.
+    Real chromium launch is exercised manually in Task 8 acceptance, not under pytest.
+    """
+    from contextlib import contextmanager
+
+    from wxsp import browser as browser_mod
+
+    udd = tmp_path / "chrome-profiles" / "test_account"
+    seen_dirs: list = []
+    seen_timeouts: list = []
+    sentinel_page = object()
+
+    @contextmanager
+    def fake_context(user_data_dir, *, headless=False):
+        seen_dirs.append(user_data_dir)
+        yield sentinel_page
+
+    def fake_wait(page, *, timeout_ms):
+        assert page is sentinel_page
+        seen_timeouts.append(timeout_ms)
+        return True
+
+    monkeypatch.setattr(browser_mod, "browser_context", fake_context)
+    monkeypatch.setattr(browser_mod, "wait_for_logged_in", fake_wait)
+
+    result = browser_mod.check_cookie(udd, timeout_ms=1234)
+    assert result is True
+    assert seen_dirs == [udd]
+    assert seen_timeouts == [1234]
+
+
+def test_check_cookie_returns_false_when_wait_returns_false(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    from wxsp import browser as browser_mod
+
+    @contextmanager
+    def fake_context(user_data_dir, *, headless=False):
+        yield object()
+
+    def fake_wait(page, *, timeout_ms):
+        return False
+
+    monkeypatch.setattr(browser_mod, "browser_context", fake_context)
+    monkeypatch.setattr(browser_mod, "wait_for_logged_in", fake_wait)
+
+    result = browser_mod.check_cookie(tmp_path / "udd", timeout_ms=1000)
+    assert result is False

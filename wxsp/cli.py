@@ -5,12 +5,15 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import typer
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from wxsp.browser import check_cookie
 from wxsp.db import get_engine, init_db, session_scope
+from wxsp.doctor import record_cookie_check
 from wxsp.models import Account
 
 app = typer.Typer(
@@ -39,8 +42,36 @@ def _open_session() -> Iterator[Session]:
 
 @app.command("login")
 def login(account_id: str = typer.Argument(..., help="账号 ID")) -> None:
-    """扫码登录指定账号,刷新 Cookie(M2 实现)。"""
-    _not_implemented(f"login {account_id}")
+    """扫码登录指定账号,刷新 Cookie。打开浏览器后扫描页面上的二维码即可。"""
+    # 1. 拿 user_data_dir,session 立刻关闭(浏览器扫码可能开 5 分钟,不能持 session)
+    with _open_session() as session:
+        account = session.get(Account, account_id)
+        if account is None:
+            typer.echo(f"[wxsp] 账号 {account_id!r} 不存在。先 `wxsp accounts add`。")
+            raise typer.Exit(code=1)
+        user_data_dir = Path(account.user_data_dir)
+
+    # 2. 启浏览器,等扫码 / 等已登录标记可见(最长 5 分钟)
+    typer.echo(f"[wxsp] 打开浏览器,请在弹出窗口中扫码登录 {account_id}(最长 5 分钟)...")
+    try:
+        is_logged_in: bool | None = check_cookie(user_data_dir, timeout_ms=300_000)
+    except Exception as exc:
+        typer.echo(f"[wxsp] 浏览器启动失败:{exc}")
+        is_logged_in = None
+
+    # 3. 回写 DB
+    now = datetime.now()
+    with _open_session() as session:
+        record_cookie_check(session, account_id, is_logged_in=is_logged_in, now=now)
+
+    if is_logged_in is True:
+        typer.echo(f"[wxsp] ✓ 账号 {account_id} 登录成功,cookie 已持久化。")
+    elif is_logged_in is False:
+        typer.echo("[wxsp] ✗ 登录超时:未在 5 分钟内完成扫码,cookie 标记为 expired。")
+        raise typer.Exit(code=1)
+    else:
+        typer.echo("[wxsp] ✗ 浏览器异常,cookie 状态标记为 unknown。")
+        raise typer.Exit(code=1)
 
 
 @accounts_app.command("add")

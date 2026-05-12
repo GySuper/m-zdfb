@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import and_, update
+from sqlalchemy import update
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -88,11 +88,9 @@ def claim_task(session: Session, task_id: int, *, lease_seconds: int = 1800) -> 
     stmt = (
         update(Task)
         .where(
-            and_(
-                Task.id == task_id,  # type: ignore[arg-type]
-                Task.status == TASK_STATUS_PENDING,  # type: ignore[arg-type]
-                Task.execute_date <= date.today(),  # type: ignore[arg-type]
-            )
+            Task.id == task_id,  # type: ignore[arg-type]
+            Task.status == TASK_STATUS_PENDING,  # type: ignore[arg-type]
+            Task.execute_date <= date.today(),  # type: ignore[arg-type]
         )
         .values(
             status=TASK_STATUS_RUNNING,
@@ -104,4 +102,4 @@ def claim_task(session: Session, task_id: int, *, lease_seconds: int = 1800) -> 
     )
     result = session.execute(stmt)
     session.commit()
-    return int(result.rowcount) == 1  # type: ignore[attr-defined]
+    return bool(result.rowcount == 1)  # type: ignore[attr-defined]

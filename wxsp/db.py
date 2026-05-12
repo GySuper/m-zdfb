@@ -54,7 +54,10 @@ def session_scope(engine: Engine) -> Iterator[Session]:
 
 
 def transition_task(session: Session, task_id: int, *, status: str, **fields: Any) -> None:
-    """更新 Task 行的 status 和任意字段。调用方负责 commit。
+    """更新 Task 行的 status 和任意字段。**调用方负责 commit**。
+
+    与 `claim_task` 不同,本函数刻意不 commit,允许调用方把状态变更与同一 session 中
+    的其它写入合并为一个事务(例如 publisher 收尾时同时写 remote_url + status)。
 
     - `task_id` 不存在 → `LookupError`
     - `fields` 中出现非 Task 字段名 → `AttributeError`
@@ -83,6 +86,10 @@ def claim_task(session: Session, task_id: int, *, lease_seconds: int = 1800) -> 
     SQLite 写入是串行化的,两个并发调用只有一个会让影响行数=1。
     返回 True 表示本次调用拿到了执行权;False 表示别人在跑、状态非 pending、
     execute_date 在未来,或 task 不存在。
+
+    **本函数内部 commit 是有意为之**:UPDATE 必须独占一次完整事务并提交,SQLite 写锁
+    才会释放、status='running' 才能对其它 worker 可见。调用方不应把它包在更外层的事务
+    里等待其它写入一起 commit —— 会让后续 worker 阻塞、defeating 并发互斥语义。
     """
     now = datetime.now()
     stmt = (

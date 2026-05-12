@@ -1,4 +1,15 @@
-"""SQLModel 表定义:Account / Video / Task / Event(M1)。"""
+"""SQLModel 表定义:Account / Video / Task / Event(M1)。
+
+时间约定(M1 暂定,M6 接 APScheduler 时一并升级):
+  所有 datetime 字段存 **naive local time (Asia/Shanghai)**。Asia/Shanghai 无 DST、
+  等同固定偏移 UTC+8,naive 与 tz-aware 互转无风险。M6 加 APScheduler 时配
+  `timezone="Asia/Shanghai"`,两边语义对齐即可。
+
+路径约定:
+  路径字段(`user_data_dir` / `file_path` / `cover_path`)为 `str`(SQLite 不直接存
+  `pathlib.Path`)。**业务代码取用时请 `pathlib.Path(value)` 包一层**,符合项目
+  "禁止字符串拼 `/`" 的跨平台约定。
+"""
 
 from __future__ import annotations
 
@@ -19,7 +30,7 @@ TASK_STATUS_INTERRUPTED = "interrupted"
 class Account(SQLModel, table=True):
     id: str = Field(primary_key=True)
     display_name: str
-    user_data_dir: str
+    user_data_dir: str  # 存为 str(SQLite 限制);M2 browser.py 取用时 Path(value) 包一层
     daily_limit: int = 20
     is_active: bool = True
     paused_until: datetime | None = None

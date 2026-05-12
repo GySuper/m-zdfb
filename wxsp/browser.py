@@ -7,6 +7,11 @@
     也开窗。CLAUDE.md 明确"严禁 headless 跑视频号"。
   - 选择器集中在本模块的 `LOGGED_IN_SELECTOR`;M5 publisher 的发布步骤选择器会
     集中到 `wxsp.selectors`(改版时唯一改动点)。
+  - **不默认注入 `wxsp.stealth_js.INIT_SCRIPT`**。视频号 2026 反爬升级后,init script
+    里 `navigator.webdriver=undefined`(正常浏览器是 `false`)等"过度修改"特征反而
+    会触发服务端在 TLS 层断连(`ERR_CONNECTION_CLOSED`)。patchright 自身的 CDP
+    指纹修补已足够;`stealth_js.py` 的常量保留备用,M5 publisher 若有需要可显式
+    `context.add_init_script(INIT_SCRIPT)` 注入。
 """
 
 from __future__ import annotations
@@ -16,8 +21,6 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from patchright.sync_api import Page, sync_playwright
-
-from wxsp.stealth_js import INIT_SCRIPT
 
 WECHAT_CHANNELS_HOME = "https://channels.weixin.qq.com"
 
@@ -34,11 +37,13 @@ def browser_context(
     *,
     headless: bool = False,
 ) -> Iterator[Page]:
-    """打开账号专属 persistent Chrome context,注入 stealth init script。
+    """打开账号专属 persistent Chrome context。
 
     - `user_data_dir` 不存在会自动创建(适配 `wxsp accounts add` 后第一次 login)。
     - persistent context 启动时会有一个默认 page(about:blank),直接复用。
     - 退出时 close context;cookie 已由 persistent context 写到 user_data_dir。
+    - 反检测靠 patchright 自身的 CDP 指纹修补 + `--disable-blink-features=
+      AutomationControlled`,**不再注入** `stealth_js.INIT_SCRIPT`(见模块 docstring)。
     """
     user_data_dir.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -49,7 +54,6 @@ def browser_context(
             args=["--disable-blink-features=AutomationControlled"],
         )
         try:
-            context.add_init_script(INIT_SCRIPT)
             page = context.pages[0] if context.pages else context.new_page()
             yield page
         finally:

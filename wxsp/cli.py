@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import typer
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from wxsp.browser import check_cookie
+from wxsp.config import Settings, load_settings
 from wxsp.db import get_engine, init_db, session_scope
 from wxsp.doctor import record_cookie_check, refresh_cookie_status
-from wxsp.models import Account
+from wxsp.feishu import FeishuApiError, fetch_pending_rows, make_client, writeback_row
+from wxsp.models import Account, Task, Video
+from wxsp.nas import find_cover, find_video
+from wxsp.validator import FieldError, NasFinder, validate
 
 app = typer.Typer(
     name="wxsp",
@@ -174,10 +180,154 @@ def doctor() -> None:
         typer.echo(f"{row.account_id:<14} {row.status:<10} {last_active:<20}")
 
 
+class _NasFinderImpl:
+    """生产 NasFinder:接 config 的 search root。"""
+
+    def __init__(self, video_root: Path, cover_root: Path) -> None:
+        self._video_root = video_root
+        self._cover_root = cover_root
+
+    def find_video(self, filename: str) -> Path:
+        return find_video(filename, search_root=self._video_root)
+
+    def find_cover(self, filename: str) -> Path:
+        return find_cover(filename, search_root=self._cover_root)
+
+
 @app.command("sync")
-def sync() -> None:
-    """立即拉一次飞书 Bitable,不跑任务(M3 实现)。"""
-    _not_implemented("sync")
+def sync(
+    dry_run: bool = typer.Option(False, "--dry-run", help="走完流程但不写 DB 不回写飞书"),
+) -> None:
+    """立即拉一次飞书 Bitable,执行入库 / 错误回写。"""
+    settings = load_settings()
+    if not settings.feishu.enabled:
+        typer.echo("[wxsp] 飞书未启用,跳过 sync。")
+        return
+
+    typer.echo(
+        f"[wxsp] 飞书同步开始: app_token={settings.feishu.bitable.app_token} "
+        f"table_id={settings.feishu.bitable.table_id}"
+    )
+
+    client = make_client(settings.feishu.app_id, settings.feishu.app_secret)
+    try:
+        rows = fetch_pending_rows(
+            client,
+            app_token=settings.feishu.bitable.app_token,
+            table_id=settings.feishu.bitable.table_id,
+            status_field=settings.feishu.field_map.status,
+        )
+    except FeishuApiError as exc:
+        typer.echo(f"[wxsp] 飞书 API 持续失败: {exc}")
+        raise typer.Exit(code=70) from exc
+
+    typer.echo(f"[wxsp] 拉取待入库行: {len(rows)} 条")
+
+    nas_finder: NasFinder = _NasFinderImpl(
+        video_root=settings.paths.video_search_root,
+        cover_root=settings.paths.cover_search_root,
+    )
+    now = datetime.now()
+    accepted: list[tuple[str, int]] = []
+    rejected: list[tuple[str, list[FieldError]]] = []
+    skipped_existing: list[str] = []
+
+    with _open_session() as session:
+        active_account_ids: set[str] = {
+            a.id
+            for a in session.exec(select(Account).where(Account.is_active == True))  # noqa: E712
+        }
+        for row in rows:
+            if session.get(Video, row.record_id) is not None:
+                skipped_existing.append(row.record_id)
+                continue
+            result = validate(
+                row,
+                config=settings,
+                now=now,
+                nas_finder=nas_finder,
+                active_account_ids=active_account_ids,
+            )
+            if not result.ok:
+                rejected.append((row.record_id, result.errors))
+                continue
+            if dry_run:
+                accepted.append((row.record_id, -1))
+                continue
+            video = Video(
+                id=row.record_id,
+                source="feishu",
+                file_path=str(result.video_path),
+                title=result.title or "",
+                description=result.description,
+                tags_json=json.dumps(result.tags, ensure_ascii=False),
+                cover_path=str(result.cover_path) if result.cover_path else None,
+                topic=result.topic,
+                original_claim=result.original_claim,
+                ingested_at=now,
+            )
+            task = Task(
+                video_id=row.record_id,
+                account_id=result.account_id or "",
+                execute_date=result.execute_date,
+                publish_at=result.publish_at,
+                status="pending",
+            )
+            try:
+                with session.begin_nested():
+                    session.add(video)
+                    session.add(task)
+            except IntegrityError:
+                skipped_existing.append(row.record_id)
+                continue
+            accepted.append((row.record_id, task.id or -1))
+
+    # 回写飞书(--dry-run 跳过;write_back_enabled=False 也跳过)
+    if not dry_run and settings.feishu.sync.write_back_enabled:
+        fm = settings.feishu.field_map
+        for record_id, _task_id in accepted:
+            _safe_writeback(client, settings, record_id, {fm.status: "已计划"})
+        for record_id, errs in rejected:
+            _safe_writeback(
+                client,
+                settings,
+                record_id,
+                {fm.status: "失败", fm.error_message: _format_errors(errs)},
+            )
+        for record_id in skipped_existing:
+            _safe_writeback(
+                client,
+                settings,
+                record_id,
+                {fm.error_message: "已有历史任务,请在 Web UI 重试"},
+            )
+
+    typer.echo("[wxsp] 飞书同步完成")
+    typer.echo(f"  拉取: {len(rows)}")
+    typer.echo(f"  入库: {len(accepted)}{' (dry-run)' if dry_run else ''}")
+    typer.echo(f"  拒绝: {len(rejected)}{' (已回写)' if not dry_run else ''}")
+    typer.echo(f"  已存在跳过: {len(skipped_existing)}")
+
+
+def _safe_writeback(
+    client: Any, settings: Settings, record_id: str, fields: dict[str, Any]
+) -> None:
+    """writeback 单行失败不抛,打印告警继续。"""
+    try:
+        writeback_row(
+            client,
+            app_token=settings.feishu.bitable.app_token,
+            table_id=settings.feishu.bitable.table_id,
+            record_id=record_id,
+            fields=fields,
+        )
+    except FeishuApiError as exc:
+        typer.echo(f"[wxsp] 回写 {record_id} 失败(已跳过): {exc}")
+
+
+def _format_errors(errs: list[FieldError]) -> str:
+    bullet_lines = "\n".join(f"· {e.field}: {e.message}" for e in errs)
+    return f'校验失败,请修复后将"状态"改回"待入库":\n{bullet_lines}'
 
 
 @app.command("run")

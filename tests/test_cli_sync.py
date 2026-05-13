@@ -98,7 +98,7 @@ def _happy_row(i: int, now: datetime) -> BitableRow:
     return BitableRow(
         record_id=f"rec_ok_{i}",
         fields={
-            "标题": f"测试标题视频内容编号{i:02d}六字",  # 18 字以上
+            "标题": f"测试标题视频内容编号第零{i:02d}号共十八字",  # 18 字以上
             "描述": "desc",
             "标签": [{"text": "t1"}],
             "封面文件": "",

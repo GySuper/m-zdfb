@@ -235,3 +235,106 @@ def test_refresh_cookie_status_passes_pathlib_path_to_checker(session: Session) 
     assert len(received) == 1
     assert isinstance(received[0], Path)
     assert str(received[0]) == "/tmp/profiles/account_a"
+
+
+# ============== check_nas ==============
+
+
+def _make_settings(video_root: Path, cover_root: Path) -> Any:
+    """构造最小 Settings,只填 check_nas 用到的 paths.{video,cover}_search_root。"""
+    from wxsp.config import (
+        AppConfig,
+        FeishuBitableConfig,
+        FeishuConfig,
+        MonitoringConfig,
+        NotifiersConfig,
+        PathsConfig,
+        PublisherConfig,
+        SchedulerConfig,
+        Settings,
+        WebUIConfig,
+        WecomNotifierConfig,
+    )
+
+    return Settings(
+        app=AppConfig(data_dir=Path("/tmp/d"), logs_dir=Path("/tmp/l"), timezone="Asia/Shanghai"),
+        paths=PathsConfig(
+            nas_root=video_root.parent,
+            video_search_root=video_root,
+            cover_search_root=cover_root,
+        ),
+        accounts={},
+        scheduler=SchedulerConfig(),
+        publisher=PublisherConfig(),
+        feishu=FeishuConfig(
+            enabled=False,
+            app_id="x",
+            app_secret="x",
+            bitable=FeishuBitableConfig(app_token="x", table_id="x"),
+        ),
+        monitoring=MonitoringConfig(
+            notifiers=NotifiersConfig(wecom=WecomNotifierConfig(enabled=False, webhook="")),
+        ),
+        webui=WebUIConfig(),
+    )
+
+
+def test_check_nas_both_paths_exist_and_are_dirs(tmp_path: Path) -> None:
+    from wxsp.doctor import check_nas
+
+    video_root = tmp_path / "videos"
+    cover_root = tmp_path / "covers"
+    video_root.mkdir()
+    cover_root.mkdir()
+    settings = _make_settings(video_root, cover_root)
+
+    rows = check_nas(settings)
+
+    assert len(rows) == 2
+    assert [(r.label, r.ok) for r in rows] == [
+        ("video_search_root", True),
+        ("cover_search_root", True),
+    ]
+    assert rows[0].path == video_root
+    assert rows[1].path == cover_root
+
+
+def test_check_nas_video_root_missing(tmp_path: Path) -> None:
+    from wxsp.doctor import check_nas
+
+    video_root = tmp_path / "videos"  # 故意不创建
+    cover_root = tmp_path / "covers"
+    cover_root.mkdir()
+    settings = _make_settings(video_root, cover_root)
+
+    rows = check_nas(settings)
+
+    assert rows[0].label == "video_search_root"
+    assert rows[0].ok is False
+    assert "不存在" in rows[0].detail
+    assert rows[1].ok is True
+
+
+def test_check_nas_path_is_file_not_dir(tmp_path: Path) -> None:
+    from wxsp.doctor import check_nas
+
+    video_root = tmp_path / "videos"
+    video_root.mkdir()
+    cover_root = tmp_path / "covers_file"  # 故意建成文件
+    cover_root.write_text("oops")
+    settings = _make_settings(video_root, cover_root)
+
+    rows = check_nas(settings)
+
+    assert rows[0].ok is True
+    assert rows[1].ok is False
+    assert "不是目录" in rows[1].detail
+
+
+def test_check_nas_both_missing(tmp_path: Path) -> None:
+    from wxsp.doctor import check_nas
+
+    settings = _make_settings(tmp_path / "v", tmp_path / "c")  # 都不存在
+    rows = check_nas(settings)
+
+    assert all(not r.ok for r in rows)

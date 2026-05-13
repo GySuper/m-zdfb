@@ -519,7 +519,7 @@ M0 脚手架 ──→ M1 数据层 ──┬──→ M2 浏览器+登录 ─�
 | **M1** | 数据层 | SQLModel 4 表 + `db.py` (engine/session/`transition_task()`/`claim_task()` 原子锁) + `wxsp accounts add/list/pause/resume` | 单元测试:两个并发 worker 抢同一 task 只有一个成功;`unique(video_id)` 约束生效 | 1d |
 | **M2** | 浏览器 + 登录 | `browser.py` (patchright + user_data_dir + init script) + `wxsp login <account>` 扫码 + `doctor` 检查登录态 | 测试号扫码登录成功;重启 daemon 后无需重新扫码;`wxsp doctor` 输出每个账号 `cookie_status` | 1.5d |
 | **M3** | 飞书同步 + 校验 | `feishu.py` + `validator.py` + `wxsp sync` + 不合规行回写错误 | fixture 表放 10 行 (5 合规 5 不合规),sync 后 DB 5 条 Video,飞书 5 行回写"失败+错因" | 1.5d |
-| **M4** | NAS 处理 | `nas.py` (`resolve_path` / `stage_to_tmp` / `cleanup_tmp`) + `doctor` 检查 NAS + `nas_unreachable` 重试 | mac `/Volumes/NAS/...` 和 Windows `\\server\share\...` 都能 resolve;NAS 断开 5 次退避后告警 | 0.5d |
+| **M4** | NAS 处理 | `nas.py` (`resolve_path` / `stage_to_tmp` / `cleanup_tmp`) + `doctor` 检查 NAS + `nas_unreachable` 重试 | mac `/Volumes/NAS/...` 和 Windows `\\server\share\...` 都能 resolve;NAS 断开 5 次退避后告警 | 0.5d | **M4 验收完成 (2026-05-13)** |
 | **M5** | 发布核心 | `publisher.py` 步骤 [0-20] + `selectors.py` + `errors.py` + `retry.py` + `wxsp run --task-id N [--dry-run]` | (1) dry-run 跑到 publish 按钮前停下截图;(2) 真发一条成功,DB 写入 `remote_url`;(3) 重复触发幂等锁只发一次 | 3-4d |
 | **M6** | 调度 daemon | `scheduler.py` (09:00 cron + 手动 fire,无 polling) + `wxsp run --daemon` + `wxsp run --today` + `wxsp sync` + worker 入口前自动调 `feishu.sync_now()` + 启动扫描 running→interrupted | 09:00 cron 触发时先 sync 飞书再扫 today pending 入队;手动 `wxsp run --today` 等效;`wxsp sync` 只拉飞书不跑任务;kill 后重启 running→interrupted | 1.5d |
 | **M7** | 通知 + 回写 | `notify.py` + `WecomNotifier` + 飞书回写 + 5 类告警事件 | 故意造 (a) cookie_expired (b) risk_control (c) element_not_found (d) task_failed,企微收到卡片,飞书状态正确回写 | 1d |

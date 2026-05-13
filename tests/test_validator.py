@@ -361,3 +361,160 @@ def test_validate_cover_empty_is_ok(tmp_path: Path) -> None:
     )
     # 封面字段不应该报错
     assert all(e.field != "封面文件" for e in result.errors), result.errors
+
+
+# ---------------------------------------------------------------------------
+# Task 9: execute_date / publish_at rules + happy path
+# ---------------------------------------------------------------------------
+
+
+def test_validate_execute_date_missing(tmp_path: Path) -> None:
+    fields = dict(_make_happy_row(tmp_path).fields)
+    fields["标题"] = "字" * 16
+    fields["执行日期"] = None
+    row = BitableRow(record_id="r", fields=fields)
+    nas = _StubNas()
+    nas.video_returns["国庆01.mp4"] = tmp_path / "国庆01.mp4"
+    (tmp_path / "国庆01.mp4").write_bytes(b"x")
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    assert result.ok is False
+    assert any(e.field == "执行日期" for e in result.errors)
+
+
+def test_validate_publish_at_too_close(tmp_path: Path) -> None:
+    # publish_at = now + 29 分钟 → 早于 now+30min
+    fields = dict(_make_happy_row(tmp_path).fields)
+    fields["标题"] = "字" * 16
+    fields["定时发布时间"] = _datetime_to_feishu_ms(datetime(2026, 5, 12, 9, 29))
+    row = BitableRow(record_id="r", fields=fields)
+    nas = _StubNas()
+    nas.video_returns["国庆01.mp4"] = tmp_path / "国庆01.mp4"
+    (tmp_path / "国庆01.mp4").write_bytes(b"x")
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    assert result.ok is False
+    assert any(e.field == "定时发布时间" and "30min" in e.message for e in result.errors)
+
+
+def test_validate_publish_at_too_far(tmp_path: Path) -> None:
+    # publish_at = now + 14 天 + 1 分钟 → 超出 now+14d 上限
+    fields = dict(_make_happy_row(tmp_path).fields)
+    fields["标题"] = "字" * 16
+    fields["定时发布时间"] = _datetime_to_feishu_ms(datetime(2026, 5, 26, 9, 1))
+    row = BitableRow(record_id="r", fields=fields)
+    nas = _StubNas()
+    nas.video_returns["国庆01.mp4"] = tmp_path / "国庆01.mp4"
+    (tmp_path / "国庆01.mp4").write_bytes(b"x")
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    assert result.ok is False
+    assert any(e.field == "定时发布时间" and "14d" in e.message for e in result.errors)
+
+
+def test_validate_publish_at_boundary_30min_passes(tmp_path: Path) -> None:
+    fields = dict(_make_happy_row(tmp_path).fields)
+    fields["标题"] = "字" * 16
+    fields["定时发布时间"] = _datetime_to_feishu_ms(datetime(2026, 5, 12, 9, 30))
+    row = BitableRow(record_id="r", fields=fields)
+    nas = _StubNas()
+    video = tmp_path / "国庆01.mp4"
+    video.write_bytes(b"x")
+    nas.video_returns["国庆01.mp4"] = video
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    assert all(e.field != "定时发布时间" for e in result.errors), result.errors
+
+
+def test_validate_publish_date_earlier_than_execute_date(tmp_path: Path) -> None:
+    fields = dict(_make_happy_row(tmp_path).fields)
+    fields["标题"] = "字" * 16
+    fields["执行日期"] = _date_to_feishu_ms(date(2026, 5, 14))
+    fields["定时发布时间"] = _datetime_to_feishu_ms(
+        datetime(2026, 5, 13, 14, 0)
+    )  # 早于 execute_date
+    row = BitableRow(record_id="r", fields=fields)
+    nas = _StubNas()
+    video = tmp_path / "国庆01.mp4"
+    video.write_bytes(b"x")
+    nas.video_returns["国庆01.mp4"] = video
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    assert result.ok is False
+    assert any(e.field == "定时发布时间" and "早于执行日期" in e.message for e in result.errors)
+
+
+def test_validate_multi_error_collection(tmp_path: Path) -> None:
+    """同时 3 个字段错 → errors 长度 == 3。"""
+    fields = dict(_make_happy_row(tmp_path).fields)
+    fields["标题"] = "短"  # 1 字
+    fields["视频文件"] = "missing.mp4"
+    fields["账号"] = ""
+    row = BitableRow(record_id="r", fields=fields)
+    nas = _StubNas()  # 不预置 → 找不到
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    assert result.ok is False
+    error_fields = {e.field for e in result.errors}
+    assert {"标题", "视频文件", "账号"} <= error_fields
+
+
+def test_validate_happy_path(tmp_path: Path) -> None:
+    """所有字段都合规 → ok=True,全部 attribute 填充。"""
+    fields = dict(_make_happy_row(tmp_path).fields)
+    fields["标题"] = "这是一个测试标题视频内容十八字符"  # 16 字
+    row = BitableRow(record_id="rec_happy", fields=fields)
+
+    settings = _make_settings(tmp_path)
+    nas = _StubNas()
+    video_path = tmp_path / "国庆01.mp4"
+    video_path.write_bytes(b"x" * 100)
+    nas.video_returns["国庆01.mp4"] = video_path
+
+    result = validate(
+        row,
+        config=settings,
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a", "account_b"},
+    )
+    assert result.ok is True, result.errors
+    assert result.title == "这是一个测试标题视频内容十八字符"
+    assert result.tags == ["标签1", "标签2"]
+    assert result.topic == "测试合集"
+    assert result.original_claim is True
+    assert result.account_id == "account_a"
+    assert result.video_path == video_path
+    assert result.cover_path is None
+    assert result.execute_date == date(2026, 5, 13)
+    assert result.publish_at == datetime(2026, 5, 13, 14, 0)  # naive 上海时间

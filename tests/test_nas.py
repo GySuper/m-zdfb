@@ -174,3 +174,47 @@ def test_stage_to_tmp_translates_mkdir_oserror_to_nas_unreachable(
 
     with pytest.raises(NasUnreachable):
         stage_to_tmp(src, task_id=1, tmp_root=tmp_path / "tmp")
+
+
+# ============== cleanup_tmp ==============
+
+
+def test_cleanup_tmp_removes_task_dir(tmp_path: Path) -> None:
+    from wxsp.nas import cleanup_tmp, stage_to_tmp
+
+    src = tmp_path / "src.mp4"
+    src.write_bytes(b"x")
+    tmp_root = tmp_path / "tmp"
+
+    stage_to_tmp(src, task_id=42, tmp_root=tmp_root)
+    assert (tmp_root / "42").is_dir()
+
+    cleanup_tmp(task_id=42, tmp_root=tmp_root)
+    assert not (tmp_root / "42").exists()
+
+
+def test_cleanup_tmp_is_idempotent_when_dir_missing(tmp_path: Path) -> None:
+    """目录不存在 → 静默返回,不抛异常。"""
+    from wxsp.nas import cleanup_tmp
+
+    tmp_root = tmp_path / "tmp"
+    tmp_root.mkdir()
+    # 调用不存在的 task_id 不抛
+    cleanup_tmp(task_id=999, tmp_root=tmp_root)
+
+
+def test_cleanup_tmp_does_not_touch_sibling_task_dirs(tmp_path: Path) -> None:
+    """只删自己的 task_id 目录,不动其他 task 的 stage。"""
+    from wxsp.nas import cleanup_tmp, stage_to_tmp
+
+    src = tmp_path / "src.mp4"
+    src.write_bytes(b"x")
+    tmp_root = tmp_path / "tmp"
+
+    stage_to_tmp(src, task_id=1, tmp_root=tmp_root)
+    stage_to_tmp(src, task_id=2, tmp_root=tmp_root)
+
+    cleanup_tmp(task_id=1, tmp_root=tmp_root)
+
+    assert not (tmp_root / "1").exists()
+    assert (tmp_root / "2").is_dir()  # 兄弟没动

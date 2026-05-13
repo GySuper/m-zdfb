@@ -27,7 +27,7 @@ WECHAT_CHANNELS_HOME = "https://channels.weixin.qq.com"
 # "已登录"标记:视频号主页/发布页登录后才出现的元素。任一可见 → 视为已登录。
 # 选择器来自 social-auto-upload/uploader/tencent_uploader/main.py 的踩坑成果。
 LOGGED_IN_SELECTOR = (
-    'div:has-text("发表视频"), ' 'button:has-text("发表"), ' 'button:has-text("发布视频")'
+    'div:has-text("发表视频"), button:has-text("发表"), button:has-text("发布视频")'
 )
 
 

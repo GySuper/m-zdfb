@@ -11,16 +11,24 @@ from pathlib import Path
 
 from loguru import logger
 from patchright.sync_api import Page
+from sqlmodel import Session
 
 from wxsp import selectors as sel
+from wxsp.browser import browser_context
+from wxsp.config import Settings
+from wxsp.db import claim_task, get_engine, init_db, session_scope, transition_task
 from wxsp.errors import (
     CookieExpired,
     ElementNotFound,
     NetworkError,
+    PublisherError,
     RiskControl,
     UploadFailed,
     VideoInvalid,
+    classify,
 )
+from wxsp.models import Account, Task, Video
+from wxsp.nas import cleanup_tmp, stage_to_tmp
 
 
 class AlreadyClaimed(Exception):
@@ -330,3 +338,181 @@ def extract_remote_video_id_and_url(page: Page) -> tuple[str | None, str | None]
     except Exception as exc:
         logger.info(f"提取 remote_url 失败(对定时发布是常态): {exc}")
         return None, None
+
+
+# ============== publish() 顶层编排 ==============
+
+
+def _load_task_bundle(session: Session, task_id: int) -> tuple[Task, Video, Account]:
+    task = session.get(Task, task_id)
+    if task is None:
+        raise LookupError(f"Task id={task_id} 不存在")
+    video = session.get(Video, task.video_id)
+    account = session.get(Account, task.account_id)
+    if video is None or account is None:
+        raise LookupError(f"Task {task_id} 的 video/account 缺失")
+    return task, video, account
+
+
+def publish(
+    task_id: int,
+    *,
+    dry_run: bool = False,
+    settings: Settings,
+) -> PublishResult:
+    """跑视频号发布的 20 个步骤,返回 PublishResult。
+
+    - 入口先 `claim_task(task_id)`(原子幂等锁)。拿不到 → AlreadyClaimed。
+    - 拿到后串行跑 [1-13];dry_run=True 在 [13] 之后截图返回,不点发表。
+    - 任何 PublisherError(及 patchright Error)→ classify → 写 last_error_type
+      + 截图 + status=failed。
+    - 成功 → status=success + remote_url/remote_video_id(尽力而为)。
+    - dry_run 成功 → status 写回 pending(没真发,等正式触发)。
+    - 不管成败,最后 cleanup_tmp。
+    """
+    import json as _json
+
+    engine = get_engine()
+    init_db(engine)
+    screenshots_root = settings.app.logs_dir / "screenshots"
+    tmp_root = settings.app.data_dir / "tmp"
+    upload_timeout = settings.publisher.upload_timeout_seconds
+    step_pause = settings.publisher.step_pause_seconds
+
+    # 1. 幂等抢锁(claim_task 自己 commit)
+    with Session(engine) as session:
+        if not claim_task(session, task_id):
+            raise AlreadyClaimed(f"Task {task_id} 不在 pending 或已被占用")
+
+    # 2. 加载 Task/Video/Account 快照
+    with Session(engine) as session:
+        task, video, account = _load_task_bundle(session, task_id)
+        task_publish_at = task.publish_at
+        video_file_path = Path(video.file_path)
+        video_title = video.title
+        video_description = video.description
+        video_tags = _json.loads(video.tags_json or "[]")
+        video_cover_path = Path(video.cover_path) if video.cover_path else None
+        video_topic = video.topic
+        video_original = video.original_claim
+        user_data_dir = Path(account.user_data_dir)
+
+    result = PublishResult(task_id=task_id, ok=False, dry_run=dry_run)
+    last_step = "init"
+
+    try:
+        # [1] stage NAS → tmp
+        last_step = "stage"
+        staged = stage_to_tmp(video_file_path, task_id=task_id, tmp_root=tmp_root)
+        staged_cover = None
+        if video_cover_path is not None:
+            staged_cover = stage_to_tmp(video_cover_path, task_id=task_id, tmp_root=tmp_root)
+
+        # [2] 启浏览器(headless 跟 settings)
+        last_step = "browser"
+        with browser_context(user_data_dir, headless=settings.publisher.headless) as page:
+            last_step = "open"
+            open_publish_page(page)
+            random_pause(step_pause)
+
+            last_step = "login"
+            verify_logged_in(page)
+            random_pause(step_pause)
+
+            last_step = "upload"
+            upload_video(page, file_path=staged, timeout_seconds=upload_timeout)
+            random_pause(step_pause)
+
+            last_step = "title"
+            fill_title(page, title=video_title)
+            random_pause(step_pause)
+
+            last_step = "desc"
+            fill_description(page, description=video_description)
+            random_pause(step_pause)
+
+            last_step = "tags"
+            add_tags(page, tags=video_tags)
+            random_pause(step_pause)
+
+            last_step = "cover"
+            set_cover(page, cover_path=staged_cover)
+            random_pause(step_pause)
+
+            last_step = "topic"
+            bind_topic(page, topic=video_topic)
+            random_pause(step_pause)
+
+            last_step = "original"
+            toggle_original(page, original_claim=video_original)
+            random_pause(step_pause)
+
+            last_step = "schedule"
+            set_schedule(page, publish_at=task_publish_at)
+            random_pause(step_pause)
+
+            last_step = "risk"
+            risk_control_probe(page)
+
+            # ★ [14] DRY_RUN GATE
+            if dry_run:
+                last_step = "dryrun_gate"
+                shot = screenshot(
+                    page,
+                    task_id=task_id,
+                    step="dryrun_gate",
+                    screenshots_root=screenshots_root,
+                )
+                result.screenshots.append(str(shot))
+                result.ok = True
+                return result
+
+            last_step = "publish"
+            click_publish(page)
+
+            last_step = "wait_success"
+            wait_for_success_indicator(page)
+
+            last_step = "extract"
+            vid, url = extract_remote_video_id_and_url(page)
+            result.remote_video_id = vid
+            result.remote_url = url
+
+        result.ok = True
+        return result
+
+    except PublisherError as exc:
+        kind = classify(exc)
+        result.error_type = kind
+        result.error_msg = f"step={last_step}: {exc}"
+        logger.error(result.error_msg)
+        return result
+    except Exception as exc:
+        kind = classify(exc)
+        result.error_type = kind
+        result.error_msg = f"step={last_step}: {exc}"
+        logger.exception("publish 顶层未分类异常")
+        return result
+    finally:
+        try:
+            cleanup_tmp(task_id=task_id, tmp_root=tmp_root)
+        except Exception as exc:
+            logger.warning(f"cleanup_tmp 失败 task_id={task_id}: {exc}")
+        # dry_run 成功 → 回写 pending(没真发,等正式触发);失败 → failed
+        new_status = (
+            "success"
+            if result.ok and not result.dry_run
+            else ("pending" if result.dry_run and result.ok else "failed")
+        )
+        with session_scope(engine) as session:
+            transition_task(
+                session,
+                task_id,
+                status=new_status,
+                finished_at=datetime.now(),
+                remote_url=result.remote_url,
+                remote_video_id=result.remote_video_id,
+                last_error_type=result.error_type,
+                last_error_msg=result.error_msg,
+                screenshots_json=_json.dumps(result.screenshots, ensure_ascii=False),
+            )

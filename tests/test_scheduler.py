@@ -8,9 +8,16 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session, select
 
+from tests.conftest import make_settings
 from wxsp.db import get_engine, init_db, session_scope
 from wxsp.models import Account, Task, Video
-from wxsp.scheduler import mark_stale_running_as_interrupted, queue_today
+from wxsp.publisher import PublishResult
+from wxsp.scheduler import (
+    RunSummary,
+    mark_stale_running_as_interrupted,
+    queue_today,
+    run_today_pending,
+)
 
 
 def _seed_account_video(session: Session, *, account_id: str = "a", video_id: str) -> None:
@@ -178,3 +185,168 @@ def test_mark_stale_running_as_interrupted_only_touches_expired_running(
     assert statuses["v_running_fresh"] == "running"
     assert statuses["v_pending"] == "pending"
     assert statuses["v_success"] == "success"
+
+
+def test_run_today_pending_calls_publish_for_each_today_task_in_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    today = date.today()
+    now = datetime.now()
+
+    with session_scope(engine) as session:
+        _seed_account_video(session, video_id="v1")
+        _seed_account_video(session, video_id="v2")
+        session.add(
+            Task(
+                video_id="v1",
+                account_id="a",
+                execute_date=today,
+                publish_at=now + timedelta(hours=3),
+                status="pending",
+            )
+        )
+        session.add(
+            Task(
+                video_id="v2",
+                account_id="a",
+                execute_date=today,
+                publish_at=now + timedelta(hours=1),  # 更早,应先跑
+                status="pending",
+            )
+        )
+
+    settings = make_settings(tmp_path, tmp_path)
+
+    call_order: list[int] = []
+
+    def fake_publish(task_id, *, dry_run, settings):
+        call_order.append(task_id)
+        return PublishResult(task_id=task_id, ok=True, dry_run=False)
+
+    monkeypatch.setattr("wxsp.scheduler.sync_now", lambda settings: None)
+    monkeypatch.setattr("wxsp.scheduler.publish", fake_publish)
+
+    summary: RunSummary = run_today_pending(settings)
+
+    with Session(engine) as session:
+        v2_task = session.exec(select(Task).where(Task.video_id == "v2")).first()
+        v1_task = session.exec(select(Task).where(Task.video_id == "v1")).first()
+        assert v2_task is not None and v1_task is not None
+    assert call_order == [v2_task.id, v1_task.id]
+    assert summary.attempted == 2
+    assert summary.succeeded == 2
+    assert summary.failed == 0
+    assert summary.skipped_paused == 0
+
+
+def test_run_today_pending_skips_tasks_when_account_paused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    today = date.today()
+    now = datetime.now()
+
+    with session_scope(engine) as session:
+        session.add(
+            Account(
+                id="a",
+                display_name="A",
+                user_data_dir="/tmp",
+                daily_limit=20,
+                paused_until=now + timedelta(hours=24),
+            )
+        )
+        session.add(Video(id="v1", file_path="/tmp/v.mp4", title="x" * 16, ingested_at=now))
+        session.add(
+            Task(
+                video_id="v1",
+                account_id="a",
+                execute_date=today,
+                publish_at=now,
+                status="pending",
+            )
+        )
+
+    settings = make_settings(tmp_path, tmp_path)
+    monkeypatch.setattr("wxsp.scheduler.sync_now", lambda settings: None)
+
+    publish_calls: list[int] = []
+
+    def fake_publish(task_id, *, dry_run, settings):
+        publish_calls.append(task_id)
+        return PublishResult(task_id=task_id, ok=True, dry_run=False)
+
+    monkeypatch.setattr("wxsp.scheduler.publish", fake_publish)
+
+    summary = run_today_pending(settings)
+
+    assert publish_calls == []
+    assert summary.attempted == 0
+    assert summary.skipped_paused == 1
+
+
+def test_run_today_pending_continues_after_a_publish_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """一条失败不应阻断后面的任务。"""
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    today = date.today()
+    now = datetime.now()
+
+    with session_scope(engine) as session:
+        _seed_account_video(session, video_id="v1")
+        _seed_account_video(session, video_id="v2")
+        session.add(
+            Task(
+                video_id="v1",
+                account_id="a",
+                execute_date=today,
+                publish_at=now,
+                status="pending",
+            )
+        )
+        session.add(
+            Task(
+                video_id="v2",
+                account_id="a",
+                execute_date=today,
+                publish_at=now + timedelta(hours=1),
+                status="pending",
+            )
+        )
+
+    settings = make_settings(tmp_path, tmp_path)
+    monkeypatch.setattr("wxsp.scheduler.sync_now", lambda settings: None)
+
+    calls: list[int] = []
+
+    def fake_publish(task_id, *, dry_run, settings):
+        calls.append(task_id)
+        first_id = calls[0]
+        is_first = task_id == first_id
+        return PublishResult(
+            task_id=task_id,
+            ok=not is_first,
+            dry_run=False,
+            error_type="network" if is_first else None,
+            error_msg="boom" if is_first else None,
+        )
+
+    monkeypatch.setattr("wxsp.scheduler.publish", fake_publish)
+
+    summary = run_today_pending(settings)
+
+    assert len(calls) == 2
+    assert summary.attempted == 2
+    assert summary.succeeded == 1
+    assert summary.failed == 1

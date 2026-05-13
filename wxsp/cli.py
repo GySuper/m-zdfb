@@ -295,9 +295,40 @@ def logs(
 
 
 @app.command("web")
-def web(port: int = typer.Option(8765, "--port", "-p", help="Web UI 端口")) -> None:
-    """启动 Web UI(M8 实现)。"""
-    _not_implemented(f"web --port {port}")
+def web(
+    port: int | None = typer.Option(None, "--port", "-p", help="覆盖 config.yaml 的端口"),
+    host: str | None = typer.Option(None, "--host", help="覆盖 config.yaml 的 host"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="不自动打开浏览器"),
+) -> None:
+    """启动 Web UI(FastAPI + Jinja2 + HTMX,SSE 日志流)。
+
+    单进程:uvicorn + 直接渲染模板。9 个路由 + 1 个 SSE 端点。任务由飞书 Bitable
+    创建,Web UI 只做查看 / 触发 / 扫码 / 配置(运维控制台)。
+    """
+    import threading
+    import time
+    import webbrowser
+
+    import uvicorn
+
+    settings = load_settings()
+    bind_host = host or settings.webui.host
+    bind_port = port or settings.webui.port
+    open_browser = settings.webui.open_browser_on_start and not no_browser
+
+    if open_browser:
+
+        def _open_later() -> None:
+            time.sleep(1.0)  # 给 uvicorn 一点点起服务的时间;失败也无所谓,只是没自动开
+            try:
+                webbrowser.open(f"http://{bind_host}:{bind_port}/")
+            except Exception:
+                pass
+
+        threading.Thread(target=_open_later, daemon=True, name="open-browser").start()
+
+    typer.echo(f"[wxsp] Web UI 启动:http://{bind_host}:{bind_port}/  (Ctrl-C 退出)")
+    uvicorn.run("wxsp.api.app:app", host=bind_host, port=bind_port, log_level="info")
 
 
 if __name__ == "__main__":

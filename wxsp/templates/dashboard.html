@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · wxsp{% endblock %}
+{% block content %}
+  <div class="card">
+    <h2>今日总览 · {{ today }}</h2>
+    <p class="muted">当前时间 {{ now.strftime("%Y-%m-%d %H:%M:%S") }} · 历史积压(execute_date &lt; today &amp; pending):
+      <strong>{{ backlog }}</strong> 条</p>
+    <div>
+      <span class="badge muted">pending {{ counts.pending }}</span>
+      <span class="badge ok">success {{ counts.success }}</span>
+      <span class="badge warn">running {{ counts.running }}</span>
+      <span class="badge error">failed {{ counts.failed }}</span>
+      <span class="badge muted">skipped {{ counts.skipped }}</span>
+      <span class="badge warn">interrupted {{ counts.interrupted }}</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>账号({{ account_cards|length }})</h2>
+    <div class="grid">
+      {% for a in account_cards %}
+      <div class="card" style="margin-bottom: 0;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <strong>{{ a.display_name }}</strong>
+          {% if a.cookie_status == "ok" %}
+            <span class="badge ok">cookie ok</span>
+          {% elif a.cookie_status == "warn" %}
+            <span class="badge warn">cookie warn</span>
+          {% elif a.cookie_status == "expired" %}
+            <span class="badge error">cookie expired</span>
+          {% else %}
+            <span class="badge muted">unknown</span>
+          {% endif %}
+        </div>
+        <p class="muted" style="margin:6px 0;">{{ a.id }} · 日限 {{ a.daily_limit }}</p>
+        {% if a.paused_until %}
+          <p class="badge warn">暂停至 {{ a.paused_until.strftime("%m-%d %H:%M") }}</p>
+        {% endif %}
+        <p style="margin:8px 0 0 0;">
+          <span class="badge ok">{{ a.today.success }}</span>
+          <span class="badge warn">{{ a.today.running }}</span>
+          <span class="badge muted">{{ a.today.pending }}</span>
+          <span class="badge error">{{ a.today.failed }}</span>
+        </p>
+        <p style="margin-top: 8px;">
+          <a class="btn" href="/accounts">详情</a>
+        </p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>最近事件</h2>
+    {% if recent_events %}
+    <table>
+      <thead><tr><th>时间</th><th>级别</th><th>类型</th><th>任务</th><th>账号</th><th>信息</th></tr></thead>
+      <tbody>
+        {% for e in recent_events %}
+        <tr>
+          <td class="muted">{{ e.ts.strftime("%m-%d %H:%M:%S") }}</td>
+          <td>
+            {% if e.level == "info" %}<span class="badge ok">{{ e.level }}</span>
+            {% elif e.level == "warn" %}<span class="badge warn">{{ e.level }}</span>
+            {% else %}<span class="badge error">{{ e.level }}</span>{% endif %}
+          </td>
+          <td>{{ e.type }}</td>
+          <td>{% if e.task_id %}<a href="/tasks/{{ e.task_id }}">#{{ e.task_id }}</a>{% endif %}</td>
+          <td class="muted">{{ e.account_id or "" }}</td>
+          <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ e.message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="muted">暂无事件</p>
+    {% endif %}
+  </div>
+{% endblock %}

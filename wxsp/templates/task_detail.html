@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Task #{{ task.id }} · wxsp{% endblock %}
+{% block content %}
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 style="margin:0;">Task #{{ task.id }} · {{ video.title if video else "(video missing)" }}</h2>
+      <div>
+        <a class="btn" href="/tasks">← 返回列表</a>
+        {% if retryable %}
+          <form method="post" action="/tasks/{{ task.id }}/retry" style="display:inline;">
+            <button class="primary" type="submit">重试</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>任务信息</h2>
+    <table>
+      <tbody>
+        <tr><th style="width:160px;">状态</th><td>
+          {% if task.status == "success" %}<span class="badge ok">{{ task.status }}</span>
+          {% elif task.status == "running" %}<span class="badge warn">{{ task.status }}</span>
+          {% elif task.status == "failed" %}<span class="badge error">{{ task.status }}</span>
+          {% else %}<span class="badge muted">{{ task.status }}</span>{% endif %}
+        </td></tr>
+        <tr><th>账号</th><td><code>{{ task.account_id }}</code>{% if account %} · {{ account.display_name }}{% endif %}</td></tr>
+        <tr><th>执行日期</th><td>{{ task.execute_date }}</td></tr>
+        <tr><th>发布时间</th><td>{{ task.publish_at.strftime("%Y-%m-%d %H:%M") }}</td></tr>
+        <tr><th>开始 / 完成</th><td class="muted">
+          {{ task.started_at.strftime("%Y-%m-%d %H:%M:%S") if task.started_at else "-" }}
+          → {{ task.finished_at.strftime("%Y-%m-%d %H:%M:%S") if task.finished_at else "-" }}
+        </td></tr>
+        <tr><th>重试次数</th><td>{{ task.attempts }}</td></tr>
+        {% if task.remote_url %}
+        <tr><th>已发布链接</th><td><a href="{{ task.remote_url }}" target="_blank">{{ task.remote_url }}</a></td></tr>
+        {% endif %}
+        {% if task.last_error_type %}
+        <tr><th>错误</th><td>
+          <span class="badge error">{{ task.last_error_type }}</span><br>
+          <pre style="white-space: pre-wrap; margin: 8px 0 0 0;">{{ task.last_error_msg or "" }}</pre>
+        </td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if video %}
+  <div class="card">
+    <h2>视频</h2>
+    <table>
+      <tbody>
+        <tr><th style="width:160px;">文件</th><td><code>{{ video.file_path }}</code></td></tr>
+        <tr><th>封面</th><td><code>{{ video.cover_path or "-" }}</code></td></tr>
+        <tr><th>描述</th><td>{{ video.description or "-" }}</td></tr>
+        <tr><th>合集</th><td>{{ video.topic or "-" }}</td></tr>
+        <tr><th>原创</th><td>{{ "是" if video.original_claim else "否" }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>事件({{ events|length }})</h2>
+    {% if events %}
+    <table>
+      <thead><tr><th>时间</th><th>级别</th><th>类型</th><th>信息</th></tr></thead>
+      <tbody>
+        {% for e in events %}
+        <tr>
+          <td class="muted">{{ e.ts.strftime("%m-%d %H:%M:%S") }}</td>
+          <td>
+            {% if e.level == "info" %}<span class="badge ok">{{ e.level }}</span>
+            {% elif e.level == "warn" %}<span class="badge warn">{{ e.level }}</span>
+            {% else %}<span class="badge error">{{ e.level }}</span>{% endif %}
+          </td>
+          <td>{{ e.type }}</td>
+          <td><pre style="white-space: pre-wrap; margin: 0;">{{ e.message }}</pre></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="muted">暂无事件</p>
+    {% endif %}
+  </div>
+
+  {% if screenshots %}
+  <div class="card">
+    <h2>截图({{ screenshots|length }})</h2>
+    <ul style="font-family: monospace; font-size: 13px;">
+      {% for s in screenshots %}
+        <li>{{ s }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+{% endblock %}

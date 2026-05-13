@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Logs · wxsp{% endblock %}
+{% block content %}
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <h2 style="margin: 0;">实时日志(loguru → SSE)</h2>
+      <div>
+        <span id="log-status" class="badge muted">连接中...</span>
+        <button id="log-clear">清屏</button>
+        <label style="margin-left: 12px;">
+          <input type="checkbox" id="log-autoscroll" checked> 自动滚动
+        </label>
+      </div>
+    </div>
+    <pre id="log-stream" class="log-stream"></pre>
+  </div>
+  <script>
+    (function () {
+      const pre = document.getElementById('log-stream');
+      const status = document.getElementById('log-status');
+      const autoscroll = document.getElementById('log-autoscroll');
+      const clearBtn = document.getElementById('log-clear');
+      const es = new EventSource('/api/logs/stream');
+      es.onopen = () => { status.textContent = '已连接'; status.className = 'badge ok'; };
+      es.onerror = () => { status.textContent = '断开,重连中...'; status.className = 'badge error'; };
+      es.onmessage = (ev) => {
+        pre.textContent += ev.data + '\n';
+        if (autoscroll.checked) pre.scrollTop = pre.scrollHeight;
+      };
+      clearBtn.addEventListener('click', () => { pre.textContent = ''; });
+    })();
+  </script>
+{% endblock %}

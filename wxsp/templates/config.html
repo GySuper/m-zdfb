@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Config · wxsp{% endblock %}
+{% block content %}
+  <div class="card">
+    <h2>config.yaml{% if not exists %} <span class="badge error">未找到</span>{% endif %}</h2>
+    <p class="muted">路径:<code>{{ abs_path }}</code></p>
+    <p class="muted">第一版 Web UI 只读展示。要修改请直接编辑该文件然后重启 <code>wxsp web</code>。
+      含 <code>app_secret</code> / <code>webhook</code> / <code>secret</code> / <code>token</code> / <code>password</code> 字样的字段已被掩码为 <code>***</code>;
+      <code>${ENV_VAR}</code> 形式的引用保留(看得到引用结构,看不到实际值)。</p>
+    <textarea readonly>{{ yaml_text }}</textarea>
+  </div>
+{% endblock %}

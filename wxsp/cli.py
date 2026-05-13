@@ -18,6 +18,7 @@ from wxsp.doctor import check_nas, record_cookie_check, refresh_cookie_status
 from wxsp.feishu import FeishuApiError
 from wxsp.models import Account
 from wxsp.publisher import AlreadyClaimed, publish
+from wxsp.scheduler import run_today_pending, start_daemon
 from wxsp.sync import sync_now
 
 app = typer.Typer(
@@ -226,36 +227,54 @@ def sync(
 
 @app.command("run")
 def run(
-    daemon: bool = typer.Option(False, "--daemon", help="启动 daemon(09:00 cron + FastAPI)"),
+    daemon: bool = typer.Option(False, "--daemon", help="启动 daemon(09:00 cron)"),
     today: bool = typer.Option(False, "--today", help="立即跑今天所有 pending 任务"),
     task_id: int | None = typer.Option(None, "--task-id", help="跑指定单条任务"),
     dry_run: bool = typer.Option(False, "--dry-run", help="发布步骤跑到点'发布'前停下"),
 ) -> None:
-    """执行任务(M5: --task-id;M6 实现 --daemon/--today)。"""
-    if task_id is None:
-        _not_implemented(
-            f"run --daemon={daemon} --today={today} --task-id={task_id} --dry-run={dry_run}"
-        )
-        return
-
+    """执行任务。三选一:--task-id 单条 / --today 跑今天 / --daemon 起 cron。"""
     settings = load_settings()
-    typer.echo(f"[wxsp] 跑 task {task_id}{' (dry-run)' if dry_run else ''}...")
-    try:
-        result = publish(task_id, dry_run=dry_run, settings=settings)
-    except AlreadyClaimed as exc:
-        typer.echo(f"[wxsp] ✗ {exc}")
-        raise typer.Exit(code=1) from exc
 
-    if result.ok:
-        typer.echo(f"[wxsp] ✓ task {task_id} {'dry-run 完成' if dry_run else '发布成功'}")
-        if result.remote_url:
-            typer.echo(f"        remote_url: {result.remote_url}")
-        if result.screenshots:
-            typer.echo(f"        screenshots: {', '.join(result.screenshots)}")
-    else:
+    if task_id is not None:
+        typer.echo(f"[wxsp] 跑 task {task_id}{' (dry-run)' if dry_run else ''}...")
+        try:
+            result = publish(task_id, dry_run=dry_run, settings=settings)
+        except AlreadyClaimed as exc:
+            typer.echo(f"[wxsp] ✗ {exc}")
+            raise typer.Exit(code=1) from exc
+
+        if result.ok:
+            typer.echo(f"[wxsp] ✓ task {task_id} {'dry-run 完成' if dry_run else '发布成功'}")
+            if result.remote_url:
+                typer.echo(f"        remote_url: {result.remote_url}")
+            if result.screenshots:
+                typer.echo(f"        screenshots: {', '.join(result.screenshots)}")
+            return
         typer.echo(f"[wxsp] ✗ task {task_id} 失败: {result.error_type}")
         typer.echo(f"        {result.error_msg}")
         raise typer.Exit(code=1)
+
+    if today:
+        typer.echo("[wxsp] 跑今天所有 pending 任务...")
+        summary = run_today_pending(settings)
+        typer.echo(
+            f"[wxsp] 完成: attempted={summary.attempted} succeeded={summary.succeeded} "
+            f"failed={summary.failed} skipped_paused={summary.skipped_paused}"
+        )
+        if summary.failed > 0:
+            raise typer.Exit(code=1)
+        return
+
+    if daemon:
+        typer.echo("[wxsp] 启动 daemon(按 Ctrl-C 退出)...")
+        try:
+            start_daemon(settings)
+        except (KeyboardInterrupt, SystemExit):
+            typer.echo("[wxsp] daemon 退出")
+        return
+
+    typer.echo("[wxsp] 请指定 --task-id N / --today / --daemon 之一")
+    raise typer.Exit(code=2)
 
 
 @app.command("status")

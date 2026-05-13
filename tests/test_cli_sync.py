@@ -164,17 +164,17 @@ def test_sync_happy_pipeline(sync_env: dict[str, Any], monkeypatch: pytest.Monke
     ]
 
     fake = _FakeClient(rows)
-    monkeypatch.setattr("wxsp.cli.make_client", lambda app_id, app_secret: fake)
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: fake)
     monkeypatch.setattr(
-        "wxsp.cli.fetch_pending_rows",
+        "wxsp.sync.fetch_pending_rows",
         lambda client, **kw: list(rows),
     )
 
     def fake_writeback(client: Any, *, record_id: str, fields: dict[str, Any], **kw: Any) -> None:
         fake.writebacks.append((record_id, fields))
 
-    monkeypatch.setattr("wxsp.cli.writeback_row", fake_writeback)
-    monkeypatch.setattr("wxsp.cli.datetime", _FrozenDatetime(now))
+    monkeypatch.setattr("wxsp.sync.writeback_row", fake_writeback)
+    monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
 
     runner = CliRunner()
     result = runner.invoke(app, ["sync"])
@@ -204,15 +204,15 @@ def test_sync_second_run_skips_existing(
     rows = [_happy_row(i, now) for i in range(5)]
 
     fake = _FakeClient(rows)
-    monkeypatch.setattr("wxsp.cli.make_client", lambda app_id, app_secret: fake)
-    monkeypatch.setattr("wxsp.cli.fetch_pending_rows", lambda client, **kw: list(rows))
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: fake)
+    monkeypatch.setattr("wxsp.sync.fetch_pending_rows", lambda client, **kw: list(rows))
 
     writebacks: list[tuple[str, dict[str, Any]]] = []
     monkeypatch.setattr(
-        "wxsp.cli.writeback_row",
+        "wxsp.sync.writeback_row",
         lambda client, *, record_id, fields, **kw: writebacks.append((record_id, fields)),
     )
-    monkeypatch.setattr("wxsp.cli.datetime", _FrozenDatetime(now))
+    monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
 
     runner = CliRunner()
     # 第一遍
@@ -256,14 +256,14 @@ def test_sync_dry_run_writes_nothing(
 ) -> None:
     now = datetime(2026, 5, 12, 9, 0)
     rows = [_happy_row(0, now)]
-    monkeypatch.setattr("wxsp.cli.make_client", lambda app_id, app_secret: object())
-    monkeypatch.setattr("wxsp.cli.fetch_pending_rows", lambda client, **kw: list(rows))
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: object())
+    monkeypatch.setattr("wxsp.sync.fetch_pending_rows", lambda client, **kw: list(rows))
     called = {"writeback": 0}
     monkeypatch.setattr(
-        "wxsp.cli.writeback_row",
+        "wxsp.sync.writeback_row",
         lambda *a, **kw: called.__setitem__("writeback", called["writeback"] + 1),
     )
-    monkeypatch.setattr("wxsp.cli.datetime", _FrozenDatetime(now))
+    monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
 
     runner = CliRunner()
     result = runner.invoke(app, ["sync", "--dry-run"])
@@ -280,12 +280,12 @@ def test_sync_feishu_api_error_exits_70(
 ) -> None:
     from wxsp.feishu import FeishuApiError
 
-    monkeypatch.setattr("wxsp.cli.make_client", lambda app_id, app_secret: object())
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: object())
 
     def boom(client: Any, **kw: Any) -> list[BitableRow]:
         raise FeishuApiError("simulated")
 
-    monkeypatch.setattr("wxsp.cli.fetch_pending_rows", boom)
+    monkeypatch.setattr("wxsp.sync.fetch_pending_rows", boom)
 
     runner = CliRunner()
     result = runner.invoke(app, ["sync"])

@@ -1,4 +1,4 @@
-"""健康检查命令实现(M2)。
+"""健康检查命令实现(M2 cookie,M4 加 NAS)。
 
 `record_cookie_check` 是写入 cookie 状态的唯一入口,被 `wxsp login` 和
 `refresh_cookie_status` 共用。与 `db.transition_task` 一致:**不 commit**,
@@ -14,6 +14,7 @@ from typing import NamedTuple
 
 from sqlmodel import Session, select
 
+from wxsp.config import Settings
 from wxsp.models import (
     COOKIE_STATUS_EXPIRED,
     COOKIE_STATUS_OK,
@@ -98,4 +99,37 @@ def refresh_cookie_status(
                 last_active_at=account.cookie_last_active_at,
             )
         )
+    return rows
+
+
+# ============== NAS 健康检查(M4)==============
+
+
+class NasCheckRow(NamedTuple):
+    """`check_nas` 返回行,CLI 输出层用。"""
+
+    path: Path
+    label: str  # "video_search_root" | "cover_search_root"
+    ok: bool
+    detail: str
+
+
+def check_nas(config: Settings) -> list[NasCheckRow]:
+    """检查 video_search_root + cover_search_root 是否存在且为目录。
+
+    无 IO 副作用,只读 stat。返回固定 2 行,按 video → cover 顺序。
+    任何路径都不抛异常,失败信息塞 NasCheckRow.detail。
+    """
+    targets: list[tuple[str, Path]] = [
+        ("video_search_root", config.paths.video_search_root),
+        ("cover_search_root", config.paths.cover_search_root),
+    ]
+    rows: list[NasCheckRow] = []
+    for label, path in targets:
+        if path.is_dir():
+            rows.append(NasCheckRow(path=path, label=label, ok=True, detail=f"OK ({path})"))
+        elif path.exists():
+            rows.append(NasCheckRow(path=path, label=label, ok=False, detail=f"不是目录: {path}"))
+        else:
+            rows.append(NasCheckRow(path=path, label=label, ok=False, detail=f"不存在: {path}"))
     return rows

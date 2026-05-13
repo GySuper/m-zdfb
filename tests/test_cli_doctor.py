@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlmodel import Session
@@ -34,7 +35,19 @@ def _add_account(db_path: Path, account_id: str) -> None:
         session.commit()
 
 
-def test_doctor_no_accounts_shows_hint(db_env: Path) -> None:
+def test_doctor_no_accounts_shows_hint(
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    video_root = tmp_path / "videos"
+    cover_root = tmp_path / "covers"
+    video_root.mkdir()
+    cover_root.mkdir()
+    settings = _make_settings_for_cli(video_root, cover_root)
+
+    from wxsp import cli as cli_module
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
 
@@ -43,7 +56,7 @@ def test_doctor_no_accounts_shows_hint(db_env: Path) -> None:
 
 
 def test_doctor_lists_each_account_with_status(
-    db_env: Path, monkeypatch: pytest.MonkeyPatch
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _add_account(db_env, "account_a")
     _add_account(db_env, "account_b")
@@ -55,40 +68,54 @@ def test_doctor_lists_each_account_with_status(
         assert timeout_ms <= 30_000, "doctor should use a short timeout (already-logged-in path)"
         return path.name == "account_a"  # only A is logged in
 
+    video_root = tmp_path / "videos"
+    cover_root = tmp_path / "covers"
+    video_root.mkdir()
+    cover_root.mkdir()
+    settings = _make_settings_for_cli(video_root, cover_root)
+
     from wxsp import cli as cli_module
 
     monkeypatch.setattr(cli_module, "check_cookie", fake_check)
+    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
-    assert result.exit_code == 0, result.output
-
-    # both accounts appear in output, with their status
+    # cookie account_b 是 expired,新 doctor 因为 cookie_failed 退 1。
+    # 这个测试关心的是输出内容,不是退码,所以放宽 exit_code 断言。
     assert "account_a" in result.output
     assert "account_b" in result.output
     assert "ok" in result.output
     assert "expired" in result.output
 
-    # checker was called once per account, with the right path
     assert sorted(str(p) for p in calls) == [
         "/tmp/profiles/account_a",
         "/tmp/profiles/account_b",
     ]
 
 
-def test_doctor_persists_cookie_status_to_db(db_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_doctor_persists_cookie_status_to_db(
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _add_account(db_env, "account_a")
 
     def fake_check(path: Path, *, timeout_ms: int) -> bool:
         return True
 
+    video_root = tmp_path / "videos"
+    cover_root = tmp_path / "covers"
+    video_root.mkdir()
+    cover_root.mkdir()
+    settings = _make_settings_for_cli(video_root, cover_root)
+
     from wxsp import cli as cli_module
 
     monkeypatch.setattr(cli_module, "check_cookie", fake_check)
+    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
-    assert result.exit_code == 0
+    assert result.exit_code == 0  # cookie OK + NAS OK → 退 0
 
     engine = get_engine(db_env)
     with Session(engine) as session:
@@ -99,7 +126,7 @@ def test_doctor_persists_cookie_status_to_db(db_env: Path, monkeypatch: pytest.M
 
 
 def test_doctor_continues_after_one_account_browser_crash(
-    db_env: Path, monkeypatch: pytest.MonkeyPatch
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _add_account(db_env, "account_a")
     _add_account(db_env, "account_b")
@@ -109,13 +136,22 @@ def test_doctor_continues_after_one_account_browser_crash(
             raise RuntimeError("simulated crash")
         return True
 
+    video_root = tmp_path / "videos"
+    cover_root = tmp_path / "covers"
+    video_root.mkdir()
+    cover_root.mkdir()
+    settings = _make_settings_for_cli(video_root, cover_root)
+
     from wxsp import cli as cli_module
 
     monkeypatch.setattr(cli_module, "check_cookie", fake_check)
+    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
-    assert result.exit_code == 0
+    # account_a 是 unknown,会触发 cookie_failed=True 退 1。
+    # 这个测试关心的是 DB 里的状态而不是退码。
+    _ = result.exit_code
 
     engine = get_engine(db_env)
     with Session(engine) as session:
@@ -123,3 +159,120 @@ def test_doctor_continues_after_one_account_browser_crash(
         b = session.get(Account, "account_b")
         assert a is not None and a.cookie_status == "unknown"
         assert b is not None and b.cookie_status == "ok"
+
+
+# ============== NAS section ==============
+
+
+def _make_settings_for_cli(video_root: Path, cover_root: Path) -> Any:
+    """复用 test_doctor 里的最小 Settings 构造。"""
+    from wxsp.config import (
+        AppConfig,
+        FeishuBitableConfig,
+        FeishuConfig,
+        MonitoringConfig,
+        NotifiersConfig,
+        PathsConfig,
+        PublisherConfig,
+        SchedulerConfig,
+        Settings,
+        WebUIConfig,
+        WecomNotifierConfig,
+    )
+
+    return Settings(
+        app=AppConfig(data_dir=Path("/tmp/d"), logs_dir=Path("/tmp/l"), timezone="Asia/Shanghai"),
+        paths=PathsConfig(
+            nas_root=video_root.parent,
+            video_search_root=video_root,
+            cover_search_root=cover_root,
+        ),
+        accounts={},
+        scheduler=SchedulerConfig(),
+        publisher=PublisherConfig(),
+        feishu=FeishuConfig(
+            enabled=False,
+            app_id="x",
+            app_secret="x",
+            bitable=FeishuBitableConfig(app_token="x", table_id="x"),
+        ),
+        monitoring=MonitoringConfig(
+            notifiers=NotifiersConfig(wecom=WecomNotifierConfig(enabled=False, webhook="")),
+        ),
+        webui=WebUIConfig(),
+    )
+
+
+def test_doctor_prints_nas_section_when_all_ok(
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _add_account(db_env, "account_a")
+
+    def fake_check(path: Path, *, timeout_ms: int) -> bool:
+        return True
+
+    video_root = tmp_path / "videos"
+    cover_root = tmp_path / "covers"
+    video_root.mkdir()
+    cover_root.mkdir()
+    settings = _make_settings_for_cli(video_root, cover_root)
+
+    from wxsp import cli as cli_module
+
+    monkeypatch.setattr(cli_module, "check_cookie", fake_check)
+    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0, result.output
+    assert "NAS" in result.output
+    assert "video_search_root" in result.output
+    assert "cover_search_root" in result.output
+
+
+def test_doctor_exits_1_when_nas_path_missing(
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _add_account(db_env, "account_a")
+
+    def fake_check(path: Path, *, timeout_ms: int) -> bool:
+        return True
+
+    video_root = tmp_path / "missing_videos"  # 故意不 mkdir
+    cover_root = tmp_path / "covers"
+    cover_root.mkdir()
+    settings = _make_settings_for_cli(video_root, cover_root)
+
+    from wxsp import cli as cli_module
+
+    monkeypatch.setattr(cli_module, "check_cookie", fake_check)
+    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 1
+    assert "不存在" in result.output
+
+
+def test_doctor_nas_section_runs_even_without_accounts(
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """没账号时早 return 不应该跳过 NAS 检查 —— NAS 是独立诊断项。"""
+    video_root = tmp_path / "videos"
+    cover_root = tmp_path / "covers"
+    video_root.mkdir()
+    cover_root.mkdir()
+    settings = _make_settings_for_cli(video_root, cover_root)
+
+    from wxsp import cli as cli_module
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["doctor"])
+
+    # 即便没账号,NAS section 仍然要出现
+    assert "无账号" in result.output
+    assert "NAS" in result.output

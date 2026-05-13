@@ -9,9 +9,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
+from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from wxsp.config import Settings
@@ -60,6 +61,9 @@ _TITLE_MAX = 30
 _TAGS_MAX = 5
 _VIDEO_EXTENSIONS = {".mp4", ".mov"}
 _VIDEO_MAX_BYTES = 4 * 1024**3  # 4 GiB
+_PUBLISH_MIN_DELTA = timedelta(minutes=30)
+_PUBLISH_MAX_DELTA = timedelta(days=14)
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +91,8 @@ def validate(
     account_id = _check_account(row.fields, fm.account, active_account_ids, errors)
     video_path = _check_video(row.fields, fm.video_file, nas_finder, errors)
     cover_path = _check_cover(row.fields, fm.cover, nas_finder, errors)
+    execute_date = _check_execute_date(row.fields, fm.execute_date, errors)
+    publish_at = _check_publish_at(row.fields, fm.publish_at, now, execute_date, errors)
 
     if errors:
         return ValidationResult(ok=False, errors=errors)
@@ -100,6 +106,8 @@ def validate(
         account_id=account_id,
         video_path=video_path,
         cover_path=cover_path,
+        execute_date=execute_date,
+        publish_at=publish_at,
     )
 
 
@@ -215,3 +223,64 @@ def _check_cover(
     except FileNotFoundError:
         errors.append(FieldError(field=field_name, message=f"未在 NAS 下找到 {raw!r}"))
         return None
+
+
+def _check_execute_date(
+    fields: dict[str, Any],
+    field_name: str,
+    errors: list[FieldError],
+) -> date | None:
+    raw = fields.get(field_name)
+    if raw is None:
+        errors.append(FieldError(field=field_name, message="未指定"))
+        return None
+    if not isinstance(raw, int | float):
+        errors.append(FieldError(field=field_name, message=f"无法解析 {raw!r}"))
+        return None
+    dt_utc = datetime.fromtimestamp(raw / 1000, tz=timezone.utc)
+    return dt_utc.astimezone(_SHANGHAI).date()
+
+
+def _check_publish_at(
+    fields: dict[str, Any],
+    field_name: str,
+    now: datetime,
+    execute_date: date | None,
+    errors: list[FieldError],
+) -> datetime | None:
+    raw = fields.get(field_name)
+    if raw is None:
+        errors.append(FieldError(field=field_name, message="未指定"))
+        return None
+    if not isinstance(raw, int | float):
+        errors.append(FieldError(field=field_name, message=f"无法解析 {raw!r}"))
+        return None
+    dt_utc = datetime.fromtimestamp(raw / 1000, tz=timezone.utc)
+    publish_at = dt_utc.astimezone(_SHANGHAI).replace(tzinfo=None)
+    min_allowed = now + _PUBLISH_MIN_DELTA
+    max_allowed = now + _PUBLISH_MAX_DELTA
+    if publish_at < min_allowed:
+        errors.append(
+            FieldError(
+                field=field_name,
+                message=f"{publish_at.strftime('%Y-%m-%d %H:%M')} 早于 now+30min",
+            )
+        )
+        return None
+    if publish_at > max_allowed:
+        errors.append(
+            FieldError(
+                field=field_name,
+                message=f"{publish_at.strftime('%Y-%m-%d %H:%M')} 超出 now+14d 上限",
+            )
+        )
+        return None
+    if execute_date is not None and publish_at.date() < execute_date:
+        errors.append(
+            FieldError(
+                field=field_name,
+                message=f"日期 {publish_at.date()} 早于执行日期 {execute_date}",
+            )
+        )
+        return None
+    return publish_at

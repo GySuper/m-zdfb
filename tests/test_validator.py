@@ -430,6 +430,7 @@ def test_validate_publish_at_too_far(tmp_path: Path) -> None:
 def test_validate_publish_at_boundary_30min_passes(tmp_path: Path) -> None:
     fields = dict(_make_happy_row(tmp_path).fields)
     fields["标题"] = "字" * 16
+    fields["执行日期"] = _date_to_feishu_ms(date(2026, 5, 12))  # 与 publish_at 同天
     fields["定时发布时间"] = _datetime_to_feishu_ms(datetime(2026, 5, 12, 9, 30))
     row = BitableRow(record_id="r", fields=fields)
     nas = _StubNas()
@@ -510,6 +511,7 @@ def test_validate_happy_path(tmp_path: Path) -> None:
     )
     assert result.ok is True, result.errors
     assert result.title == "这是一个测试标题视频内容十八字符"
+    assert result.description == "测试描述"
     assert result.tags == ["标签1", "标签2"]
     assert result.topic == "测试合集"
     assert result.original_claim is True

@@ -117,8 +117,8 @@ def validate(
 
 
 def _check_title(fields: dict[str, Any], field_name: str, errors: list[FieldError]) -> str | None:
-    raw = fields.get(field_name)
-    if not raw or not isinstance(raw, str):
+    raw = _get_str(fields.get(field_name))
+    if not raw:
         errors.append(FieldError(field=field_name, message="未指定"))
         return None
     n = len(raw)
@@ -173,8 +173,22 @@ def _coerce_select(raw: Any) -> str | None:
 
 
 def _get_str(raw: Any) -> str | None:
+    """提取字符串。
+
+    兼容飞书"单行/多行文本"字段的 rich-text array 格式:
+    `[{"text": "...", "type": "text"}, ...]`。多段时按顺序拼接。
+    """
     if isinstance(raw, str) and raw:
         return raw
+    if isinstance(raw, list):
+        parts: list[str] = []
+        for item in raw:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        joined = "".join(parts)
+        return joined or None
     return None
 
 

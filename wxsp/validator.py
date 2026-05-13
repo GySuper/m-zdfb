@@ -58,6 +58,8 @@ class NasFinder(Protocol):
 _TITLE_MIN = 16
 _TITLE_MAX = 30
 _TAGS_MAX = 5
+_VIDEO_EXTENSIONS = {".mp4", ".mov"}
+_VIDEO_MAX_BYTES = 4 * 1024**3  # 4 GiB
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +85,8 @@ def validate(
     topic = _get_str(row.fields.get(fm.topic))
     original_claim = bool(row.fields.get(fm.original_claim) or False)
     account_id = _check_account(row.fields, fm.account, active_account_ids, errors)
+    video_path = _check_video(row.fields, fm.video_file, nas_finder, errors)
+    cover_path = _check_cover(row.fields, fm.cover, nas_finder, errors)
 
     if errors:
         return ValidationResult(ok=False, errors=errors)
@@ -94,6 +98,8 @@ def validate(
         topic=topic,
         original_claim=original_claim,
         account_id=account_id,
+        video_path=video_path,
+        cover_path=cover_path,
     )
 
 
@@ -162,3 +168,50 @@ def _get_str(raw: Any) -> str | None:
     if isinstance(raw, str) and raw:
         return raw
     return None
+
+
+def _check_video(
+    fields: dict[str, Any],
+    field_name: str,
+    nas_finder: NasFinder,
+    errors: list[FieldError],
+) -> Path | None:
+    raw = _get_str(fields.get(field_name))
+    if not raw:
+        errors.append(FieldError(field=field_name, message="未指定"))
+        return None
+    try:
+        path = nas_finder.find_video(raw)
+    except FileNotFoundError:
+        errors.append(FieldError(field=field_name, message=f"未在 NAS 下找到 {raw!r}"))
+        return None
+    if path.suffix.lower() not in _VIDEO_EXTENSIONS:
+        errors.append(
+            FieldError(
+                field=field_name,
+                message=f"不支持的扩展名 {path.suffix!r}(允许 .mp4/.mov)",
+            )
+        )
+        return None
+    size = path.stat().st_size
+    if size > _VIDEO_MAX_BYTES:
+        gib = size / 1024**3
+        errors.append(FieldError(field=field_name, message=f"{gib:.2f} GiB 超出 4 GiB 上限"))
+        return None
+    return path
+
+
+def _check_cover(
+    fields: dict[str, Any],
+    field_name: str,
+    nas_finder: NasFinder,
+    errors: list[FieldError],
+) -> Path | None:
+    raw = _get_str(fields.get(field_name))
+    if not raw:
+        return None  # 封面可空
+    try:
+        return nas_finder.find_cover(raw)
+    except FileNotFoundError:
+        errors.append(FieldError(field=field_name, message=f"未在 NAS 下找到 {raw!r}"))
+        return None

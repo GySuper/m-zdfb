@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from wxsp.errors import NasUnreachable
@@ -45,3 +46,16 @@ def stage_to_tmp(src: Path, *, task_id: int, tmp_root: Path) -> Path:
         return link_path
     except OSError as exc:
         raise NasUnreachable(f"stage_to_tmp 失败 src={src!s} task_id={task_id}: {exc}") from exc
+
+
+def cleanup_tmp(*, task_id: int, tmp_root: Path) -> None:
+    """删除 tmp_root/{task_id}/ 目录。
+
+    - 目录不存在 → 静默返回(幂等,同 task_id 多次清理安全)
+    - 其他 OSError → 抛出原始异常(本地文件系统问题,不翻译为 NasUnreachable)
+    """
+    stage_dir = tmp_root / str(task_id)
+    try:
+        shutil.rmtree(stage_dir)
+    except FileNotFoundError:
+        pass  # 幂等:已经被清过了

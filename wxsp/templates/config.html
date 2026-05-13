@@ -1,12 +1,43 @@
 {% extends "base.html" %}
-{% block title %}Config · wxsp{% endblock %}
+{% block title %}配置 · wxsp{% endblock %}
 {% block content %}
+  {% if flash %}
+    <div class="card" style="border-left: 4px solid var(--ok);">
+      <p style="margin: 0;">{{ flash }}</p>
+    </div>
+  {% endif %}
+
+  {% if errors %}
+    <div class="card" style="border-left: 4px solid var(--error);">
+      <h2 style="margin: 0 0 8px 0; color: var(--error);">保存失败,以下问题需要修正</h2>
+      <ul style="margin: 0; padding-left: 20px;">
+        {% for e in errors %}
+          <li><code>{{ e }}</code></li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
   <div class="card">
-    <h2>config.yaml{% if not exists %} <span class="badge error">未找到</span>{% endif %}</h2>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <h2 style="margin: 0;">config.yaml{% if not exists %} <span class="badge error">未找到</span>{% endif %}</h2>
+    </div>
     <p class="muted">路径:<code>{{ abs_path }}</code></p>
-    <p class="muted">第一版 Web UI 只读展示。要修改请直接编辑该文件然后重启 <code>wxsp web</code>。
+    <p class="muted">
       含 <code>app_secret</code> / <code>webhook</code> / <code>secret</code> / <code>token</code> / <code>password</code> 字样的字段已被掩码为 <code>***</code>;
-      <code>${ENV_VAR}</code> 形式的引用保留(看得到引用结构,看不到实际值)。</p>
-    <textarea readonly>{{ yaml_text }}</textarea>
+      <code>${ENV_VAR}</code> 形式的引用保留。<strong>保存时</strong>没改动的 <code>***</code> 行会自动还原成磁盘上的原值,只覆盖你真正动过的部分。
+    </p>
+    <p class="muted">保存前会自动备份旧文件到 <code>config.yaml.bak</code>。提交后立刻生效;<code>config.yaml</code> 是每次请求都重新读的,无需重启服务。</p>
+
+    <form method="post" action="/config">
+      <textarea name="yaml_text" style="font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; min-height: 480px;" {% if not exists %}readonly{% endif %}>{{ yaml_text }}</textarea>
+      <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+        <button type="submit" class="primary" {% if not exists %}disabled{% endif %}>保存配置</button>
+        <a class="btn" href="/config">放弃修改</a>
+        <span class="muted" style="margin-left: auto; font-size: 12px;">
+          保存会触发 YAML 解析 + Pydantic 校验,任一失败都不会写盘
+        </span>
+      </div>
+    </form>
   </div>
 {% endblock %}

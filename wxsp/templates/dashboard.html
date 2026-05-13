@@ -1,17 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Dashboard · wxsp{% endblock %}
+{% block title %}总览 · wxsp{% endblock %}
 {% block content %}
   <div class="card">
     <h2>今日总览 · {{ today }}</h2>
-    <p class="muted">当前时间 {{ now.strftime("%Y-%m-%d %H:%M:%S") }} · 历史积压(execute_date &lt; today &amp; pending):
+    <p class="muted">当前时间 {{ now.strftime("%Y-%m-%d %H:%M:%S") }} · 历史积压(执行日期早于今天且仍待发布):
       <strong>{{ backlog }}</strong> 条</p>
     <div>
-      <span class="badge muted">pending {{ counts.pending }}</span>
-      <span class="badge ok">success {{ counts.success }}</span>
-      <span class="badge warn">running {{ counts.running }}</span>
-      <span class="badge error">failed {{ counts.failed }}</span>
-      <span class="badge muted">skipped {{ counts.skipped }}</span>
-      <span class="badge warn">interrupted {{ counts.interrupted }}</span>
+      <span class="badge muted">待发布 {{ counts.pending }}</span>
+      <span class="badge ok">已发布 {{ counts.success }}</span>
+      <span class="badge warn">发布中 {{ counts.running }}</span>
+      <span class="badge error">失败 {{ counts.failed }}</span>
+      <span class="badge muted">已跳过 {{ counts.skipped }}</span>
+      <span class="badge warn">已中断 {{ counts.interrupted }}</span>
     </div>
   </div>
 
@@ -23,24 +23,24 @@
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <strong>{{ a.display_name }}</strong>
           {% if a.cookie_status == "ok" %}
-            <span class="badge ok">cookie ok</span>
+            <span class="badge ok">登录正常</span>
           {% elif a.cookie_status == "warn" %}
-            <span class="badge warn">cookie warn</span>
+            <span class="badge warn">即将过期</span>
           {% elif a.cookie_status == "expired" %}
-            <span class="badge error">cookie expired</span>
+            <span class="badge error">已过期</span>
           {% else %}
-            <span class="badge muted">unknown</span>
+            <span class="badge muted">未知</span>
           {% endif %}
         </div>
-        <p class="muted" style="margin:6px 0;">{{ a.id }} · 日限 {{ a.daily_limit }}</p>
+        <p class="muted" style="margin:6px 0;">{{ a.id }} · 日发布上限 {{ a.daily_limit }}</p>
         {% if a.paused_until %}
           <p class="badge warn">暂停至 {{ a.paused_until.strftime("%m-%d %H:%M") }}</p>
         {% endif %}
         <p style="margin:8px 0 0 0;">
-          <span class="badge ok">{{ a.today.success }}</span>
-          <span class="badge warn">{{ a.today.running }}</span>
-          <span class="badge muted">{{ a.today.pending }}</span>
-          <span class="badge error">{{ a.today.failed }}</span>
+          <span class="badge ok">已发 {{ a.today.success }}</span>
+          <span class="badge warn">发布中 {{ a.today.running }}</span>
+          <span class="badge muted">待发 {{ a.today.pending }}</span>
+          <span class="badge error">失败 {{ a.today.failed }}</span>
         </p>
         <p style="margin-top: 8px;">
           <a class="btn" href="/accounts">详情</a>
@@ -60,11 +60,11 @@
         <tr>
           <td class="muted">{{ e.ts.strftime("%m-%d %H:%M:%S") }}</td>
           <td>
-            {% if e.level == "info" %}<span class="badge ok">{{ e.level }}</span>
-            {% elif e.level == "warn" %}<span class="badge warn">{{ e.level }}</span>
-            {% else %}<span class="badge error">{{ e.level }}</span>{% endif %}
+            {% if e.level == "info" %}<span class="badge ok">{{ level_cn(e.level) }}</span>
+            {% elif e.level == "warn" %}<span class="badge warn">{{ level_cn(e.level) }}</span>
+            {% else %}<span class="badge error">{{ level_cn(e.level) }}</span>{% endif %}
           </td>
-          <td>{{ e.type }}</td>
+          <td>{{ error_type_cn(e.type) }}</td>
           <td>{% if e.task_id %}<a href="/tasks/{{ e.task_id }}">#{{ e.task_id }}</a>{% endif %}</td>
           <td class="muted">{{ e.account_id or "" }}</td>
           <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ e.message }}</td>

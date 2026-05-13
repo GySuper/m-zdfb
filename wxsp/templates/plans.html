@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Plans · wxsp{% endblock %}
+{% block title %}计划 · wxsp{% endblock %}
 {% block content %}
   <div class="card">
     <form method="get" action="/plans" style="display: flex; gap: 12px; align-items: flex-end;">
@@ -17,7 +17,7 @@
           <code>{{ account_id }}</code> · {{ items|length }} 条
         </h3>
         <table>
-          <thead><tr><th>#</th><th>标题</th><th>发布时间</th><th>状态</th></tr></thead>
+          <thead><tr><th>编号</th><th>标题</th><th>发布时间</th><th>状态</th></tr></thead>
           <tbody>
             {% for it in items %}
             <tr>
@@ -25,10 +25,10 @@
               <td>{{ it.title }}</td>
               <td class="muted">{{ it.publish_at.strftime("%H:%M") }}</td>
               <td>
-                {% if it.status == "success" %}<span class="badge ok">{{ it.status }}</span>
-                {% elif it.status == "running" %}<span class="badge warn">{{ it.status }}</span>
-                {% elif it.status == "failed" %}<span class="badge error">{{ it.status }}</span>
-                {% else %}<span class="badge muted">{{ it.status }}</span>{% endif %}
+                {% if it.status == "success" %}<span class="badge ok">{{ status_cn(it.status) }}</span>
+                {% elif it.status == "running" %}<span class="badge warn">{{ status_cn(it.status) }}</span>
+                {% elif it.status == "failed" %}<span class="badge error">{{ status_cn(it.status) }}</span>
+                {% else %}<span class="badge muted">{{ status_cn(it.status) }}</span>{% endif %}
               </td>
             </tr>
             {% endfor %}

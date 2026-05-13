@@ -14,11 +14,20 @@ from pathlib import Path
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session
 
+from wxsp.api.i18n import cookie_cn, enabled_cn, error_type_cn, level_cn, status_cn
 from wxsp.config import Settings, load_settings
 from wxsp.db import get_engine, init_db, session_scope
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+# 中文化:模板里直接 {{ status_cn(s) }} 即可,无需每个变量做 if/elif 链
+templates.env.globals.update(
+    status_cn=status_cn,
+    cookie_cn=cookie_cn,
+    level_cn=level_cn,
+    enabled_cn=enabled_cn,
+    error_type_cn=error_type_cn,
+)
 
 _db_initialized = False
 

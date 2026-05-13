@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Accounts · wxsp{% endblock %}
+{% block title %}账号 · wxsp{% endblock %}
 {% block content %}
   {% if flash %}
     <div class="card" style="border-left: 4px solid var(--primary);">
@@ -19,7 +19,7 @@
     <table>
       <thead>
         <tr>
-          <th>ID</th><th>显示名</th><th>启用</th><th>Cookie</th>
+          <th>账号 ID</th><th>显示名</th><th>启用</th><th>登录状态</th>
           <th>最后活跃</th><th>暂停至</th><th>操作</th>
         </tr>
       </thead>
@@ -29,14 +29,14 @@
           <td><code>{{ r.id }}</code></td>
           <td>{{ r.display_name }}</td>
           <td>
-            {% if r.enabled %}<span class="badge ok">enabled</span>
-            {% else %}<span class="badge muted">disabled</span>{% endif %}
+            {% if r.enabled %}<span class="badge ok">启用</span>
+            {% else %}<span class="badge muted">禁用</span>{% endif %}
           </td>
           <td>
-            {% if r.cookie_status == "ok" %}<span class="badge ok">ok</span>
-            {% elif r.cookie_status == "warn" %}<span class="badge warn">warn</span>
-            {% elif r.cookie_status == "expired" %}<span class="badge error">expired</span>
-            {% else %}<span class="badge muted">{{ r.cookie_status }}</span>{% endif %}
+            {% if r.cookie_status == "ok" %}<span class="badge ok">正常</span>
+            {% elif r.cookie_status == "warn" %}<span class="badge warn">即将过期</span>
+            {% elif r.cookie_status == "expired" %}<span class="badge error">已过期</span>
+            {% else %}<span class="badge muted">未知</span>{% endif %}
           </td>
           <td class="muted">{{ r.cookie_last_active_at.strftime("%Y-%m-%d %H:%M") if r.cookie_last_active_at else "-" }}</td>
           <td class="muted">{{ r.paused_until.strftime("%Y-%m-%d %H:%M") if r.paused_until else "-" }}</td>
@@ -51,7 +51,7 @@
             {% else %}
               <form method="post" action="/accounts/{{ r.id }}/pause" style="display:inline;">
                 <input type="hidden" name="hours" value="24">
-                <button type="submit">暂停 24h</button>
+                <button type="submit">暂停 24 小时</button>
               </form>
             {% endif %}
           </td>
@@ -60,17 +60,17 @@
       </tbody>
     </table>
     {% else %}
-      <p class="muted">配置里还没有账号。请编辑 <code>config.yaml</code> 的 <code>accounts</code> 段。</p>
+      <p class="muted">配置里还没有账号。请在"配置"页的 <code>accounts</code> 段添加。</p>
     {% endif %}
   </div>
 
   <div class="card">
     <h2>扫码登录说明</h2>
     <ol style="margin: 0; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.7;">
-      <li>点"扫码登录"按钮后,后台会启动 patchright 弹一个 Chrome 窗口,直接打开视频号主页</li>
-      <li>在那个窗口里用微信扫页面上的二维码,扫完即登录(无需在 Web UI 里看二维码)</li>
-      <li>扫码完成或 5 分钟超时后,窗口自动关,cookie 状态会刷新到 ok/expired</li>
-      <li>视频号风控敏感,严禁 headless,弹窗是必须的</li>
+      <li>点"扫码登录"按钮后,后台会启动一个 Chrome 浏览器窗口,直接打开视频号主页</li>
+      <li>在那个窗口里用微信扫页面上的二维码,扫完即登录(本网页里不显示二维码)</li>
+      <li>扫码完成或 5 分钟超时后,Chrome 窗口自动关闭,登录状态会刷新到正常 / 已过期</li>
+      <li>视频号风控敏感,严禁后台静默模式,弹窗是必须的</li>
     </ol>
   </div>
 {% endblock %}

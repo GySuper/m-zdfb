@@ -106,7 +106,7 @@ def test_tasks_list_renders_today_failed_row(
     assert r.status_code == 200
     assert "国庆短片" in r.text
     assert "account_a" in r.text
-    assert "upload_failed" in r.text
+    assert "上传失败" in r.text  # i18n: upload_failed → 上传失败
     assert "重试" in r.text  # failed → retryable 按钮可见
 
 
@@ -126,9 +126,9 @@ def test_task_detail_shows_event_and_error(
     r = c.get("/tasks/1")
     assert r.status_code == 200
     assert "国庆短片" in r.text
-    assert "upload_failed" in r.text
-    assert "task_failed" in r.text  # event type
-    assert "发布失败" in r.text
+    assert "上传失败" in r.text  # i18n: upload_failed
+    assert "任务失败" in r.text  # i18n: event type=task_failed
+    assert "发布失败" in r.text  # event.message 原文
 
 
 def test_task_detail_404(client_with_data: tuple[TestClient, _date]) -> None:

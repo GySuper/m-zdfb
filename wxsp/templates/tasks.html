@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Tasks · wxsp{% endblock %}
+{% block title %}任务 · wxsp{% endblock %}
 {% block content %}
   {% if flash %}
     <div class="card" style="border-left: 4px solid var(--primary);">
@@ -23,14 +23,14 @@
           <select name="status">
             <option value="">全部</option>
             {% for s in status_options %}
-              <option value="{{ s }}" {% if filter_status==s %}selected{% endif %}>{{ s }}</option>
+              <option value="{{ s }}" {% if filter_status==s %}selected{% endif %}>{{ status_cn(s) }}</option>
             {% endfor %}
           </select>
         </label>
         <button class="primary" type="submit">筛选</button>
       </form>
       <form method="post" action="/tasks/run-today">
-        <button class="primary" type="submit">跑今天 pending</button>
+        <button class="primary" type="submit">立即跑今天待发布</button>
       </form>
     </div>
   </div>
@@ -41,7 +41,7 @@
     <table>
       <thead>
         <tr>
-          <th>#</th><th>标题</th><th>账号</th><th>执行日期</th><th>发布时间</th>
+          <th>编号</th><th>标题</th><th>账号</th><th>执行日期</th><th>发布时间</th>
           <th>状态</th><th>重试次数</th><th>操作</th>
         </tr>
       </thead>
@@ -54,12 +54,12 @@
           <td class="muted">{{ r.execute_date }}</td>
           <td class="muted">{{ r.publish_at.strftime("%H:%M") }}</td>
           <td>
-            {% if r.status == "success" %}<span class="badge ok">{{ r.status }}</span>
-            {% elif r.status == "running" %}<span class="badge warn">{{ r.status }}</span>
-            {% elif r.status == "failed" %}<span class="badge error">{{ r.status }}</span>
-            {% elif r.status == "interrupted" %}<span class="badge warn">{{ r.status }}</span>
-            {% else %}<span class="badge muted">{{ r.status }}</span>{% endif %}
-            {% if r.last_error_type %}<br><span class="muted">{{ r.last_error_type }}</span>{% endif %}
+            {% if r.status == "success" %}<span class="badge ok">{{ status_cn(r.status) }}</span>
+            {% elif r.status == "running" %}<span class="badge warn">{{ status_cn(r.status) }}</span>
+            {% elif r.status == "failed" %}<span class="badge error">{{ status_cn(r.status) }}</span>
+            {% elif r.status == "interrupted" %}<span class="badge warn">{{ status_cn(r.status) }}</span>
+            {% else %}<span class="badge muted">{{ status_cn(r.status) }}</span>{% endif %}
+            {% if r.last_error_type %}<br><span class="muted">{{ error_type_cn(r.last_error_type) }}</span>{% endif %}
           </td>
           <td class="muted">{{ r.attempts }}</td>
           <td style="white-space: nowrap;">
@@ -75,7 +75,7 @@
       </tbody>
     </table>
     {% else %}
-      <p class="muted">该条件下没有任务。任务由飞书 Bitable 创建,点上方"立即同步飞书"或等 09:00 cron。</p>
+      <p class="muted">该条件下没有任务。任务由飞书 Bitable 创建,点上方"立即同步飞书"或等 09:00 自动同步。</p>
     {% endif %}
   </div>
 {% endblock %}

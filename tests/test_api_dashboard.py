@@ -121,6 +121,5 @@ def test_dashboard_shows_today_task_counts_and_recent_event(
 
     r = client.get("/")
     assert r.status_code == 200
-    assert "success 1" in r.text
-    assert "风控触发" in r.text
-    assert "risk_control" in r.text
+    assert "已发布 1" in r.text
+    assert "风控触发" in r.text  # i18n 映射 risk_control → 风控触发

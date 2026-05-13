@@ -19,6 +19,7 @@ from lark_oapi.api.bitable.v1 import (  # type: ignore[import-untyped]
     FilterInfo,
     SearchAppTableRecordRequest,
     SearchAppTableRecordRequestBody,
+    UpdateAppTableRecordRequest,
 )
 
 # 指数退避序列:第 1 次失败等 1s,第 2 次失败等 2s,第 3 次失败直接抛
@@ -144,3 +145,55 @@ def _build_search_request(
 
 def _to_bitable_row(item: AppTableRecord) -> BitableRow:
     return BitableRow(record_id=item.record_id, fields=dict(item.fields or {}))
+
+
+def writeback_row(
+    client: lark.Client,
+    *,
+    app_token: str,
+    table_id: str,
+    record_id: str,
+    fields: dict[str, Any],
+) -> None:
+    """回写指定 record 的指定字段。fields 已用飞书原字段名作 key。
+
+    内置 3 次指数退避(1s/2s);3 次都失败 → FeishuApiError。
+    """
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            response = client.bitable.v1.app_table_record.update(
+                _build_update_request(
+                    app_token=app_token,
+                    table_id=table_id,
+                    record_id=record_id,
+                    fields=fields,
+                )
+            )
+            if not response.success():
+                raise FeishuApiError(f"飞书 update 错误 code={response.code} msg={response.msg}")
+            return
+        except Exception as exc:
+            last_err = exc
+            if attempt < 2:
+                time.sleep(_RETRY_DELAYS[attempt])
+    assert last_err is not None
+    raise FeishuApiError(f"飞书 writeback 重试 3 次仍失败: {last_err}") from last_err
+
+
+def _build_update_request(
+    *,
+    app_token: str,
+    table_id: str,
+    record_id: str,
+    fields: dict[str, Any],
+) -> UpdateAppTableRecordRequest:
+    body = AppTableRecord.builder().fields(fields).build()
+    return (
+        UpdateAppTableRecordRequest.builder()
+        .app_token(app_token)
+        .table_id(table_id)
+        .record_id(record_id)
+        .request_body(body)
+        .build()
+    )

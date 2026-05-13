@@ -20,6 +20,7 @@ from wxsp.doctor import check_nas, record_cookie_check, refresh_cookie_status
 from wxsp.feishu import FeishuApiError, fetch_pending_rows, make_client, writeback_row
 from wxsp.models import Account, Task, Video
 from wxsp.nas import find_cover, find_video
+from wxsp.publisher import AlreadyClaimed, publish
 from wxsp.validator import FieldError, NasFinder, validate
 
 app = typer.Typer(
@@ -356,10 +357,31 @@ def run(
     task_id: int | None = typer.Option(None, "--task-id", help="跑指定单条任务"),
     dry_run: bool = typer.Option(False, "--dry-run", help="发布步骤跑到点'发布'前停下"),
 ) -> None:
-    """执行任务(M5-M6 实现)。"""
-    _not_implemented(
-        f"run --daemon={daemon} --today={today} --task-id={task_id} --dry-run={dry_run}"
-    )
+    """执行任务(M5: --task-id;M6 实现 --daemon/--today)。"""
+    if task_id is None:
+        _not_implemented(
+            f"run --daemon={daemon} --today={today} --task-id={task_id} --dry-run={dry_run}"
+        )
+        return
+
+    settings = load_settings()
+    typer.echo(f"[wxsp] 跑 task {task_id}{' (dry-run)' if dry_run else ''}...")
+    try:
+        result = publish(task_id, dry_run=dry_run, settings=settings)
+    except AlreadyClaimed as exc:
+        typer.echo(f"[wxsp] ✗ {exc}")
+        raise typer.Exit(code=1) from exc
+
+    if result.ok:
+        typer.echo(f"[wxsp] ✓ task {task_id} {'dry-run 完成' if dry_run else '发布成功'}")
+        if result.remote_url:
+            typer.echo(f"        remote_url: {result.remote_url}")
+        if result.screenshots:
+            typer.echo(f"        screenshots: {', '.join(result.screenshots)}")
+    else:
+        typer.echo(f"[wxsp] ✗ task {task_id} 失败: {result.error_type}")
+        typer.echo(f"        {result.error_msg}")
+        raise typer.Exit(code=1)
 
 
 @app.command("status")

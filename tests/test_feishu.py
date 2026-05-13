@@ -102,7 +102,7 @@ def test_fetch_pending_rows_single_page() -> None:
         ]
     )
     rows = fetch_pending_rows(
-        fake,  # type: ignore[arg-type]
+        fake,
         app_token="tbl_token",
         table_id="tblxxx",
         status_field="状态",
@@ -129,7 +129,7 @@ def test_fetch_pending_rows_paginates() -> None:
         ]
     )
     rows = fetch_pending_rows(
-        fake,  # type: ignore[arg-type]
+        fake,
         app_token="t",
         table_id="t",
         status_field="状态",
@@ -152,7 +152,7 @@ def test_fetch_pending_rows_retries_on_transient_error(
         ]
     )
     rows = fetch_pending_rows(
-        fake,  # type: ignore[arg-type]
+        fake,
         app_token="t",
         table_id="t",
         status_field="状态",
@@ -176,7 +176,7 @@ def test_fetch_pending_rows_raises_after_3_failures(
     )
     with pytest.raises(FeishuApiError) as exc_info:
         fetch_pending_rows(
-            fake,  # type: ignore[arg-type]
+            fake,
             app_token="t",
             table_id="t",
             status_field="状态",
@@ -198,7 +198,7 @@ def test_fetch_pending_rows_raises_on_api_error_response(
     )
     with pytest.raises(FeishuApiError):
         fetch_pending_rows(
-            fake,  # type: ignore[arg-type]
+            fake,
             app_token="t",
             table_id="t",
             status_field="状态",

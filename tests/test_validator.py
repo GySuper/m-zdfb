@@ -538,3 +538,46 @@ def test_validate_video_file_auto_appends_mp4(tmp_path: Path) -> None:
     )
     # 不关心整体 ok(时间 rules 与 happy_row 默认值的交互),只关心视频字段不报错
     assert all(e.field != "视频文件" for e in result.errors), result.errors
+
+
+def test_validate_title_rich_text_array_format(tmp_path: Path) -> None:
+    """飞书"单行文本"字段实际返回 [{"text": "...", "type": "text"}] 数组,validator 必须兼容。"""
+    fields = dict(_make_happy_row(tmp_path).fields)
+    fields["标题"] = [{"text": "字" * 16, "type": "text"}]
+    fields["视频文件"] = [{"text": "国庆01.mp4", "type": "text"}]
+    row = BitableRow(record_id="r", fields=fields)
+    nas = _StubNas()
+    nas.video_returns["国庆01.mp4"] = tmp_path / "国庆01.mp4"
+    (tmp_path / "国庆01.mp4").write_bytes(b"x")
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    # 标题和视频文件都不应报错
+    error_fields = {e.field for e in result.errors}
+    assert "标题" not in error_fields, result.errors
+    assert "视频文件" not in error_fields, result.errors
+
+
+def test_validate_text_array_concatenated_when_multipart(tmp_path: Path) -> None:
+    """rich-text 数组多段 → 拼接(飞书富文本场景:中间插链接/@等会变多段)。"""
+    fields = dict(_make_happy_row(tmp_path).fields)
+    fields["标题"] = [
+        {"text": "字" * 10, "type": "text"},
+        {"text": "字" * 8, "type": "text"},  # 总共 18 字,合规
+    ]
+    row = BitableRow(record_id="r", fields=fields)
+    nas = _StubNas()
+    nas.video_returns["国庆01.mp4"] = tmp_path / "国庆01.mp4"
+    (tmp_path / "国庆01.mp4").write_bytes(b"x")
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    assert "标题" not in {e.field for e in result.errors}, result.errors

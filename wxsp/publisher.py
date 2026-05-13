@@ -290,3 +290,43 @@ def risk_control_probe(page: Page) -> None:
     for kw in sel.RISK_CONTROL_KEYWORDS:
         if kw in body_text:
             raise RiskControl(f"页面命中风控关键词: {kw}")
+
+
+def click_publish(page: Page) -> None:
+    """[15] 点"发表"按钮。"""
+    button = page.locator(sel.SUBMIT_PUBLISH_BUTTON)
+    if not button.count():
+        raise ElementNotFound("发表按钮未找到")
+    button.click()
+
+
+def wait_for_success_indicator(page: Page, *, timeout_ms: int = 30_000) -> None:
+    """[16] 等 URL 跳到 /post/list,认为发布成功。"""
+    try:
+        page.wait_for_url(lambda url: sel.POST_LIST_URL_FRAGMENT in url, timeout=timeout_ms)
+    except Exception as exc:
+        # 兜底:看 URL 是否已经包含
+        if sel.POST_LIST_URL_FRAGMENT not in page.url:
+            raise NetworkError(f"发布后未跳到 post/list: {exc}") from exc
+
+
+def extract_remote_video_id_and_url(page: Page) -> tuple[str | None, str | None]:
+    """[17] 尽力从 post/list 首条提取 remote_video_id + URL。
+
+    定时发布的视频在到点前**不会**有公开 URL,拿不到是常态 —— 返回 (None, None)
+    让上层把 remote_url 留 None,不是错误。
+    """
+    try:
+        link = page.locator(sel.LIST_FIRST_ITEM_LINK).first
+        if not link.count():
+            return None, None
+        href = link.get_attribute("href", timeout=2000)
+        if not href:
+            return None, None
+        # 视频号详情页 URL 形如 .../platform/post/finderNewLifeData?vid=xxx 或 ?id=xxx
+        # 不严格解析,直接拿 href 末段当 video_id
+        vid = href.rsplit("=", 1)[-1] if "=" in href else None
+        return vid, href
+    except Exception as exc:
+        logger.info(f"提取 remote_url 失败(对定时发布是常态): {exc}")
+        return None, None

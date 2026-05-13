@@ -188,8 +188,10 @@ def _check_video(
     if not raw:
         errors.append(FieldError(field=field_name, message="未指定"))
         return None
+    # 运营常只填裸文件名(已知都是 mp4)→ 没扩展名时自动补 .mp4
+    lookup_name = raw if "." in raw else raw + ".mp4"
     try:
-        path = nas_finder.find_video(raw)
+        path = nas_finder.find_video(lookup_name)
     except FileNotFoundError:
         errors.append(FieldError(field=field_name, message=f"未在 NAS 下找到 {raw!r}"))
         return None

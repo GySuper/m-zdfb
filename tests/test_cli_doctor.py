@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 from sqlmodel import Session
 from typer.testing import CliRunner
 
+from tests.conftest import make_settings
 from wxsp.cli import app
 from wxsp.db import get_engine, init_db
 from wxsp.models import Account
@@ -42,7 +42,7 @@ def test_doctor_no_accounts_shows_hint(
     cover_root = tmp_path / "covers"
     video_root.mkdir()
     cover_root.mkdir()
-    settings = _make_settings_for_cli(video_root, cover_root)
+    settings = make_settings(video_root, cover_root)
 
     from wxsp import cli as cli_module
 
@@ -72,7 +72,7 @@ def test_doctor_lists_each_account_with_status(
     cover_root = tmp_path / "covers"
     video_root.mkdir()
     cover_root.mkdir()
-    settings = _make_settings_for_cli(video_root, cover_root)
+    settings = make_settings(video_root, cover_root)
 
     from wxsp import cli as cli_module
 
@@ -106,7 +106,7 @@ def test_doctor_persists_cookie_status_to_db(
     cover_root = tmp_path / "covers"
     video_root.mkdir()
     cover_root.mkdir()
-    settings = _make_settings_for_cli(video_root, cover_root)
+    settings = make_settings(video_root, cover_root)
 
     from wxsp import cli as cli_module
 
@@ -140,7 +140,7 @@ def test_doctor_continues_after_one_account_browser_crash(
     cover_root = tmp_path / "covers"
     video_root.mkdir()
     cover_root.mkdir()
-    settings = _make_settings_for_cli(video_root, cover_root)
+    settings = make_settings(video_root, cover_root)
 
     from wxsp import cli as cli_module
 
@@ -164,45 +164,6 @@ def test_doctor_continues_after_one_account_browser_crash(
 # ============== NAS section ==============
 
 
-def _make_settings_for_cli(video_root: Path, cover_root: Path) -> Any:
-    """复用 test_doctor 里的最小 Settings 构造。"""
-    from wxsp.config import (
-        AppConfig,
-        FeishuBitableConfig,
-        FeishuConfig,
-        MonitoringConfig,
-        NotifiersConfig,
-        PathsConfig,
-        PublisherConfig,
-        SchedulerConfig,
-        Settings,
-        WebUIConfig,
-        WecomNotifierConfig,
-    )
-
-    return Settings(
-        app=AppConfig(data_dir=Path("/tmp/d"), logs_dir=Path("/tmp/l"), timezone="Asia/Shanghai"),
-        paths=PathsConfig(
-            nas_root=video_root.parent,
-            video_search_root=video_root,
-            cover_search_root=cover_root,
-        ),
-        accounts={},
-        scheduler=SchedulerConfig(),
-        publisher=PublisherConfig(),
-        feishu=FeishuConfig(
-            enabled=False,
-            app_id="x",
-            app_secret="x",
-            bitable=FeishuBitableConfig(app_token="x", table_id="x"),
-        ),
-        monitoring=MonitoringConfig(
-            notifiers=NotifiersConfig(wecom=WecomNotifierConfig(enabled=False, webhook="")),
-        ),
-        webui=WebUIConfig(),
-    )
-
-
 def test_doctor_prints_nas_section_when_all_ok(
     db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -215,7 +176,7 @@ def test_doctor_prints_nas_section_when_all_ok(
     cover_root = tmp_path / "covers"
     video_root.mkdir()
     cover_root.mkdir()
-    settings = _make_settings_for_cli(video_root, cover_root)
+    settings = make_settings(video_root, cover_root)
 
     from wxsp import cli as cli_module
 
@@ -242,7 +203,7 @@ def test_doctor_exits_1_when_nas_path_missing(
     video_root = tmp_path / "missing_videos"  # 故意不 mkdir
     cover_root = tmp_path / "covers"
     cover_root.mkdir()
-    settings = _make_settings_for_cli(video_root, cover_root)
+    settings = make_settings(video_root, cover_root)
 
     from wxsp import cli as cli_module
 
@@ -264,7 +225,7 @@ def test_doctor_nas_section_runs_even_without_accounts(
     cover_root = tmp_path / "covers"
     video_root.mkdir()
     cover_root.mkdir()
-    settings = _make_settings_for_cli(video_root, cover_root)
+    settings = make_settings(video_root, cover_root)
 
     from wxsp import cli as cli_module
 

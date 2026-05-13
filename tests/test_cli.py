@@ -41,13 +41,13 @@ def test_run_supports_today_flag() -> None:
 def test_doctor_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # doctor 现在会读 settings.paths.{video,cover}_search_root 并检查存在性,
     # 测试不依赖开发机 config.yaml,monkeypatch load_settings 注入临时目录。
-    from tests.test_cli_doctor import _make_settings_for_cli
+    from tests.conftest import make_settings
 
     video_root = tmp_path / "videos"
     cover_root = tmp_path / "covers"
     video_root.mkdir()
     cover_root.mkdir()
-    settings = _make_settings_for_cli(video_root, cover_root)
+    settings = make_settings(video_root, cover_root)
 
     monkeypatch.setenv("WXSP_DB_PATH", str(tmp_path / "db.sqlite"))
     from wxsp import cli as cli_module

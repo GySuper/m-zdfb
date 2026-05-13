@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
+from tests.conftest import make_settings
 from wxsp.models import (
     COOKIE_STATUS_EXPIRED,
     COOKIE_STATUS_OK,
@@ -240,45 +241,6 @@ def test_refresh_cookie_status_passes_pathlib_path_to_checker(session: Session) 
 # ============== check_nas ==============
 
 
-def _make_settings(video_root: Path, cover_root: Path) -> Any:
-    """构造最小 Settings,只填 check_nas 用到的 paths.{video,cover}_search_root。"""
-    from wxsp.config import (
-        AppConfig,
-        FeishuBitableConfig,
-        FeishuConfig,
-        MonitoringConfig,
-        NotifiersConfig,
-        PathsConfig,
-        PublisherConfig,
-        SchedulerConfig,
-        Settings,
-        WebUIConfig,
-        WecomNotifierConfig,
-    )
-
-    return Settings(
-        app=AppConfig(data_dir=Path("/tmp/d"), logs_dir=Path("/tmp/l"), timezone="Asia/Shanghai"),
-        paths=PathsConfig(
-            nas_root=video_root.parent,
-            video_search_root=video_root,
-            cover_search_root=cover_root,
-        ),
-        accounts={},
-        scheduler=SchedulerConfig(),
-        publisher=PublisherConfig(),
-        feishu=FeishuConfig(
-            enabled=False,
-            app_id="x",
-            app_secret="x",
-            bitable=FeishuBitableConfig(app_token="x", table_id="x"),
-        ),
-        monitoring=MonitoringConfig(
-            notifiers=NotifiersConfig(wecom=WecomNotifierConfig(enabled=False, webhook="")),
-        ),
-        webui=WebUIConfig(),
-    )
-
-
 def test_check_nas_both_paths_exist_and_are_dirs(tmp_path: Path) -> None:
     from wxsp.doctor import check_nas
 
@@ -286,7 +248,7 @@ def test_check_nas_both_paths_exist_and_are_dirs(tmp_path: Path) -> None:
     cover_root = tmp_path / "covers"
     video_root.mkdir()
     cover_root.mkdir()
-    settings = _make_settings(video_root, cover_root)
+    settings = make_settings(video_root, cover_root)
 
     rows = check_nas(settings)
 
@@ -305,7 +267,7 @@ def test_check_nas_video_root_missing(tmp_path: Path) -> None:
     video_root = tmp_path / "videos"  # 故意不创建
     cover_root = tmp_path / "covers"
     cover_root.mkdir()
-    settings = _make_settings(video_root, cover_root)
+    settings = make_settings(video_root, cover_root)
 
     rows = check_nas(settings)
 
@@ -322,7 +284,7 @@ def test_check_nas_path_is_file_not_dir(tmp_path: Path) -> None:
     video_root.mkdir()
     cover_root = tmp_path / "covers_file"  # 故意建成文件
     cover_root.write_text("oops")
-    settings = _make_settings(video_root, cover_root)
+    settings = make_settings(video_root, cover_root)
 
     rows = check_nas(settings)
 
@@ -334,7 +296,7 @@ def test_check_nas_path_is_file_not_dir(tmp_path: Path) -> None:
 def test_check_nas_both_missing(tmp_path: Path) -> None:
     from wxsp.doctor import check_nas
 
-    settings = _make_settings(tmp_path / "v", tmp_path / "c")  # 都不存在
+    settings = make_settings(tmp_path / "v", tmp_path / "c")  # 都不存在
     rows = check_nas(settings)
 
     assert all(not r.ok for r in rows)

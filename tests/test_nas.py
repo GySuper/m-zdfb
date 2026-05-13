@@ -125,3 +125,52 @@ def test_stage_to_tmp_preserves_filename_with_spaces_and_unicode(tmp_path: Path)
 
     assert link.name == "国庆 短片 01.mov"
     assert link.is_symlink()
+
+
+# ============== stage_to_tmp 错误翻译 ==============
+
+
+def test_stage_to_tmp_translates_oserror_to_nas_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """模拟 NAS 抖动:symlink_to 抛 PermissionError → 翻译为 NasUnreachable。"""
+    from wxsp.errors import NasUnreachable
+    from wxsp.nas import stage_to_tmp
+
+    src = tmp_path / "src.mp4"
+    src.write_bytes(b"x")
+
+    def boom(self: Path, target: Path | str, target_is_directory: bool = False) -> None:
+        raise PermissionError("simulated NAS permission error")
+
+    monkeypatch.setattr(Path, "symlink_to", boom)
+
+    with pytest.raises(NasUnreachable) as exc_info:
+        stage_to_tmp(src, task_id=99, tmp_root=tmp_path / "tmp")
+
+    # 原始 OSError 通过 __cause__ 保留
+    assert isinstance(exc_info.value.__cause__, PermissionError)
+    assert "simulated NAS permission error" in str(exc_info.value.__cause__)
+
+
+def test_stage_to_tmp_translates_mkdir_oserror_to_nas_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mkdir 阶段抛 OSError 也要被翻译(不只是 symlink_to 阶段)。"""
+    from wxsp.errors import NasUnreachable
+    from wxsp.nas import stage_to_tmp
+
+    src = tmp_path / "src.mp4"
+    src.write_bytes(b"x")
+
+    original_mkdir = Path.mkdir
+
+    def crashing_mkdir(self: Path, *args: object, **kwargs: object) -> None:
+        if "tmp" in str(self):
+            raise OSError("simulated disk full")
+        original_mkdir(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "mkdir", crashing_mkdir)
+
+    with pytest.raises(NasUnreachable):
+        stage_to_tmp(src, task_id=1, tmp_root=tmp_path / "tmp")

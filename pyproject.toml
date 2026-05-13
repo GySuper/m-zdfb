@@ -59,3 +59,6 @@ disallow_untyped_defs = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+  "integration: real browser + real account; run manually, skip in CI",
+]

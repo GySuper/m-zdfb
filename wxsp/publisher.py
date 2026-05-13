@@ -16,7 +16,7 @@ from sqlmodel import Session
 from wxsp import selectors as sel
 from wxsp.browser import browser_context
 from wxsp.config import Settings
-from wxsp.db import claim_task, get_engine, init_db, session_scope, transition_task
+from wxsp.db import claim_task, get_engine, init_db, session_scope
 from wxsp.errors import (
     CookieExpired,
     ElementNotFound,
@@ -365,9 +365,11 @@ def publish(
     - 入口先 `claim_task(task_id)`(原子幂等锁)。拿不到 → AlreadyClaimed。
     - 拿到后串行跑 [1-13];dry_run=True 在 [13] 之后截图返回,不点发表。
     - 任何 PublisherError(及 patchright Error)→ classify → 写 last_error_type
-      + 截图 + status=failed。
+      + **失败时截图存档** + status=failed。
     - 成功 → status=success + remote_url/remote_video_id(尽力而为)。
-    - dry_run 成功 → status 写回 pending(没真发,等正式触发)。
+    - dry_run 成功 → status 写回 pending,且 claim 留下的 lease/attempts/started_at
+      全部抹掉(task 视作没跑过)。
+    - **风控触发 → account.paused_until = now+24h**(CLAUDE.md 核心约束)。
     - 不管成败,最后 cleanup_tmp。
     """
     import json as _json
@@ -396,6 +398,7 @@ def publish(
         video_topic = video.topic
         video_original = video.original_claim
         user_data_dir = Path(account.user_data_dir)
+        account_id = account.id  # 风控触发时用
 
     result = PublishResult(task_id=task_id, ok=False, dry_run=dry_run)
     last_step = "init"
@@ -411,72 +414,87 @@ def publish(
         # [2] 启浏览器(headless 跟 settings)
         last_step = "browser"
         with browser_context(user_data_dir, headless=settings.publisher.headless) as page:
-            last_step = "open"
-            open_publish_page(page)
-            random_pause(step_pause)
+            try:
+                last_step = "open"
+                open_publish_page(page)
+                random_pause(step_pause)
 
-            last_step = "login"
-            verify_logged_in(page)
-            random_pause(step_pause)
+                last_step = "login"
+                verify_logged_in(page)
+                random_pause(step_pause)
 
-            last_step = "upload"
-            upload_video(page, file_path=staged, timeout_seconds=upload_timeout)
-            random_pause(step_pause)
+                last_step = "upload"
+                upload_video(page, file_path=staged, timeout_seconds=upload_timeout)
+                random_pause(step_pause)
 
-            last_step = "title"
-            fill_title(page, title=video_title)
-            random_pause(step_pause)
+                last_step = "title"
+                fill_title(page, title=video_title)
+                random_pause(step_pause)
 
-            last_step = "desc"
-            fill_description(page, description=video_description)
-            random_pause(step_pause)
+                last_step = "desc"
+                fill_description(page, description=video_description)
+                random_pause(step_pause)
 
-            last_step = "tags"
-            add_tags(page, tags=video_tags)
-            random_pause(step_pause)
+                last_step = "tags"
+                add_tags(page, tags=video_tags)
+                random_pause(step_pause)
 
-            last_step = "cover"
-            set_cover(page, cover_path=staged_cover)
-            random_pause(step_pause)
+                last_step = "cover"
+                set_cover(page, cover_path=staged_cover)
+                random_pause(step_pause)
 
-            last_step = "topic"
-            bind_topic(page, topic=video_topic)
-            random_pause(step_pause)
+                last_step = "topic"
+                bind_topic(page, topic=video_topic)
+                random_pause(step_pause)
 
-            last_step = "original"
-            toggle_original(page, original_claim=video_original)
-            random_pause(step_pause)
+                last_step = "original"
+                toggle_original(page, original_claim=video_original)
+                random_pause(step_pause)
 
-            last_step = "schedule"
-            set_schedule(page, publish_at=task_publish_at)
-            random_pause(step_pause)
+                last_step = "schedule"
+                set_schedule(page, publish_at=task_publish_at)
+                random_pause(step_pause)
 
-            last_step = "risk"
-            risk_control_probe(page)
+                last_step = "risk"
+                risk_control_probe(page)
 
-            # ★ [14] DRY_RUN GATE
-            if dry_run:
-                last_step = "dryrun_gate"
-                shot = screenshot(
-                    page,
-                    task_id=task_id,
-                    step="dryrun_gate",
-                    screenshots_root=screenshots_root,
-                )
-                result.screenshots.append(str(shot))
-                result.ok = True
-                return result
+                # ★ [14] DRY_RUN GATE
+                if dry_run:
+                    last_step = "dryrun_gate"
+                    shot = screenshot(
+                        page,
+                        task_id=task_id,
+                        step="dryrun_gate",
+                        screenshots_root=screenshots_root,
+                    )
+                    result.screenshots.append(str(shot))
+                    result.ok = True
+                    return result
 
-            last_step = "publish"
-            click_publish(page)
+                last_step = "publish"
+                click_publish(page)
 
-            last_step = "wait_success"
-            wait_for_success_indicator(page)
+                last_step = "wait_success"
+                wait_for_success_indicator(page)
 
-            last_step = "extract"
-            vid, url = extract_remote_video_id_and_url(page)
-            result.remote_video_id = vid
-            result.remote_url = url
+                last_step = "extract"
+                vid, url = extract_remote_video_id_and_url(page)
+                result.remote_video_id = vid
+                result.remote_url = url
+
+            except Exception:
+                # I1: 趁 page 还活着截图存档(截图自身失败不抛,避免掩盖原异常)
+                try:
+                    shot = screenshot(
+                        page,
+                        task_id=task_id,
+                        step=f"err_{last_step}",
+                        screenshots_root=screenshots_root,
+                    )
+                    result.screenshots.append(str(shot))
+                except Exception as ss_exc:
+                    logger.warning(f"失败时截图也失败 task_id={task_id}: {ss_exc}")
+                raise
 
         result.ok = True
         return result
@@ -494,25 +512,43 @@ def publish(
         logger.exception("publish 顶层未分类异常")
         return result
     finally:
+        # cleanup tmp(本地文件系统操作,失败不影响后续 DB 写)
         try:
             cleanup_tmp(task_id=task_id, tmp_root=tmp_root)
         except Exception as exc:
             logger.warning(f"cleanup_tmp 失败 task_id={task_id}: {exc}")
-        # dry_run 成功 → 回写 pending(没真发,等正式触发);失败 → failed
-        new_status = (
-            "success"
-            if result.ok and not result.dry_run
-            else ("pending" if result.dry_run and result.ok else "failed")
-        )
+
+        # 决定 task 最终状态
+        if result.ok and not result.dry_run:
+            new_status = "success"
+        elif result.dry_run and result.ok:
+            new_status = "pending"  # dry_run 没真发 → 回到可执行
+        else:
+            new_status = "failed"
+
         with session_scope(engine) as session:
-            transition_task(
-                session,
-                task_id,
-                status=new_status,
-                finished_at=datetime.now(),
-                remote_url=result.remote_url,
-                remote_video_id=result.remote_video_id,
-                last_error_type=result.error_type,
-                last_error_msg=result.error_msg,
-                screenshots_json=_json.dumps(result.screenshots, ensure_ascii=False),
-            )
+            task_now = session.get(Task, task_id)
+            assert task_now is not None
+            task_now.status = new_status
+            task_now.remote_url = result.remote_url
+            task_now.remote_video_id = result.remote_video_id
+            task_now.last_error_type = result.error_type
+            task_now.last_error_msg = result.error_msg
+            task_now.screenshots_json = _json.dumps(result.screenshots, ensure_ascii=False)
+
+            if result.dry_run and result.ok:
+                # I2: dry_run 成功 → 抹掉 claim 痕迹,task 视作没跑过
+                task_now.lease_token = None
+                task_now.lease_expires_at = None
+                task_now.started_at = None
+                task_now.attempts = max(0, task_now.attempts - 1)
+                task_now.finished_at = None
+            else:
+                task_now.finished_at = datetime.now()
+
+            # I3: 风控 → 暂停账号 24h(CLAUDE.md 核心约束 §1)
+            if result.error_type == "risk_control":
+                account_now = session.get(Account, account_id)
+                if account_now is not None:
+                    account_now.paused_until = datetime.now() + timedelta(hours=24)
+                    logger.warning(f"风控触发,账号 {account_id} 暂停 24h")

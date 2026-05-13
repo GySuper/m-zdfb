@@ -166,3 +166,149 @@ def test_publish_already_claimed_raises_if_task_in_running(
 
     with pytest.raises(AlreadyClaimed):
         publish(task_id, dry_run=True, settings=settings)
+
+
+def _fake_browser_ctx(tmp_path: Path):
+    """造一个 with browser_context(...) as page: 兼容的 fake,page 是 MagicMock。"""
+    fake_ctx = MagicMock()
+    fake_ctx.__enter__.return_value = MagicMock(name="page")
+    fake_ctx.__exit__.return_value = False
+    return fake_ctx
+
+
+def _noop_steps(**overrides):
+    """把所有步骤函数 mock 成 no-op,允许某些显式 override(用于注入异常)。"""
+    fakes = {
+        "open_publish_page": lambda *a, **kw: None,
+        "verify_logged_in": lambda *a, **kw: None,
+        "upload_video": lambda *a, **kw: None,
+        "fill_title": lambda *a, **kw: None,
+        "fill_description": lambda *a, **kw: None,
+        "add_tags": lambda *a, **kw: None,
+        "set_cover": lambda *a, **kw: None,
+        "bind_topic": lambda *a, **kw: None,
+        "toggle_original": lambda *a, **kw: None,
+        "set_schedule": lambda *a, **kw: None,
+        "risk_control_probe": lambda *a, **kw: None,
+        "click_publish": lambda *a, **kw: None,
+        "wait_for_success_indicator": lambda *a, **kw: None,
+        "extract_remote_video_id_and_url": lambda page: (None, None),
+        "random_pause": lambda *a, **kw: None,
+    }
+    fakes.update(overrides)
+    return fakes
+
+
+def test_publish_failure_writes_status_failed_with_screenshot(
+    pending_task: tuple[int, Path],
+) -> None:
+    """步骤抛 PublisherError → DB 写 failed + last_error_type + 截图记录。"""
+    from wxsp.errors import CookieExpired
+    from wxsp.models import Task
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+
+    def raise_cookie_expired(*_a, **_kw):
+        raise CookieExpired("二维码出来了")
+
+    shots_captured: list[str] = []
+
+    def fake_screenshot(page, *, task_id, step, screenshots_root, now=None):
+        shots_captured.append(step)
+        return tmp_path / f"{task_id}_{step}.png"
+
+    overrides = _noop_steps(verify_logged_in=raise_cookie_expired)
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=fake_screenshot),
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is False
+    assert result.error_type == "cookie_expired"
+    assert "step=login" in (result.error_msg or "")
+    assert "err_login" in shots_captured  # I1: 趁 page 还活着截图
+
+    engine = get_engine()
+    with Session(engine) as session:
+        task_db = session.get(Task, task_id)
+        assert task_db is not None
+        assert task_db.status == "failed"
+        assert task_db.last_error_type == "cookie_expired"
+        assert task_db.screenshots_json != "[]"
+        assert task_db.finished_at is not None
+
+
+def test_publish_risk_control_pauses_account_24h(
+    pending_task: tuple[int, Path],
+) -> None:
+    """RiskControl → account.paused_until ≈ now+24h(CLAUDE.md 核心约束 §1)。"""
+    from wxsp.errors import RiskControl
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+
+    def raise_risk(*_a, **_kw):
+        raise RiskControl("操作过于频繁")
+
+    overrides = _noop_steps(risk_control_probe=raise_risk)
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is False
+    assert result.error_type == "risk_control"
+
+    engine = get_engine()
+    with Session(engine) as session:
+        acc = session.get(Account, "a")
+        assert acc is not None
+        assert acc.paused_until is not None
+        delta = acc.paused_until - datetime.now()
+        # 容差 ±10s,因为 datetime.now() 在测试和实现里调用时刻不同
+        assert timedelta(hours=23, minutes=59, seconds=50) < delta <= timedelta(hours=24)
+
+
+def test_publish_dry_run_success_resets_claim_residue(
+    pending_task: tuple[int, Path],
+) -> None:
+    """dry_run 成功 → task 视作没跑过:status=pending, attempts=0, lease/started_at=None。"""
+    from wxsp.models import Task
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+
+    overrides = _noop_steps()
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=True, settings=settings)
+
+    assert result.ok is True
+
+    engine = get_engine()
+    with Session(engine) as session:
+        task_db = session.get(Task, task_id)
+        assert task_db is not None
+        assert task_db.status == "pending"
+        assert task_db.attempts == 0  # claim 加的 1 被抹掉
+        assert task_db.lease_token is None
+        assert task_db.lease_expires_at is None
+        assert task_db.started_at is None
+        assert task_db.finished_at is None

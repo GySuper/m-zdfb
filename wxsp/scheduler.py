@@ -6,12 +6,16 @@ from dataclasses import dataclass
 from datetime import date as _date
 from datetime import datetime
 
+from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore[import-untyped]
+from apscheduler.schedulers.base import BaseScheduler  # type: ignore[import-untyped]
+from apscheduler.schedulers.blocking import BlockingScheduler  # type: ignore[import-untyped]
+from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-untyped]
 from loguru import logger
 from sqlalchemy import update
 from sqlmodel import Session, col, select
 
 from wxsp.config import Settings
-from wxsp.db import get_engine, init_db
+from wxsp.db import get_engine, init_db, session_scope
 from wxsp.models import (
     TASK_STATUS_INTERRUPTED,
     TASK_STATUS_PENDING,
@@ -121,3 +125,49 @@ def run_today_pending(settings: Settings) -> RunSummary:
             summary.failed += 1
 
     return summary
+
+
+def make_scheduler(settings: Settings, *, blocking: bool = False) -> BaseScheduler:
+    """构造 APScheduler 并注册"每日 09:00 cron job"。
+
+    blocking=True 用于 daemon 进程(主线程 .start() 阻塞);
+    blocking=False(默认)用于测试 / 后台模式。**调用方负责 shutdown**。
+    """
+    scheduler: BaseScheduler
+    if blocking:
+        scheduler = BlockingScheduler(timezone=settings.app.timezone)
+    else:
+        scheduler = BackgroundScheduler(timezone=settings.app.timezone)
+    scheduler.add_job(
+        run_today_pending,
+        trigger=CronTrigger(
+            hour=settings.scheduler.daily_cron_hour,
+            minute=settings.scheduler.daily_cron_minute,
+            timezone=settings.app.timezone,
+        ),
+        args=[settings],
+        id="daily_run_today_pending",
+        replace_existing=True,
+    )
+    return scheduler
+
+
+def start_daemon(settings: Settings) -> None:
+    """daemon 入口:启动时 (1) 标 interrupted (2) 起 blocking scheduler。
+
+    `BlockingScheduler.start()` 会阻塞当前线程,直到 SIGINT/SIGTERM。
+    """
+    engine = get_engine()
+    init_db(engine)
+    with session_scope(engine) as session:
+        touched = mark_stale_running_as_interrupted(session)
+    if touched:
+        logger.warning(f"[scheduler] 启动时标 interrupted: {touched} 条僵尸 running")
+
+    scheduler = make_scheduler(settings, blocking=True)
+    logger.info(
+        f"[scheduler] daemon 启动:每日 "
+        f"{settings.scheduler.daily_cron_hour:02d}:{settings.scheduler.daily_cron_minute:02d} "
+        f"({settings.app.timezone}) 跑 run_today_pending"
+    )
+    scheduler.start()  # 阻塞

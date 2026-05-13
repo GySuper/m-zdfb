@@ -13,6 +13,7 @@ dependencies = [
     "sqlmodel>=0.0.21",
     "patchright>=1.40.0",
     "lark-oapi>=1.4.0",
+    "apscheduler>=3.10.0",
 ]
 
 [project.optional-dependencies]

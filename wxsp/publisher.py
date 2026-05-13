@@ -27,8 +27,18 @@ from wxsp.errors import (
     VideoInvalid,
     classify,
 )
+from wxsp.feishu import FeishuApiError, make_client, writeback_row
 from wxsp.models import Account, Task, Video
 from wxsp.nas import cleanup_tmp, stage_to_tmp
+from wxsp.notify import NotifyEvent, notify
+
+# error_type → (notify type, level, 中文标题)
+_NOTIFY_BY_ERROR: dict[str, tuple[str, str, str]] = {
+    "cookie_expired": ("cookie_expired", "error", "Cookie 失效,等待扫码"),
+    "risk_control": ("risk_control", "error", "风控触发,账号已暂停 24h"),
+    "element_not_found": ("element_not_found", "warn", "元素未找到 —— 视频号可能改版"),
+    "nas_unreachable": ("nas_unreachable", "error", "NAS 不可达"),
+}
 
 
 class AlreadyClaimed(Exception):
@@ -390,6 +400,7 @@ def publish(
     with Session(engine) as session:
         task, video, account = _load_task_bundle(session, task_id)
         task_publish_at = task.publish_at
+        video_record_id = video.id  # = 飞书 record_id(M7 回写用)
         video_file_path = Path(video.file_path)
         video_title = video.title
         video_description = video.description
@@ -552,3 +563,72 @@ def publish(
                 if account_now is not None:
                     account_now.paused_until = datetime.now() + timedelta(hours=24)
                     logger.warning(f"风控触发,账号 {account_id} 暂停 24h")
+
+            # I4: 失败时派 NotifyEvent(同事务写 Event 表 + 按 notify_on 派外部渠道)
+            #   - dry-run 失败不告警(开发期场景)
+            #   - 5 类映射:cookie_expired / risk_control / element_not_found / nas_unreachable
+            #     其它任何 error_type → 兜底 task_failed
+            if not result.ok and not result.dry_run:
+                error_type = result.error_type or "unknown"
+                notify_type, level, title = _NOTIFY_BY_ERROR.get(
+                    error_type, ("task_failed", "error", f"任务失败 ({error_type})")
+                )
+                notify(
+                    NotifyEvent(
+                        type=notify_type,
+                        level=level,
+                        title=title,
+                        content=result.error_msg or "(无错误信息)",
+                        context={"error_type": error_type, "last_step": last_step},
+                        task_id=task_id,
+                        account_id=account_id,
+                    ),
+                    session=session,
+                    settings=settings,
+                )
+
+        # I5: 终态回写飞书 Bitable(放 session_scope 之外,HTTP 调用不持 DB 事务)。
+        #   dry-run / feishu disabled / write_back_enabled=False 时跳过;API 异常被吞。
+        _writeback_to_feishu(video_record_id, result, settings)
+
+
+def _writeback_to_feishu(
+    record_id: str,
+    result: PublishResult,
+    settings: Settings,
+) -> None:
+    """任务终态回写飞书 Bitable。
+
+    跳过条件:dry-run / feishu disabled / write_back_enabled=False。
+    成功 → 状态=已发布 (+ 已发布链接,如能拿到)。
+    失败 → 状态=失败 + 错误信息。
+    API 异常被吞(只 log),不能让飞书挂掉主流程。
+    """
+    if result.dry_run:
+        return
+    if not settings.feishu.enabled or not settings.feishu.sync.write_back_enabled:
+        return
+
+    fm = settings.feishu.field_map
+    fields: dict[str, str] = {}
+    if result.ok:
+        fields[fm.status] = "已发布"
+        if result.remote_url:
+            fields[fm.remote_url] = result.remote_url
+    else:
+        fields[fm.status] = "失败"
+        fields[fm.error_message] = result.error_msg or "(无错误信息)"
+
+    try:
+        client = make_client(settings.feishu.app_id, settings.feishu.app_secret)
+        writeback_row(
+            client,
+            app_token=settings.feishu.bitable.app_token,
+            table_id=settings.feishu.bitable.table_id,
+            record_id=record_id,
+            fields=fields,
+        )
+    except FeishuApiError as exc:
+        logger.warning(f"[publisher] 飞书回写失败 task={result.task_id} record={record_id}: {exc}")
+    except Exception as exc:
+        logger.exception(f"[publisher] 飞书回写未预料异常 task={result.task_id}: {exc}")

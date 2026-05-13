@@ -312,3 +312,341 @@ def test_publish_dry_run_success_resets_claim_residue(
         assert task_db.lease_expires_at is None
         assert task_db.started_at is None
         assert task_db.finished_at is None
+
+
+# =========== M7: publisher → notify 链路 ===========
+
+
+@pytest.mark.parametrize(
+    ("step_name", "exception_cls", "exception_msg", "expected_notify_type"),
+    [
+        ("verify_logged_in", "CookieExpired", "扫码框出现了", "cookie_expired"),
+        ("risk_control_probe", "RiskControl", "操作过于频繁", "risk_control"),
+        ("upload_video", "UploadFailed", "页面提示上传失败", "task_failed"),
+    ],
+)
+def test_publish_failure_writes_event_with_mapped_notify_type(
+    pending_task: tuple[int, Path],
+    step_name: str,
+    exception_cls: str,
+    exception_msg: str,
+    expected_notify_type: str,
+) -> None:
+    """失败时按 error_type 映射写 Event(M7):cookie/risk/upload 三种代表场景。"""
+    from wxsp import errors as err_mod
+    from wxsp.models import Event
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+
+    exc_cls = getattr(err_mod, exception_cls)
+
+    def raise_it(*_a, **_kw):
+        raise exc_cls(exception_msg)
+
+    overrides = _noop_steps(**{step_name: raise_it})
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is False
+
+    engine = get_engine()
+    with Session(engine) as session:
+        rows = list(session.exec(select(Event)).all())
+        assert len(rows) == 1, f"应有 1 行 Event, 实有 {len(rows)}"
+        ev = rows[0]
+        assert ev.type == expected_notify_type
+        assert ev.task_id == task_id
+        assert ev.account_id == "a"
+        # error_type 和 last_step 进 context_json
+        ctx_json = ev.context_json
+        assert "error_type" in ctx_json
+        assert "last_step" in ctx_json
+
+
+def test_publish_success_does_not_write_notify_event(
+    pending_task: tuple[int, Path],
+) -> None:
+    """成功路径不发任何告警,Event 表为空(M7 设计:成功不刷屏)。"""
+    from wxsp.models import Event
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+
+    overrides = _noop_steps()
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is True
+
+    engine = get_engine()
+    with Session(engine) as session:
+        rows = list(session.exec(select(Event)).all())
+        assert rows == []
+
+
+def test_publish_dry_run_failure_skips_notify_event(
+    pending_task: tuple[int, Path],
+) -> None:
+    """dry-run 期间步骤抛错也算 failure,但 dry-run 是开发场景,不告警。"""
+    from wxsp.errors import UploadFailed
+    from wxsp.models import Event
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+
+    def raise_upload(*_a, **_kw):
+        raise UploadFailed("dev failure")
+
+    overrides = _noop_steps(upload_video=raise_upload)
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=True, settings=settings)
+
+    assert result.ok is False  # dry-run 也算失败
+
+    engine = get_engine()
+    with Session(engine) as session:
+        rows = list(session.exec(select(Event)).all())
+        assert rows == []  # dry-run 不告警
+
+
+# =========== M7: publisher → 飞书回写链路 ===========
+
+
+def _enable_feishu_writeback(settings) -> None:
+    settings.feishu.enabled = True
+    settings.feishu.app_id = "cli_test"
+    settings.feishu.app_secret = "test_secret"
+    settings.feishu.bitable.app_token = "appT"
+    settings.feishu.bitable.table_id = "tblT"
+    settings.feishu.sync.write_back_enabled = True
+
+
+def test_publish_success_writes_back_status_and_url_to_feishu(
+    pending_task: tuple[int, Path],
+) -> None:
+    """成功 → 飞书回写 状态=已发布 + 已发布链接(remote_url 有值时)。"""
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    _enable_feishu_writeback(settings)
+
+    captured: dict[str, object] = {}
+
+    def fake_writeback(client, *, app_token, table_id, record_id, fields):
+        captured["record_id"] = record_id
+        captured["fields"] = fields
+
+    overrides = _noop_steps(
+        extract_remote_video_id_and_url=lambda page: ("vid123", "https://channels/x/vid123")
+    )
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch("wxsp.publisher.make_client", return_value=MagicMock()),
+        patch("wxsp.publisher.writeback_row", side_effect=fake_writeback),
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is True
+    assert captured["record_id"] == "v1"  # = video.id
+    fields = captured["fields"]
+    assert fields == {"状态": "已发布", "已发布链接": "https://channels/x/vid123"}
+
+
+def test_publish_success_without_remote_url_writes_back_status_only(
+    pending_task: tuple[int, Path],
+) -> None:
+    """定时任务到点前拿不到 remote_url → 只回写 状态=已发布,不写空链接。"""
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    _enable_feishu_writeback(settings)
+
+    captured: dict[str, object] = {}
+
+    def fake_writeback(client, *, app_token, table_id, record_id, fields):
+        captured["fields"] = fields
+
+    overrides = _noop_steps()  # extract 默认返回 (None, None)
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch("wxsp.publisher.make_client", return_value=MagicMock()),
+        patch("wxsp.publisher.writeback_row", side_effect=fake_writeback),
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is True
+    assert captured["fields"] == {"状态": "已发布"}
+
+
+def test_publish_failure_writes_back_status_failed_with_error_message(
+    pending_task: tuple[int, Path],
+) -> None:
+    """失败 → 飞书回写 状态=失败 + 错误信息。"""
+    from wxsp.errors import CookieExpired
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    _enable_feishu_writeback(settings)
+
+    captured: dict[str, object] = {}
+
+    def fake_writeback(client, *, app_token, table_id, record_id, fields):
+        captured["fields"] = fields
+
+    def raise_cookie(*_a, **_kw):
+        raise CookieExpired("二维码出现")
+
+    overrides = _noop_steps(verify_logged_in=raise_cookie)
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch("wxsp.publisher.make_client", return_value=MagicMock()),
+        patch("wxsp.publisher.writeback_row", side_effect=fake_writeback),
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is False
+    fields = captured["fields"]
+    assert fields["状态"] == "失败"
+    assert "step=login" in fields["错误信息"]
+    assert "二维码" in fields["错误信息"]
+
+
+def test_publish_dry_run_skips_feishu_writeback(
+    pending_task: tuple[int, Path],
+) -> None:
+    """dry-run 不真发,不回写飞书(避免污染 Bitable 状态)。"""
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    _enable_feishu_writeback(settings)
+
+    overrides = _noop_steps()
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch("wxsp.publisher.make_client", return_value=MagicMock()) as mc,
+        patch("wxsp.publisher.writeback_row") as wb,
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=True, settings=settings)
+
+    assert result.ok is True
+    mc.assert_not_called()
+    wb.assert_not_called()
+
+
+def test_publish_feishu_disabled_skips_writeback(
+    pending_task: tuple[int, Path],
+) -> None:
+    """feishu.enabled=False → 不构造 client,不回写。"""
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    # 默认 enabled=False;留作 sanity check
+    assert settings.feishu.enabled is False
+
+    overrides = _noop_steps()
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch("wxsp.publisher.make_client") as mc,
+        patch("wxsp.publisher.writeback_row") as wb,
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is True
+    mc.assert_not_called()
+    wb.assert_not_called()
+
+
+def test_publish_write_back_disabled_skips_writeback(
+    pending_task: tuple[int, Path],
+) -> None:
+    """feishu.sync.write_back_enabled=False → 不回写(企业内允许只读模式)。"""
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    _enable_feishu_writeback(settings)
+    settings.feishu.sync.write_back_enabled = False
+
+    overrides = _noop_steps()
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch("wxsp.publisher.make_client") as mc,
+        patch("wxsp.publisher.writeback_row") as wb,
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is True
+    mc.assert_not_called()
+    wb.assert_not_called()
+
+
+def test_publish_writeback_feishu_api_error_does_not_propagate(
+    pending_task: tuple[int, Path],
+) -> None:
+    """飞书 API 持续失败 → 不影响 publish() 返回 ok=True(回写是次要副作用)。"""
+    from wxsp.feishu import FeishuApiError
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    _enable_feishu_writeback(settings)
+
+    overrides = _noop_steps()
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch("wxsp.publisher.make_client", return_value=MagicMock()),
+        patch("wxsp.publisher.writeback_row", side_effect=FeishuApiError("API 持续失败")),
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is True  # 主流程成功

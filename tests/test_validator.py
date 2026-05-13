@@ -520,3 +520,21 @@ def test_validate_happy_path(tmp_path: Path) -> None:
     assert result.cover_path is None
     assert result.execute_date == date(2026, 5, 13)
     assert result.publish_at == datetime(2026, 5, 13, 14, 0)  # naive 上海时间
+
+
+def test_validate_video_file_auto_appends_mp4(tmp_path: Path) -> None:
+    """运营只填 'test' 不带扩展名 → 工具自动按 'test.mp4' 找。"""
+    video = tmp_path / "test.mp4"
+    video.write_bytes(b"x")
+    row = _row_with(tmp_path, **{"视频文件": "test"})
+    nas = _StubNas()
+    nas.video_returns["test.mp4"] = video
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    # 不关心整体 ok(时间 rules 与 happy_row 默认值的交互),只关心视频字段不报错
+    assert all(e.field != "视频文件" for e in result.errors), result.errors

@@ -250,3 +250,114 @@ def test_validate_account_not_in_active_set(tmp_path: Path) -> None:
     )
     assert result.ok is False
     assert any(e.field == "账号" and "account_unknown" in e.message for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# Task 8: video_file / cover file rules
+# ---------------------------------------------------------------------------
+
+
+def test_validate_video_file_not_found(tmp_path: Path) -> None:
+    row = _row_with(tmp_path, 标题="字" * 16, **{"视频文件": "missing.mp4"})
+    nas = _StubNas()  # 不预置 video_returns → 抛 FileNotFoundError
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    assert result.ok is False
+    assert any(e.field == "视频文件" and "未在" in e.message for e in result.errors)
+
+
+def test_validate_video_file_wrong_extension(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.avi"
+    bad.write_bytes(b"x")
+    row = _row_with(tmp_path, 标题="字" * 16, **{"视频文件": "bad.avi"})
+    nas = _StubNas()
+    nas.video_returns["bad.avi"] = bad
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    assert result.ok is False
+    assert any(e.field == "视频文件" and ".avi" in e.message for e in result.errors)
+
+
+def test_validate_video_extension_case_insensitive(tmp_path: Path) -> None:
+    upper = tmp_path / "x.MP4"
+    upper.write_bytes(b"x")
+    row = _row_with(tmp_path, 标题="字" * 16, **{"视频文件": "x.MP4"})
+    nas = _StubNas()
+    nas.video_returns["x.MP4"] = upper
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    # 不关心整体 ok(时间 rules 还没做);只关心视频文件这一项不报错
+    assert all(e.field != "视频文件" for e in result.errors), result.errors
+
+
+def test_validate_video_too_large(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    big = tmp_path / "big.mp4"
+    big.write_bytes(b"x")
+
+    class _FakeStat:
+        st_size = 5 * 1024**3
+        st_mtime = 1.0
+
+    monkeypatch.setattr(Path, "stat", lambda self, **kwargs: _FakeStat())
+
+    row = _row_with(tmp_path, 标题="字" * 16, **{"视频文件": "big.mp4"})
+    nas = _StubNas()
+    nas.video_returns["big.mp4"] = big
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    assert result.ok is False
+    assert any(e.field == "视频文件" and "GiB" in e.message for e in result.errors)
+
+
+def test_validate_cover_missing(tmp_path: Path) -> None:
+    video = tmp_path / "国庆01.mp4"
+    video.write_bytes(b"x")
+    row = _row_with(tmp_path, 标题="字" * 16, **{"封面文件": "missing.jpg"})
+    nas = _StubNas()
+    nas.video_returns["国庆01.mp4"] = video
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    assert result.ok is False
+    assert any(e.field == "封面文件" and "missing.jpg" in e.message for e in result.errors)
+
+
+def test_validate_cover_empty_is_ok(tmp_path: Path) -> None:
+    video = tmp_path / "国庆01.mp4"
+    video.write_bytes(b"x")
+    row = _row_with(tmp_path, 标题="字" * 16, **{"封面文件": ""})
+    nas = _StubNas()
+    nas.video_returns["国庆01.mp4"] = video
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_account_ids={"account_a"},
+    )
+    # 封面字段不应该报错
+    assert all(e.field != "封面文件" for e in result.errors), result.errors

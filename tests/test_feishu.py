@@ -203,3 +203,75 @@ def test_fetch_pending_rows_raises_on_api_error_response(
             table_id="t",
             status_field="状态",
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 5: writeback_row
+# ---------------------------------------------------------------------------
+
+from wxsp.feishu import writeback_row  # noqa: E402
+
+
+class _FakeClientForUpdate:
+    def __init__(self, responses: list[_FakeResponse | Exception]) -> None:
+        self._responses = list(responses)
+        self.update_calls: list[Any] = []
+        self.bitable = self
+        self.v1 = self
+        self.app_table_record = self
+
+    def update(self, request: Any) -> _FakeResponse:
+        self.update_calls.append(request)
+        nxt = self._responses.pop(0)
+        if isinstance(nxt, Exception):
+            raise nxt
+        return nxt
+
+
+def test_writeback_row_single_success() -> None:
+    fake = _FakeClientForUpdate(
+        [
+            _FakeResponse(items=[], has_more=False),
+        ]
+    )
+    writeback_row(
+        fake,
+        app_token="t",
+        table_id="t",
+        record_id="rec1",
+        fields={"状态": "失败", "错误信息": "标题: 12 字"},
+    )
+    assert len(fake.update_calls) == 1
+
+
+def test_writeback_row_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("wxsp.feishu.time.sleep", lambda s: None)
+
+    fake = _FakeClientForUpdate(
+        [
+            RuntimeError("transient"),
+            _FakeResponse(items=[], has_more=False),
+        ]
+    )
+    writeback_row(
+        fake,
+        app_token="t",
+        table_id="t",
+        record_id="rec1",
+        fields={"状态": "已计划"},
+    )
+    assert len(fake.update_calls) == 2
+
+
+def test_writeback_row_raises_after_3_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("wxsp.feishu.time.sleep", lambda s: None)
+
+    fake = _FakeClientForUpdate([RuntimeError("f1"), RuntimeError("f2"), RuntimeError("f3")])
+    with pytest.raises(FeishuApiError):
+        writeback_row(
+            fake,
+            app_token="t",
+            table_id="t",
+            record_id="rec1",
+            fields={"状态": "失败"},
+        )

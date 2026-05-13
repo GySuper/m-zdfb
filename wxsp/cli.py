@@ -16,7 +16,7 @@ from sqlmodel import Session, select
 from wxsp.browser import check_cookie
 from wxsp.config import Settings, load_settings
 from wxsp.db import get_engine, init_db, session_scope
-from wxsp.doctor import record_cookie_check, refresh_cookie_status
+from wxsp.doctor import check_nas, record_cookie_check, refresh_cookie_status
 from wxsp.feishu import FeishuApiError, fetch_pending_rows, make_client, writeback_row
 from wxsp.models import Account, Task, Video
 from wxsp.nas import find_cover, find_video
@@ -160,24 +160,43 @@ def accounts_resume(account_id: str = typer.Argument(..., help="账号 ID")) -> 
 
 @app.command("doctor")
 def doctor() -> None:
-    """健康检查:账号 / Cookie(M2)。NAS / 飞书 API 在 M3-M4 接入。"""
+    """健康检查:账号 / Cookie + NAS(M2 cookie,M4 NAS)。"""
 
     # cookie_checker 注入点:生产用 wxsp.browser.check_cookie(打开浏览器);测试可 monkeypatch
     def cookie_checker(user_data_dir: Path) -> bool:
         return check_cookie(user_data_dir, timeout_ms=15_000)
 
+    cookie_failed = False
+
     with _open_session() as session:
-        # 先看有没有账号 —— 没有就给提示退出,不让 refresh_cookie_status 跑空循环
+        # 先看有没有账号 —— 没有就提示,但不 return,继续跑 NAS section
         if not session.exec(select(Account)).first():
             typer.echo("[wxsp] 无账号。先 `wxsp accounts add`,再 `wxsp login <id>` 扫码。")
-            return
+        else:
+            rows = refresh_cookie_status(session, cookie_checker=cookie_checker)
+            typer.echo(f"{'ID':<14} {'Cookie':<10} {'最后活跃':<20}")
+            for row in rows:
+                last_active = (
+                    row.last_active_at.strftime("%Y-%m-%d %H:%M") if row.last_active_at else "-"
+                )
+                typer.echo(f"{row.account_id:<14} {row.status:<10} {last_active:<20}")
+                if row.status != "ok":
+                    cookie_failed = True
 
-        rows = refresh_cookie_status(session, cookie_checker=cookie_checker)
+    # NAS section
+    typer.echo("")  # 空行分隔
+    typer.echo("NAS:")
+    settings = load_settings()
+    nas_rows = check_nas(settings)
+    nas_failed = False
+    for nas_row in nas_rows:
+        mark = "✅" if nas_row.ok else "❌"
+        typer.echo(f"  {mark} {nas_row.label:<20} {nas_row.detail}")
+        if not nas_row.ok:
+            nas_failed = True
 
-    typer.echo(f"{'ID':<14} {'Cookie':<10} {'最后活跃':<20}")
-    for row in rows:
-        last_active = row.last_active_at.strftime("%Y-%m-%d %H:%M") if row.last_active_at else "-"
-        typer.echo(f"{row.account_id:<14} {row.status:<10} {last_active:<20}")
+    if cookie_failed or nas_failed:
+        raise typer.Exit(code=1)
 
 
 class _NasFinderImpl:

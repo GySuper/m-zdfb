@@ -42,12 +42,13 @@ if (-not (Test-Path $DistDir)) {
 }
 
 Write-Host "==> 内嵌 patchright chromium 到 _internal/chromium/"
+# patchright/playwright 默认装到 %LOCALAPPDATA%\ms-playwright
 $ChromiumSrc = uv run python -c "
-import patchright, os
-d = os.path.join(os.path.dirname(patchright.__file__), 'driver')
-c = [x for x in os.listdir(d) if x.startswith('chromium')]
-assert c, 'no chromium'
-print(os.path.join(d, c[0]))
+import os, glob
+root = os.environ.get('PLAYWRIGHT_BROWSERS_PATH') or os.path.expandvars(r'%LOCALAPPDATA%\ms-playwright')
+c = sorted(glob.glob(os.path.join(root, 'chromium-*')))
+assert c, f'no chromium-* in {root}'
+print(c[-1])
 "
 Write-Host "    chromium 源: $ChromiumSrc"
 $ChromiumDst = "$DistDir/_internal/chromium"

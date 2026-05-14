@@ -53,12 +53,14 @@ if [ ! -d "$APP_PATH" ]; then
 fi
 
 echo "==> 内嵌 patchright chromium 到 _internal/chromium/"
+# patchright/playwright 把 chromium 装在 PLAYWRIGHT_BROWSERS_PATH 指定的目录
+# (默认 mac: ~/Library/Caches/ms-playwright,win: %LOCALAPPDATA%\ms-playwright)
 CHROMIUM_SRC="$(uv run python -c "
-import patchright, os
-driver = os.path.join(os.path.dirname(patchright.__file__), 'driver')
-candidates = [d for d in os.listdir(driver) if d.startswith('chromium')]
-assert candidates, f'未在 {driver} 找到 chromium 目录'
-print(os.path.join(driver, candidates[0]))
+import os, glob
+root = os.environ.get('PLAYWRIGHT_BROWSERS_PATH') or os.path.expanduser('~/Library/Caches/ms-playwright')
+candidates = sorted(glob.glob(os.path.join(root, 'chromium-*')))
+assert candidates, f'未在 {root} 找到 chromium-* 目录;先跑 uv run patchright install chromium'
+print(candidates[-1])
 ")"
 echo "    chromium 源: $CHROMIUM_SRC"
 # PyInstaller .app 在 mac 下:bundle/Contents/Frameworks/ = _MEIPASS

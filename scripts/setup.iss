@@ -26,7 +26,8 @@ WizardStyle=modern
 ; SetupIconFile=..\assets\icon.ico  ; M11: assets/icon.ico 是空占位,真图标后补
 
 [Languages]
-Name: "chinese"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; choco 装的 Inno Setup 6 默认只带 Default.isl(英文),中文翻译要单独下;
+; 内部分发,装一次就行,先简单用英文界面。
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]

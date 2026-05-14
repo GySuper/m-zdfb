@@ -14,11 +14,13 @@ echo "==> 清理旧产物"
 rm -rf dist build
 
 echo "==> Nuitka 编译"
-# --lto=no: 关 LTO,链接快 5-10 倍,代价是产物体积大些(0.1.0 不在乎)
-# --jobs=2: 限制并行 clang 进程数,避免 GHA 14GB runner 内存爆掉
-# --show-scons: 让 clang 输出可见,卡住时能定位
+# --follow-import-to=wxsp: 只把 wxsp 自己的代码编译成 C/机器码,第三方依赖(lark-oapi/
+# fastapi/sqlmodel 等)以 .pyc 字节码方式打包。第三方库本就开源,无需保护;砍掉它们的
+# C 编译能把 Nuitka 阶段从 ~60 min 缩到 ~5-10 min。
+# --lto=no / --jobs=2 / --show-scons: 关 LTO、限并行避免 14GB runner 爆内存、显示进度
 uv run python -m nuitka \
   --standalone \
+  --follow-import-to=wxsp \
   --lto=no \
   --jobs=2 \
   --show-scons \

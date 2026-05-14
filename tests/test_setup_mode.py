@@ -34,9 +34,10 @@ def test_accounts_redirects_to_setup_when_no_config(app_in_setup_mode):
 
 def test_setup_route_not_redirected(app_in_setup_mode):
     """/setup/* 本身不应该被重定向(否则死循环)。"""
-    client = TestClient(app_in_setup_mode, follow_redirects=False)
+    # raise_server_exceptions=False:模板还没建时 /setup/step/1 返 500,不抛异常
+    client = TestClient(app_in_setup_mode, follow_redirects=False, raise_server_exceptions=False)
     resp = client.get("/setup/step/1")
-    # 此时 routes_setup 还没接入,200 / 404 都可以,但不应是 302 自指
+    # 200 / 404 / 500 都可以,但不应是 302 自指
     assert resp.headers.get("location") != "/setup/step/1"
 
 

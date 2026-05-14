@@ -16,6 +16,7 @@ from wxsp.api.routes_config import router as config_router
 from wxsp.api.routes_dashboard import router as dashboard_router
 from wxsp.api.routes_logs import router as logs_router
 from wxsp.api.routes_plans import router as plans_router
+from wxsp.api.routes_setup import router as setup_router
 from wxsp.api.routes_tasks import router as tasks_router
 from wxsp.config import get_config_path
 
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
             return RedirectResponse(url="/setup/step/1", status_code=302)
         return await call_next(request)
 
+    app.include_router(setup_router)
     app.include_router(dashboard_router)
     app.include_router(accounts_router)
     app.include_router(tasks_router)

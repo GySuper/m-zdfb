@@ -130,27 +130,58 @@ def test_stage_to_tmp_preserves_filename_with_spaces_and_unicode(tmp_path: Path)
 # ============== stage_to_tmp 错误翻译 ==============
 
 
-def test_stage_to_tmp_translates_oserror_to_nas_unreachable(
+def test_stage_to_tmp_falls_back_to_copy_when_symlink_lacks_privilege(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """模拟 NAS 抖动:symlink_to 抛 PermissionError → 翻译为 NasUnreachable。"""
+    """Windows 默认账户没 symlink 权限会抛 OSError(WinError 1314);
+    必须 fallback 到 copy,产物是普通文件而不是 symlink。"""
+    from wxsp.nas import stage_to_tmp
+
+    src = tmp_path / "videos" / "v.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"real bytes")
+
+    def winerr_1314(self: Path, target: Path | str, target_is_directory: bool = False) -> None:
+        # 模拟 Windows 报错: A required privilege is not held by the client
+        raise OSError(1314, "A required privilege is not held by the client")
+
+    monkeypatch.setattr(Path, "symlink_to", winerr_1314)
+
+    out = stage_to_tmp(src, task_id=42, tmp_root=tmp_path / "tmp")
+
+    assert out == tmp_path / "tmp" / "42" / "v.mp4"
+    assert not out.is_symlink()  # 走的是 copy 兜底
+    assert out.is_file()
+    assert out.read_bytes() == b"real bytes"
+
+
+def test_stage_to_tmp_raises_nas_unreachable_when_both_symlink_and_copy_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """symlink 失败 + copy 也失败(真 NAS 不可达)→ 翻译为 NasUnreachable。"""
+    import shutil as _shutil
+
     from wxsp.errors import NasUnreachable
     from wxsp.nas import stage_to_tmp
 
     src = tmp_path / "src.mp4"
     src.write_bytes(b"x")
 
-    def boom(self: Path, target: Path | str, target_is_directory: bool = False) -> None:
-        raise PermissionError("simulated NAS permission error")
+    def symlink_boom(self: Path, target: Path | str, target_is_directory: bool = False) -> None:
+        raise PermissionError("symlink not allowed")
 
-    monkeypatch.setattr(Path, "symlink_to", boom)
+    def copy_boom(src_p: object, dst_p: object, *args: object, **kwargs: object) -> str:
+        raise OSError("NAS unreachable during copy")
+
+    monkeypatch.setattr(Path, "symlink_to", symlink_boom)
+    monkeypatch.setattr(_shutil, "copy2", copy_boom)
 
     with pytest.raises(NasUnreachable) as exc_info:
         stage_to_tmp(src, task_id=99, tmp_root=tmp_path / "tmp")
 
-    # 原始 OSError 通过 __cause__ 保留
-    assert isinstance(exc_info.value.__cause__, PermissionError)
-    assert "simulated NAS permission error" in str(exc_info.value.__cause__)
+    # __cause__ 保留 copy 的失败(最终决定性失败),便于排查
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert "NAS unreachable during copy" in str(exc_info.value.__cause__)
 
 
 def test_stage_to_tmp_translates_mkdir_oserror_to_nas_unreachable(

@@ -5,6 +5,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from loguru import logger
+
 from wxsp.errors import NasUnreachable
 
 
@@ -29,23 +31,42 @@ def find_cover(filename: str, *, search_root: Path) -> Path:
 
 
 def stage_to_tmp(src: Path, *, task_id: int, tmp_root: Path) -> Path:
-    """在 tmp_root/{task_id}/ 下建 symlink 指向 src,返回 symlink 路径。
+    """在 tmp_root/{task_id}/ 下暂存 src(优先 symlink,失败 fallback 到 copy)。
 
     - tmp_root/{task_id}/ 不存在则自动 mkdir(parents=True, exist_ok=True)
-    - symlink 名等于 src.name(保留原文件名,便于 debug)
-    - 已存在同名 symlink/文件 → 先 unlink 再 symlink_to(覆盖式;同 task_id 重跑安全)
-    - 任意 OSError → NasUnreachable(M5 retry 装饰器统一处理)
+    - 暂存文件名等于 src.name(保留原文件名,便于 debug)
+    - 已存在同名 symlink/文件 → 先 unlink 再写(覆盖式;同 task_id 重跑安全)
+    - 优先 symlink_to;Windows 默认账户没 SeCreateSymbolicLinkPrivilege 会抛 OSError
+      → fallback 到 shutil.copy2;log 一条 warn 提示用户考虑开发者模式
+    - 连 copy 都失败(真 NAS 抖动)→ NasUnreachable,M5 retry 装饰器统一处理
     """
+    stage_dir = tmp_root / str(task_id)
     try:
-        stage_dir = tmp_root / str(task_id)
         stage_dir.mkdir(parents=True, exist_ok=True)
-        link_path = stage_dir / src.name
-        if link_path.is_symlink() or link_path.exists():
-            link_path.unlink()
-        link_path.symlink_to(src)
-        return link_path
     except OSError as exc:
         raise NasUnreachable(f"stage_to_tmp 失败 src={src!s} task_id={task_id}: {exc}") from exc
+
+    out_path = stage_dir / src.name
+    if out_path.is_symlink() or out_path.exists():
+        out_path.unlink()
+
+    try:
+        out_path.symlink_to(src)
+        return out_path
+    except OSError as symlink_exc:
+        # Windows 上无权限 (WinError 1314) 是最常见原因;不区分细分类,统一兜底
+        logger.warning(
+            f"[nas] symlink 失败,fallback 到 copy(src={src.name} task_id={task_id}): "
+            f"{symlink_exc}"
+        )
+        try:
+            shutil.copy2(src, out_path)
+            return out_path
+        except OSError as copy_exc:
+            raise NasUnreachable(
+                f"stage_to_tmp 失败(symlink + copy 都失败) src={src!s} task_id={task_id}: "
+                f"{copy_exc}"
+            ) from copy_exc
 
 
 def cleanup_tmp(*, task_id: int, tmp_root: Path) -> None:

@@ -323,6 +323,35 @@ def run(
         return
 
     if daemon:
+        from wxsp.config import is_packaged
+
+        if is_packaged():
+            import threading
+
+            import uvicorn
+
+            def _serve_web() -> None:
+                uvicorn.run(
+                    "wxsp.api.app:app",
+                    host=settings.webui.host,
+                    port=settings.webui.port,
+                    log_level="info",
+                )
+
+            threading.Thread(target=_serve_web, daemon=True, name="web-ui").start()
+            if settings.webui.open_browser_on_start:
+                import time
+                import webbrowser
+
+                def _open() -> None:
+                    time.sleep(1.0)
+                    try:
+                        webbrowser.open(f"http://{settings.webui.host}:{settings.webui.port}/")
+                    except Exception:
+                        pass
+
+                threading.Thread(target=_open, daemon=True, name="open-browser").start()
+
         typer.echo("[wxsp] 启动 daemon(按 Ctrl-C 退出)...")
         try:
             start_daemon(settings)

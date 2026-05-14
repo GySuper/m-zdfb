@@ -116,3 +116,70 @@ def test_run_no_flag_exits_two(tmp_path, monkeypatch):
         result = CliRunner().invoke(app, ["run"])
     assert result.exit_code == 2
     assert "--task-id" in result.stdout or "--today" in result.stdout
+
+
+def test_run_daemon_in_packaged_mode_starts_web(monkeypatch) -> None:
+    """打包模式下 `wxsp run --daemon` 应该额外开一个 uvicorn 线程。"""
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    from typer.testing import CliRunner
+
+    main_module = sys.modules["__main__"]
+    started_threads: list[str] = []
+
+    real_thread = __import__("threading").Thread
+
+    def fake_thread(*args, **kwargs):
+        started_threads.append(kwargs.get("name", "unnamed"))
+        t = real_thread(*args, **kwargs)
+        return t
+
+    monkeypatch.setattr("threading.Thread", fake_thread)
+    monkeypatch.setattr("wxsp.cli.start_daemon", lambda s: None)
+    monkeypatch.setattr(
+        "wxsp.cli.load_settings",
+        lambda: MagicMock(
+            webui=MagicMock(host="127.0.0.1", port=8765, open_browser_on_start=False),
+        ),
+    )
+
+    with patch.object(main_module, "__compiled__", True, create=True):
+        monkeypatch.delenv("WXSP_DEV_MODE", raising=False)
+        from wxsp.cli import app as cli_app
+
+        runner = CliRunner()
+        result = runner.invoke(cli_app, ["run", "--daemon"])
+        assert result.exit_code == 0
+        assert "web-ui" in started_threads
+
+
+def test_run_daemon_in_dev_mode_does_not_start_web(monkeypatch) -> None:
+    """开发模式下 `wxsp run --daemon` 不应该开 uvicorn 线程。"""
+    from unittest.mock import MagicMock
+
+    from typer.testing import CliRunner
+
+    started_threads: list[str] = []
+    real_thread = __import__("threading").Thread
+
+    def fake_thread(*args, **kwargs):
+        started_threads.append(kwargs.get("name", "unnamed"))
+        return real_thread(*args, **kwargs)
+
+    monkeypatch.setattr("threading.Thread", fake_thread)
+    monkeypatch.setattr("wxsp.cli.start_daemon", lambda s: None)
+    monkeypatch.setattr(
+        "wxsp.cli.load_settings",
+        lambda: MagicMock(
+            webui=MagicMock(host="127.0.0.1", port=8765, open_browser_on_start=True),
+        ),
+    )
+    monkeypatch.delenv("WXSP_DEV_MODE", raising=False)
+
+    from wxsp.cli import app as cli_app
+
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["run", "--daemon"])
+    assert result.exit_code == 0
+    assert "web-ui" not in started_threads

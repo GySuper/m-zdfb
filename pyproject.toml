@@ -70,3 +70,8 @@ python_files = ["test_*.py"]
 markers = [
   "integration: real browser + real account; run manually, skip in CI",
 ]
+
+[dependency-groups]
+dev = [
+    "nuitka>=4.1",
+]

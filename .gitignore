@@ -21,6 +21,10 @@ logs/
 _ref/
 ../_ref/
 
+# Build artifacts
+dist/
+build/
+
 # Editor
 .idea/
 .vscode/

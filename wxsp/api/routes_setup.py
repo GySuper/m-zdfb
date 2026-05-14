@@ -244,10 +244,12 @@ def complete(request: Request, enable_autostart: str = Form("")) -> RedirectResp
     if enable_autostart == "on":
         try:
             autostart.enable_autostart()
-        except autostart.AutostartError as exc:
+        except Exception as exc:
+            # 开机自启失败不应阻断向导完成(config.yaml 已写,主功能可用)。
+            # 捕获所有异常(不只是 AutostartError):防 FileNotFoundError 等漏出 500。
             from loguru import logger
 
-            logger.warning(f"开机自启注册失败: {exc}")
+            logger.warning(f"开机自启注册失败(向导继续): {exc}")
 
     request.app.state.wizard_data = {}
     return RedirectResponse(url="/accounts", status_code=302)

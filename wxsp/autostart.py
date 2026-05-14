@@ -16,12 +16,107 @@ from pathlib import Path
 
 from wxsp.config import get_user_data_dir
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_PLIST_TEMPLATE_PATH = _REPO_ROOT / "deploy" / "wxsp.plist.tmpl"
-_XML_TEMPLATE_PATH = _REPO_ROOT / "deploy" / "wxsp-task.xml.tmpl"
-
 _TASK_NAME = "wxsp-daemon"
 _LAUNCH_LABEL = "com.wxsp.daemon"
+
+# 模板内联为字符串常量,避免 PyInstaller 打包时丢失 deploy/*.tmpl 文件导致运行时
+# FileNotFoundError。deploy/ 目录下的 .tmpl 文件保留作为人类可读参考。
+_PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.wxsp.daemon</string>
+
+    <key>WorkingDirectory</key>
+    <string>__INSTALL_DIR__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__WXSP_BIN__</string>
+        <string>run</string>
+        <string>--daemon</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>__INSTALL_DIR__/logs/launchd.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__INSTALL_DIR__/logs/launchd.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>LANG</key>
+        <string>zh_CN.UTF-8</string>
+    </dict>
+</dict>
+</plist>
+"""
+
+_XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>wxsp 微信视频号自动发布 daemon</Description>
+    <URI>\\wxsp-daemon</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>__USERNAME__</UserId>
+      <Delay>PT30S</Delay>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>__USERNAME__</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>__WXSP_BIN__</Command>
+      <Arguments>run --daemon</Arguments>
+      <WorkingDirectory>__INSTALL_DIR__</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"""
 
 
 class AutostartError(RuntimeError):
@@ -43,14 +138,14 @@ def _launch_agent_path() -> Path:
 
 
 def _render_macos_plist(*, install_dir: Path, wxsp_bin: Path) -> str:
-    tpl = _PLIST_TEMPLATE_PATH.read_text(encoding="utf-8")
-    return tpl.replace("__INSTALL_DIR__", str(install_dir)).replace("__WXSP_BIN__", str(wxsp_bin))
+    return _PLIST_TEMPLATE.replace("__INSTALL_DIR__", str(install_dir)).replace(
+        "__WXSP_BIN__", str(wxsp_bin)
+    )
 
 
 def _render_windows_xml(*, install_dir: Path, wxsp_bin: Path, username: str) -> str:
-    tpl = _XML_TEMPLATE_PATH.read_text(encoding="utf-8")
     return (
-        tpl.replace("__INSTALL_DIR__", str(install_dir))
+        _XML_TEMPLATE.replace("__INSTALL_DIR__", str(install_dir))
         .replace("__WXSP_BIN__", str(wxsp_bin))
         .replace("__USERNAME__", username)
     )

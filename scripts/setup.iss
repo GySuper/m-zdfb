@@ -23,7 +23,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
 WizardStyle=modern
-SetupIconFile=..\assets\icon.ico
+; SetupIconFile=..\assets\icon.ico  ; M11: assets/icon.ico 是空占位,真图标后补
 
 [Languages]
 Name: "chinese"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"

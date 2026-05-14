@@ -1,0 +1,28 @@
+{% extends "setup/base.html" %}
+{% block content %}
+<h1>NAS 挂载路径</h1>
+<p>填视频和封面文件的存储根目录,工具会在这下面按账号检索文件。</p>
+
+<form method="post" action="/setup/step/3" id="nas-form">
+  <div class="form-row">
+    <label>NAS Root</label>
+    <input type="text" name="nas_root" required
+      placeholder="/Volumes/NAS/wxsp 或 Z:/wxsp"
+      value="{{ data.nas.nas_root if data and data.nas else '' }}"
+      hx-post="/setup/probe-path"
+      hx-trigger="blur, keyup changed delay:600ms"
+      hx-vals='js:{path: event.target.value}'
+      hx-target="#path-probe"
+      hx-swap="innerHTML">
+    <div class="hint">
+      mac 示例: <code>/Volumes/NAS/wxsp</code><br>
+      win 示例: <code>Z:/wxsp</code> 或 UNC <code>\\server\share\wxsp</code>
+    </div>
+    <div id="path-probe" style="margin-top: 8px;"></div>
+  </div>
+  <div class="actions">
+    <a href="/setup/step/2"><button type="button">← 上一步</button></a>
+    <button type="submit" class="primary">下一步:账号 →</button>
+  </div>
+</form>
+{% endblock %}

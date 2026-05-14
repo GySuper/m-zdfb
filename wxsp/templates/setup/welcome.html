@@ -1,0 +1,27 @@
+{% extends "setup/base.html" %}
+{% block content %}
+<h1>欢迎使用 wxsp</h1>
+<p>这是首次设置向导,大约 3 分钟,引导你配置飞书、NAS、账号、告警。</p>
+
+<h2 style="font-size: 16px; margin-top: 24px;">环境自检</h2>
+<table>
+  {% for c in self_check %}
+  <tr>
+    <td style="width: 30px;">{% if c.ok %}<span class="check-ok">✓</span>{% else %}<span class="check-fail">✗</span>{% endif %}</td>
+    <td style="width: 180px;">{{ c.name }}</td>
+    <td style="color: #777;">{{ c.detail }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<p class="step-label" style="margin-top: 20px;">配置和数据将写入: <code>{{ data_dir }}</code></p>
+
+<form method="get" action="/setup/step/2">
+  <div class="actions">
+    <button type="submit" class="primary"
+      {% if self_check|selectattr('ok', 'equalto', false)|list %}disabled{% endif %}>
+      下一步:飞书配置 →
+    </button>
+  </div>
+</form>
+{% endblock %}

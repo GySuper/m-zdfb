@@ -24,7 +24,6 @@ def fresh_app(monkeypatch, tmp_path):
     return app_module.app, config_path
 
 
-@pytest.mark.skip(reason="template comes in Task 7 (setup wizard templates)")
 def test_step1_welcome_renders(fresh_app):
     app, _ = fresh_app
     client = TestClient(app)
@@ -73,7 +72,6 @@ def test_step4_post_validates_accounts(fresh_app):
     assert resp.status_code == 302
 
 
-@pytest.mark.skip(reason="template comes in Task 7")
 def test_step4_rejects_invalid_account_id(fresh_app):
     app, _ = fresh_app
     client = TestClient(app, follow_redirects=False)

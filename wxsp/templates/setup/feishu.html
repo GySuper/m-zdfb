@@ -1,0 +1,39 @@
+{% extends "setup/base.html" %}
+{% block content %}
+<h1>飞书 Bitable 配置</h1>
+<p>填飞书自建应用的 app_id / app_secret + 多维表格的 token / table_id。</p>
+
+<form method="post" action="/setup/step/2" id="feishu-form">
+  <div class="form-row">
+    <label>App ID</label>
+    <input type="text" name="app_id" required value="{{ data.feishu.app_id if data and data.feishu else '' }}">
+    <div class="hint">飞书开放平台 → 自建应用 → 凭证,以 cli_ 开头</div>
+  </div>
+  <div class="form-row">
+    <label>App Secret</label>
+    <input type="password" name="app_secret" required>
+    <div class="hint">和 App ID 同一处</div>
+  </div>
+  <div class="form-row">
+    <label>Bitable App Token</label>
+    <input type="text" name="app_token" required value="{{ data.feishu.app_token if data and data.feishu else '' }}">
+    <div class="hint">飞书多维表 URL: /base/<strong>xxxxxxxx</strong>?table=tblxxx 中加粗那段</div>
+  </div>
+  <div class="form-row">
+    <label>Table ID</label>
+    <input type="text" name="table_id" required value="{{ data.feishu.table_id if data and data.feishu else '' }}">
+    <div class="hint">同 URL 中 ?table=<strong>tblxxx</strong> 部分</div>
+  </div>
+
+  <div class="actions">
+    <button type="button"
+      hx-post="/setup/test-feishu"
+      hx-include="#feishu-form"
+      hx-target="#test-result"
+      hx-swap="innerHTML">测试连接</button>
+    <a href="/setup/step/1"><button type="button">← 上一步</button></a>
+    <button type="submit" class="primary">下一步:NAS 路径 →</button>
+  </div>
+  <div id="test-result" style="margin-top: 12px;"></div>
+</form>
+{% endblock %}

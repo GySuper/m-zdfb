@@ -175,57 +175,43 @@ def submit_nas(request: Request, nas_root: str = Form(...)) -> StarletteResponse
 
 @router.post("/step/4", response_model=None)
 async def submit_accounts(request: Request) -> StarletteResponse:
-    redirect = _required_step_or_redirect(request, 4)
-    if redirect:
-        return redirect
     form = await request.form()
     ids = [str(v) for v in form.getlist("account_id[]")]
     names = [str(v) for v in form.getlist("display_name[]")]
     limits = [str(v) for v in form.getlist("daily_limit[]")]
 
-    if not ids or len(ids) != len(names) or len(ids) != len(limits):
+    def _render_error(msg: str) -> StarletteResponse:
         return templates.TemplateResponse(
             request,
             "setup/accounts.html",
-            {"step": 4, "total_steps": _TOTAL_STEPS, "error": "至少 1 个账号,字段数对不齐"},
+            {"step": 4, "total_steps": _TOTAL_STEPS, "error": msg},
             status_code=200,
         )
+
+    if not ids or len(ids) != len(names) or len(ids) != len(limits):
+        return _render_error("至少 1 个账号,字段数对不齐")
 
     accounts: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for acc_id, name, limit in zip(ids, names, limits, strict=False):
         acc_id = acc_id.strip()
         if not _ACCOUNT_ID_RE.match(acc_id):
-            return templates.TemplateResponse(
-                request,
-                "setup/accounts.html",
-                {
-                    "step": 4,
-                    "total_steps": _TOTAL_STEPS,
-                    "error": f"account_id 格式非法: {acc_id}(需小写字母开头,英文蛇形)",
-                },
-                status_code=200,
-            )
+            return _render_error(f"account_id 格式非法: {acc_id}(需小写字母开头,英文蛇形)")
         if acc_id in seen_ids:
-            return templates.TemplateResponse(
-                request,
-                "setup/accounts.html",
-                {"step": 4, "total_steps": _TOTAL_STEPS, "error": f"account_id 重复: {acc_id}"},
-                status_code=200,
-            )
+            return _render_error(f"account_id 重复: {acc_id}")
         seen_ids.add(acc_id)
         try:
             limit_int = int(limit)
             if limit_int < 1:
                 raise ValueError("daily_limit must be >= 1")
         except ValueError:
-            return templates.TemplateResponse(
-                request,
-                "setup/accounts.html",
-                {"step": 4, "total_steps": _TOTAL_STEPS, "error": f"daily_limit 必须 ≥ 1: {limit}"},
-                status_code=200,
-            )
+            return _render_error(f"daily_limit 必须 ≥ 1: {limit}")
         accounts.append({"id": acc_id, "display_name": name.strip(), "daily_limit": limit_int})
+
+    # Validation passed — now enforce wizard step ordering
+    redirect = _required_step_or_redirect(request, 4)
+    if redirect:
+        return redirect
 
     _get_wizard_data(request)["accounts"] = accounts
     return RedirectResponse(url="/setup/step/5", status_code=302)

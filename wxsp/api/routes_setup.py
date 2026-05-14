@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 from typing import Any
@@ -215,8 +216,9 @@ async def submit_accounts(request: Request) -> StarletteResponse:
         seen_ids.add(acc_id)
         try:
             limit_int = int(limit)
-            assert limit_int >= 1
-        except (ValueError, AssertionError):
+            if limit_int < 1:
+                raise ValueError("daily_limit must be >= 1")
+        except ValueError:
             return templates.TemplateResponse(
                 request,
                 "setup/accounts.html",
@@ -353,11 +355,14 @@ def test_feishu(
             status_field="状态",
         )
         sample_fields = list(rows[0].fields.keys()) if rows else []
+        escaped_fields = html.escape(", ".join(sample_fields[:8]))
         return HTMLResponse(
-            f'<div class="check-ok">✓ 连接成功,拉到 {len(rows)} 行。字段名: {", ".join(sample_fields[:8])}</div>'
+            f'<div class="check-ok">✓ 连接成功,拉到 {len(rows)} 行。字段名: {escaped_fields}</div>'
         )
     except Exception as exc:
-        return HTMLResponse(f'<div class="check-fail">✗ {exc}</div>', status_code=200)
+        return HTMLResponse(
+            f'<div class="check-fail">✗ {html.escape(str(exc))}</div>', status_code=200
+        )
 
 
 @router.post("/probe-path")
@@ -365,8 +370,8 @@ def probe_path(path: str = Form(...)) -> HTMLResponse:
     """NAS 路径实时检测:存在 / 不存在。"""
     p = Path(path.strip())
     if p.exists() and p.is_dir():
-        return HTMLResponse(f'<div class="check-ok">✓ 路径存在: {p}</div>')
-    return HTMLResponse(f'<div class="check-fail">✗ 不可达: {p}</div>')
+        return HTMLResponse(f'<div class="check-ok">✓ 路径存在: {html.escape(str(p))}</div>')
+    return HTMLResponse(f'<div class="check-fail">✗ 不可达: {html.escape(str(p))}</div>')
 
 
 @router.post("/test-wecom")
@@ -392,4 +397,4 @@ def test_wecom(webhook: str = Form(...)) -> HTMLResponse:
             else '<div class="check-fail">✗ 发送失败,看后端日志</div>'
         )
     except Exception as exc:
-        return HTMLResponse(f'<div class="check-fail">✗ {exc}</div>')
+        return HTMLResponse(f'<div class="check-fail">✗ {html.escape(str(exc))}</div>')

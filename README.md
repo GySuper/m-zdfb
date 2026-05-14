@@ -13,7 +13,7 @@
 ### 普通运营用户(推荐)
 
 **macOS**:
-1. 从 [Releases](https://github.com/your-org/wxsp/releases) 下载 `wxsp-x.y.z.dmg`
+1. 从 [Releases](https://github.com/GySuper/m-zdfb/releases) 下载 `wxsp-x.y.z.dmg`
 2. 双击挂载,把 `wxsp.app` 拖到 `/Applications`
 3. **首次打开**:右键 `wxsp.app` → 「打开」→ 确认。普通双击会被 Gatekeeper 拦截(因为没苹果开发者签名)
 4. 浏览器会自动弹到 http://127.0.0.1:8765/setup —— 走完 6 步向导

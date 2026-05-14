@@ -22,14 +22,14 @@ def minimal_yaml() -> str:
           timezone: Asia/Shanghai
         paths:
           nas_root: /Volumes/NAS/wxsp
-          video_search_root: "{nas_root}/videos"
-          cover_search_root: "{nas_root}/covers"
         accounts:
           account_a:
             display_name: 测试号
             enabled: true
             daily_limit: 20
             user_data_dir: ./data/chrome-profiles/account_a
+            video_search_root: "{nas_root}/videos"
+            cover_search_root: "{nas_root}/covers"
         scheduler:
           daily_cron_hour: 9
           daily_cron_minute: 0
@@ -121,8 +121,8 @@ def test_nas_root_template_substitution(
 
     settings = load_settings(config_path)
 
-    assert str(settings.paths.video_search_root) == "/Volumes/NAS/wxsp/videos"
-    assert str(settings.paths.cover_search_root) == "/Volumes/NAS/wxsp/covers"
+    assert str(settings.accounts["account_a"].video_search_root) == "/Volumes/NAS/wxsp/videos"
+    assert str(settings.accounts["account_a"].cover_search_root) == "/Volumes/NAS/wxsp/covers"
 
 
 def test_missing_env_var_raises(

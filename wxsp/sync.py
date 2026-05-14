@@ -33,15 +33,13 @@ class SyncResult:
 
 
 class _NasFinderImpl:
-    def __init__(self, video_root: Path, cover_root: Path) -> None:
-        self._video_root = video_root
-        self._cover_root = cover_root
+    """生产用的 NAS 检索:search_root 由 validator 按账号传入。"""
 
-    def find_video(self, filename: str) -> Path:
-        return find_video(filename, search_root=self._video_root)
+    def find_video(self, filename: str, *, search_root: Path) -> Path:
+        return find_video(filename, search_root=search_root)
 
-    def find_cover(self, filename: str) -> Path:
-        return find_cover(filename, search_root=self._cover_root)
+    def find_cover(self, filename: str, *, search_root: Path) -> Path:
+        return find_cover(filename, search_root=search_root)
 
 
 def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
@@ -64,10 +62,7 @@ def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
     )
     result.pulled = len(rows)
 
-    nas_finder: NasFinder = _NasFinderImpl(
-        video_root=settings.paths.video_search_root,
-        cover_root=settings.paths.cover_search_root,
-    )
+    nas_finder: NasFinder = _NasFinderImpl()
     now = datetime.now()
     accepted: list[str] = []
     rejected: list[tuple[str, list[FieldError]]] = []

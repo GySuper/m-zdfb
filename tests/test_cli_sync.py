@@ -49,14 +49,14 @@ def sync_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
                 },
                 "paths": {
                     "nas_root": str(nas_root),
-                    "video_search_root": str(video_root),
-                    "cover_search_root": str(cover_root),
                 },
                 "accounts": {
                     "account_a": {
                         "display_name": "测试号",
                         "daily_limit": 20,
                         "user_data_dir": str(tmp_path / "p" / "a"),
+                        "video_search_root": str(video_root),
+                        "cover_search_root": str(cover_root),
                     },
                 },
                 "scheduler": {},

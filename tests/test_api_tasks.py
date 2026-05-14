@@ -24,7 +24,11 @@ def _settings(tmp_path: Path) -> Settings:
     s = make_settings(tmp_path, tmp_path)
     s.accounts = {
         "account_a": AccountConfig(
-            display_name="美食号", daily_limit=20, user_data_dir=tmp_path / "a"
+            display_name="美食号",
+            daily_limit=20,
+            user_data_dir=tmp_path / "a",
+            video_search_root=tmp_path / "videos",
+            cover_search_root=tmp_path / "covers",
         ),
     }
     return s

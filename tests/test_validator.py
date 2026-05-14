@@ -53,14 +53,14 @@ def test_nas_finder_is_protocol() -> None:
     """NasFinder 是 Protocol,任何提供 find_video/find_cover 的对象都满足。"""
 
     class _Stub:
-        def find_video(self, name: str) -> Path:
+        def find_video(self, name: str, *, search_root: Path) -> Path:
             return Path("/dev/null")
 
-        def find_cover(self, name: str) -> Path:
+        def find_cover(self, name: str, *, search_root: Path) -> Path:
             return Path("/dev/null")
 
     finder: NasFinder = _Stub()
-    assert finder.find_video("x").as_posix() == "/dev/null"
+    assert finder.find_video("x", search_root=Path("/")).as_posix() == "/dev/null"
 
 
 # ---------------------------------------------------------------------------
@@ -69,17 +69,23 @@ def test_nas_finder_is_protocol() -> None:
 
 
 def _make_settings(tmp_path: Path) -> Settings:
-    """构造一个合法的 Settings,validator 实际只用到 feishu.field_map 和 paths。"""
+    """构造一个合法的 Settings;account_a 必须存在(validator 要从中拿 video/cover_search_root)。"""
+    from wxsp.config import AccountConfig
+
     return Settings(
         app=AppConfig(
             data_dir=tmp_path / "data", logs_dir=tmp_path / "logs", timezone="Asia/Shanghai"
         ),
-        paths=PathsConfig(
-            nas_root=tmp_path / "nas",
-            video_search_root=tmp_path / "nas" / "videos",
-            cover_search_root=tmp_path / "nas" / "covers",
-        ),
-        accounts={},
+        paths=PathsConfig(nas_root=tmp_path / "nas"),
+        accounts={
+            "account_a": AccountConfig(
+                display_name="测试号",
+                daily_limit=20,
+                user_data_dir=tmp_path / "profiles" / "account_a",
+                video_search_root=tmp_path / "nas" / "videos",
+                cover_search_root=tmp_path / "nas" / "covers",
+            )
+        },
         scheduler=SchedulerConfig(),
         publisher=PublisherConfig(),
         feishu=FeishuConfig(
@@ -97,18 +103,21 @@ def _make_settings(tmp_path: Path) -> Settings:
 
 
 class _StubNas:
-    """默认 stub:find_video / find_cover 都抛 FileNotFoundError;按需填 *_returns。"""
+    """默认 stub:find_video / find_cover 都抛 FileNotFoundError;按需填 *_returns。
+
+    search_root 在 stub 里被忽略(测试不关心是哪个 root,只关心 filename→path 的映射)。
+    """
 
     def __init__(self) -> None:
         self.video_returns: dict[str, Path] = {}
         self.cover_returns: dict[str, Path] = {}
 
-    def find_video(self, filename: str) -> Path:
+    def find_video(self, filename: str, *, search_root: Path) -> Path:
         if filename in self.video_returns:
             return self.video_returns[filename]
         raise FileNotFoundError(filename)
 
-    def find_cover(self, filename: str) -> Path:
+    def find_cover(self, filename: str, *, search_root: Path) -> Path:
         if filename in self.cover_returns:
             return self.cover_returns[filename]
         raise FileNotFoundError(filename)

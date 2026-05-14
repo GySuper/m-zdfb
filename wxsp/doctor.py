@@ -109,27 +109,31 @@ class NasCheckRow(NamedTuple):
     """`check_nas` 返回行,CLI 输出层用。"""
 
     path: Path
-    label: str  # "video_search_root" | "cover_search_root"
+    label: str  # "<account_id>.video_search_root" | "<account_id>.cover_search_root"
     ok: bool
     detail: str
 
 
 def check_nas(config: Settings) -> list[NasCheckRow]:
-    """检查 video_search_root + cover_search_root 是否存在且为目录。
+    """按账号检查 video_search_root + cover_search_root。
 
-    无 IO 副作用,只读 stat。返回固定 2 行,按 video → cover 顺序。
+    无 IO 副作用,只读 stat。每个账号 2 行(video + cover),按账号 ID 排序。
     任何路径都不抛异常,失败信息塞 NasCheckRow.detail。
     """
-    targets: list[tuple[str, Path]] = [
-        ("video_search_root", config.paths.video_search_root),
-        ("cover_search_root", config.paths.cover_search_root),
-    ]
     rows: list[NasCheckRow] = []
-    for label, path in targets:
-        if path.is_dir():
-            rows.append(NasCheckRow(path=path, label=label, ok=True, detail=f"OK ({path})"))
-        elif path.exists():
-            rows.append(NasCheckRow(path=path, label=label, ok=False, detail=f"不是目录: {path}"))
-        else:
-            rows.append(NasCheckRow(path=path, label=label, ok=False, detail=f"不存在: {path}"))
+    for aid in sorted(config.accounts.keys()):
+        ac = config.accounts[aid]
+        for kind, path in (
+            ("video_search_root", ac.video_search_root),
+            ("cover_search_root", ac.cover_search_root),
+        ):
+            label = f"{aid}.{kind}"
+            if path.is_dir():
+                rows.append(NasCheckRow(path=path, label=label, ok=True, detail=f"OK ({path})"))
+            elif path.exists():
+                rows.append(
+                    NasCheckRow(path=path, label=label, ok=False, detail=f"不是目录: {path}")
+                )
+            else:
+                rows.append(NasCheckRow(path=path, label=label, ok=False, detail=f"不存在: {path}"))
     return rows

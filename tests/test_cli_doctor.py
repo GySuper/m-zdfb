@@ -164,6 +164,23 @@ def test_doctor_continues_after_one_account_browser_crash(
 # ============== NAS section ==============
 
 
+def _settings_with_account_paths(tmp_path: Path, video_root: Path, cover_root: Path):  # type: ignore[no-untyped-def]
+    """构造 settings + 1 个账号(账号自带 video/cover_search_root)。"""
+    from wxsp.config import AccountConfig
+
+    s = make_settings(video_root, cover_root)
+    s.accounts = {
+        "account_a": AccountConfig(
+            display_name="测试号",
+            daily_limit=20,
+            user_data_dir=tmp_path / "profiles" / "a",
+            video_search_root=video_root,
+            cover_search_root=cover_root,
+        )
+    }
+    return s
+
+
 def test_doctor_prints_nas_section_when_all_ok(
     db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -176,7 +193,7 @@ def test_doctor_prints_nas_section_when_all_ok(
     cover_root = tmp_path / "covers"
     video_root.mkdir()
     cover_root.mkdir()
-    settings = make_settings(video_root, cover_root)
+    settings = _settings_with_account_paths(tmp_path, video_root, cover_root)
 
     from wxsp import cli as cli_module
 
@@ -203,7 +220,7 @@ def test_doctor_exits_1_when_nas_path_missing(
     video_root = tmp_path / "missing_videos"  # 故意不 mkdir
     cover_root = tmp_path / "covers"
     cover_root.mkdir()
-    settings = make_settings(video_root, cover_root)
+    settings = _settings_with_account_paths(tmp_path, video_root, cover_root)
 
     from wxsp import cli as cli_module
 

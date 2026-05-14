@@ -46,10 +46,13 @@ class ValidationResult:
 
 
 class NasFinder(Protocol):
-    """validator 依赖的 NAS 检索接口。生产实现走 wxsp.nas;测试可直接造 stub。"""
+    """validator 依赖的 NAS 检索接口。生产实现走 wxsp.nas;测试可直接造 stub。
 
-    def find_video(self, filename: str) -> Path: ...
-    def find_cover(self, filename: str) -> Path: ...
+    search_root 由 validator 根据 row 上的账号 ID 决定后传入(每账号路径可不同)。
+    """
+
+    def find_video(self, filename: str, *, search_root: Path) -> Path: ...
+    def find_cover(self, filename: str, *, search_root: Path) -> Path: ...
 
 
 # ---------------------------------------------------------------------------
@@ -89,8 +92,9 @@ def validate(
     topic = _get_str(row.fields.get(fm.topic))
     original_claim = bool(row.fields.get(fm.original_claim) or False)
     account_id = _check_account(row.fields, fm.account, active_account_ids, errors)
-    video_path = _check_video(row.fields, fm.video_file, nas_finder, errors)
-    cover_path = _check_cover(row.fields, fm.cover, nas_finder, errors)
+    account_cfg = config.accounts.get(account_id) if account_id else None
+    video_path = _check_video(row.fields, fm.video_file, nas_finder, account_cfg, errors)
+    cover_path = _check_cover(row.fields, fm.cover, nas_finder, account_cfg, errors)
     execute_date = _check_execute_date(row.fields, fm.execute_date, errors)
     publish_at = _check_publish_at(row.fields, fm.publish_at, now, execute_date, errors)
 
@@ -196,16 +200,20 @@ def _check_video(
     fields: dict[str, Any],
     field_name: str,
     nas_finder: NasFinder,
+    account_cfg: Any,
     errors: list[FieldError],
 ) -> Path | None:
     raw = _get_str(fields.get(field_name))
     if not raw:
         errors.append(FieldError(field=field_name, message="未指定"))
         return None
+    if account_cfg is None:
+        errors.append(FieldError(field=field_name, message="账号未识别,无法选择视频检索路径"))
+        return None
     # 运营常只填裸文件名(已知都是 mp4)→ 没扩展名时自动补 .mp4
     lookup_name = raw if "." in raw else raw + ".mp4"
     try:
-        path = nas_finder.find_video(lookup_name)
+        path = nas_finder.find_video(lookup_name, search_root=account_cfg.video_search_root)
     except FileNotFoundError:
         errors.append(FieldError(field=field_name, message=f"未在 NAS 下找到 {raw!r}"))
         return None
@@ -229,13 +237,17 @@ def _check_cover(
     fields: dict[str, Any],
     field_name: str,
     nas_finder: NasFinder,
+    account_cfg: Any,
     errors: list[FieldError],
 ) -> Path | None:
     raw = _get_str(fields.get(field_name))
     if not raw:
         return None  # 封面可空
+    if account_cfg is None:
+        errors.append(FieldError(field=field_name, message="账号未识别,无法选择封面检索路径"))
+        return None
     try:
-        return nas_finder.find_cover(raw)
+        return nas_finder.find_cover(raw, search_root=account_cfg.cover_search_root)
     except FileNotFoundError:
         errors.append(FieldError(field=field_name, message=f"未在 NAS 下找到 {raw!r}"))
         return None

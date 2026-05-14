@@ -31,7 +31,11 @@ def _settings_with_accounts(tmp_path: Path, feishu_enabled: bool = False) -> Set
     s = make_settings(tmp_path, tmp_path)
     s.accounts = {
         "account_a": AccountConfig(
-            display_name="美食号", daily_limit=20, user_data_dir=tmp_path / "a"
+            display_name="美食号",
+            daily_limit=20,
+            user_data_dir=tmp_path / "a",
+            video_search_root=tmp_path / "videos",
+            cover_search_root=tmp_path / "covers",
         ),
     }
     s.feishu.enabled = feishu_enabled
@@ -118,7 +122,11 @@ def test_login_creates_db_row_if_missing(
     # 配置里加个还没入 DB 的账号
     settings = client.app.dependency_overrides[get_settings]()  # type: ignore[attr-defined]
     settings.accounts["account_b"] = AccountConfig(
-        display_name="新号", daily_limit=10, user_data_dir=tmp_path / "b"
+        display_name="新号",
+        daily_limit=10,
+        user_data_dir=tmp_path / "b",
+        video_search_root=tmp_path / "videos_b",
+        cover_search_root=tmp_path / "covers_b",
     )
     monkeypatch.setattr(routes_accounts, "_spawn", lambda *a, **kw: None)
 

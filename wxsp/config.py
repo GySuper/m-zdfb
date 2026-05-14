@@ -18,9 +18,9 @@ class AppConfig(BaseModel):
 
 
 class PathsConfig(BaseModel):
+    """全局只配 NAS 挂载根目录;每个账号自己配 video/cover 检索路径(在 AccountConfig)。"""
+
     nas_root: Path
-    video_search_root: Path
-    cover_search_root: Path
 
 
 class AccountConfig(BaseModel):
@@ -28,6 +28,9 @@ class AccountConfig(BaseModel):
     enabled: bool = True
     daily_limit: int
     user_data_dir: Path
+    # 视频/封面检索路径(支持 {nas_root} 占位,会在 Settings.after 钩子里展开)
+    video_search_root: Path
+    cover_search_root: Path
 
 
 class SchedulerConfig(BaseModel):
@@ -111,12 +114,14 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def _expand_nas_root_template(self) -> Settings:
+        """把账号下 video_search_root / cover_search_root 里的 {nas_root} 占位展开。"""
         nas_root_str = str(self.paths.nas_root)
-        for field in ("video_search_root", "cover_search_root"):
-            current = str(getattr(self.paths, field))
-            if "{nas_root}" in current:
-                expanded = current.replace("{nas_root}", nas_root_str)
-                setattr(self.paths, field, Path(expanded))
+        for ac in self.accounts.values():
+            for field in ("video_search_root", "cover_search_root"):
+                current = str(getattr(ac, field))
+                if "{nas_root}" in current:
+                    expanded = current.replace("{nas_root}", nas_root_str)
+                    setattr(ac, field, Path(expanded))
         return self
 
 

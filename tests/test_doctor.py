@@ -14,6 +14,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 from tests.conftest import make_settings
+from wxsp.config import Settings
 from wxsp.models import (
     COOKIE_STATUS_EXPIRED,
     COOKIE_STATUS_OK,
@@ -238,7 +239,23 @@ def test_refresh_cookie_status_passes_pathlib_path_to_checker(session: Session) 
     assert str(received[0]) == "/tmp/profiles/account_a"
 
 
-# ============== check_nas ==============
+# ============== check_nas(按账号循环)==============
+
+
+def _settings_with_account(tmp_path: Path, video_root: Path, cover_root: Path) -> Settings:
+    from wxsp.config import AccountConfig
+
+    s = make_settings(video_root, cover_root)
+    s.accounts = {
+        "account_a": AccountConfig(
+            display_name="测试号",
+            daily_limit=20,
+            user_data_dir=tmp_path / "profiles" / "a",
+            video_search_root=video_root,
+            cover_search_root=cover_root,
+        )
+    }
+    return s
 
 
 def test_check_nas_both_paths_exist_and_are_dirs(tmp_path: Path) -> None:
@@ -248,14 +265,14 @@ def test_check_nas_both_paths_exist_and_are_dirs(tmp_path: Path) -> None:
     cover_root = tmp_path / "covers"
     video_root.mkdir()
     cover_root.mkdir()
-    settings = make_settings(video_root, cover_root)
+    settings = _settings_with_account(tmp_path, video_root, cover_root)
 
     rows = check_nas(settings)
 
     assert len(rows) == 2
     assert [(r.label, r.ok) for r in rows] == [
-        ("video_search_root", True),
-        ("cover_search_root", True),
+        ("account_a.video_search_root", True),
+        ("account_a.cover_search_root", True),
     ]
     assert rows[0].path == video_root
     assert rows[1].path == cover_root
@@ -267,11 +284,11 @@ def test_check_nas_video_root_missing(tmp_path: Path) -> None:
     video_root = tmp_path / "videos"  # 故意不创建
     cover_root = tmp_path / "covers"
     cover_root.mkdir()
-    settings = make_settings(video_root, cover_root)
+    settings = _settings_with_account(tmp_path, video_root, cover_root)
 
     rows = check_nas(settings)
 
-    assert rows[0].label == "video_search_root"
+    assert rows[0].label == "account_a.video_search_root"
     assert rows[0].ok is False
     assert "不存在" in rows[0].detail
     assert rows[1].ok is True
@@ -284,7 +301,7 @@ def test_check_nas_path_is_file_not_dir(tmp_path: Path) -> None:
     video_root.mkdir()
     cover_root = tmp_path / "covers_file"  # 故意建成文件
     cover_root.write_text("oops")
-    settings = make_settings(video_root, cover_root)
+    settings = _settings_with_account(tmp_path, video_root, cover_root)
 
     rows = check_nas(settings)
 
@@ -296,7 +313,16 @@ def test_check_nas_path_is_file_not_dir(tmp_path: Path) -> None:
 def test_check_nas_both_missing(tmp_path: Path) -> None:
     from wxsp.doctor import check_nas
 
-    settings = make_settings(tmp_path / "v", tmp_path / "c")  # 都不存在
+    settings = _settings_with_account(tmp_path, tmp_path / "v", tmp_path / "c")
     rows = check_nas(settings)
 
     assert all(not r.ok for r in rows)
+
+
+def test_check_nas_returns_empty_when_no_accounts(tmp_path: Path) -> None:
+    """没有账号时 check_nas 返回空(谁的路径都不该检查)。"""
+    from wxsp.doctor import check_nas
+
+    settings = make_settings(tmp_path / "v", tmp_path / "c")
+    assert settings.accounts == {}
+    assert check_nas(settings) == []

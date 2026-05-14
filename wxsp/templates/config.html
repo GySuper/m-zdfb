@@ -40,34 +40,35 @@
       </div>
     </div>
 
-    <!-- ============== 路径 ============== -->
+    <!-- ============== 路径(只剩 NAS 根)============== -->
     <div class="card">
-      <h2>路径(NAS)</h2>
-      <div class="row"><label>NAS 根目录</label>
+      <h2>NAS 路径</h2>
+      <div class="row"><label>NAS 挂载根目录</label>
         <input type="text" name="paths_nas_root" value="{{ vm.paths_nas_root }}" style="flex:1;">
       </div>
-      <div class="row"><label>视频检索根</label>
-        <input type="text" name="paths_video_search_root" value="{{ vm.paths_video_search_root }}" style="flex:1;">
-        <span class="muted" style="font-size: 12px;">可用 {nas_root} 占位</span>
-      </div>
-      <div class="row"><label>封面检索根</label>
-        <input type="text" name="paths_cover_search_root" value="{{ vm.paths_cover_search_root }}" style="flex:1;">
-      </div>
+      <p class="muted" style="margin: 4px 0 0 0; font-size: 12px;">
+        视频 / 封面的检索路径在下方"账号"section 各自配置(每个账号可不同),允许在路径里写 <code>{nas_root}</code> 占位
+      </p>
     </div>
 
-    <!-- ============== 调度 ============== -->
+    <!-- ============== 定时触发 ============== -->
     <div class="card">
-      <h2>调度</h2>
-      <div class="row"><label>每日触发(小时)</label>
-        <input type="number" name="sched_hour" value="{{ vm.sched_hour }}" min="0" max="23" style="width: 80px;">
-        <label style="min-width: auto;">分钟</label>
-        <input type="number" name="sched_minute" value="{{ vm.sched_minute }}" min="0" max="59" style="width: 80px;">
-        <span class="muted" style="font-size: 12px;">cron,默认 09:00</span>
+      <h2>定时触发</h2>
+      <p class="muted" style="margin-top: 0;">
+        每天到点,自动同步飞书表 + 跑当日待发布任务(本机没开机就跳过这次,下次开机后手动点"立即跑今天"补)
+      </p>
+      <div class="row"><label>每天触发时间</label>
+        <input type="number" name="sched_hour" value="{{ vm.sched_hour }}" min="0" max="23" style="width: 70px;">
+        <span>时</span>
+        <input type="number" name="sched_minute" value="{{ vm.sched_minute }}" min="0" max="59" style="width: 70px;">
+        <span>分</span>
+        <span class="muted" style="margin-left: 12px; font-size: 12px;">推荐 09:00(运营在飞书表写完任务后)</span>
       </div>
       <div class="row"><label>账号分配策略</label>
         <select name="sched_strategy">
           <option value="round-robin" {% if vm.sched_strategy=="round-robin" %}selected{% endif %}>round-robin(轮询)</option>
         </select>
+        <span class="muted" style="font-size: 12px;">飞书行里没写账号时,按此策略分配</span>
       </div>
     </div>
 
@@ -186,12 +187,16 @@
   <!-- ============== 账号(独立 CRUD)============== -->
   <div class="card">
     <h2>账号({{ vm.accounts|length }})</h2>
-    <p class="muted" style="margin-top: 0;">账号列表通过下面单独的添加 / 删除操作维护,改动会立即写盘并校验。</p>
+    <p class="muted" style="margin-top: 0;">
+      Chrome profile 目录由系统按账号 ID 自动管理(<code>./data/chrome-profiles/&lt;id&gt;</code>),不展示在表单里。
+      每个账号自己的视频 / 封面检索根可以独立配,支持 <code>{nas_root}</code> 占位。
+    </p>
 
     {% if vm.accounts %}
     <table>
       <thead>
-        <tr><th>账号 ID</th><th>显示名</th><th>启用</th><th>日发上限</th><th>Chrome profile 目录</th><th>操作</th></tr>
+        <tr><th>账号 ID</th><th>显示名</th><th>启用</th><th>日发上限</th>
+            <th>视频检索根</th><th>封面检索根</th><th>操作</th></tr>
       </thead>
       <tbody>
         {% for aid, a in vm.accounts.items() %}
@@ -200,8 +205,10 @@
           <td>{{ a.display_name }}</td>
           <td>{% if a.enabled %}<span class="badge ok">启用</span>{% else %}<span class="badge muted">禁用</span>{% endif %}</td>
           <td class="muted">{{ a.daily_limit }}</td>
-          <td class="muted"><code>{{ a.user_data_dir }}</code></td>
-          <td>
+          <td class="muted" style="font-size: 12px;"><code>{{ a.video_search_root }}</code></td>
+          <td class="muted" style="font-size: 12px;"><code>{{ a.cover_search_root }}</code></td>
+          <td style="white-space: nowrap;">
+            <a class="btn" href="/config?edit={{ aid }}#acc-{{ aid }}">编辑</a>
             <form method="post" action="/config/accounts/{{ aid }}/delete"
                   onsubmit="return confirm('确认删除账号 {{ aid }}?(配置文件里的条目会被移除,Chrome profile 目录不会删)');"
                   style="display:inline;">
@@ -209,6 +216,34 @@
             </form>
           </td>
         </tr>
+        {% if edit_account_id == aid %}
+        <tr id="acc-{{ aid }}" style="background: #fafbff;">
+          <td colspan="7" style="padding: 16px;">
+            <form method="post" action="/config/accounts/{{ aid }}/update">
+              <h3 style="margin: 0 0 12px 0; font-size: 14px;">编辑 <code>{{ aid }}</code></h3>
+              <div class="row"><label>显示名</label>
+                <input type="text" name="display_name" value="{{ a.display_name }}" required style="flex:1;">
+              </div>
+              <div class="row"><label>启用</label>
+                <input type="checkbox" name="enabled" {% if a.enabled %}checked{% endif %}>
+              </div>
+              <div class="row"><label>日发布上限</label>
+                <input type="number" name="daily_limit" value="{{ a.daily_limit }}" min="1" max="200" style="width: 100px;">
+              </div>
+              <div class="row"><label>视频检索根</label>
+                <input type="text" name="video_search_root" value="{{ a.video_search_root }}" required style="flex:1;">
+              </div>
+              <div class="row"><label>封面检索根</label>
+                <input type="text" name="cover_search_root" value="{{ a.cover_search_root }}" required style="flex:1;">
+              </div>
+              <div style="margin-top: 8px;">
+                <button type="submit" class="primary">保存</button>
+                <a class="btn" href="/config">取消</a>
+              </div>
+            </form>
+          </td>
+        </tr>
+        {% endif %}
         {% endfor %}
       </tbody>
     </table>
@@ -220,7 +255,7 @@
     <form method="post" action="/config/accounts/add">
       <div class="row"><label>账号 ID</label>
         <input type="text" name="account_id" required placeholder="如 account_a" style="flex:1;">
-        <span class="muted" style="font-size: 12px;">小写字母 + 下划线;不可与现有账号重复</span>
+        <span class="muted" style="font-size: 12px;">小写字母 + 下划线;Chrome profile 目录会按它自动生成</span>
       </div>
       <div class="row"><label>显示名</label>
         <input type="text" name="display_name" required placeholder="如 美食号" style="flex:1;">
@@ -231,8 +266,11 @@
       <div class="row"><label>日发布上限</label>
         <input type="number" name="daily_limit" value="20" min="1" max="200" style="width: 100px;">
       </div>
-      <div class="row"><label>Chrome profile 目录</label>
-        <input type="text" name="user_data_dir" required placeholder="./data/chrome-profiles/account_a" style="flex:1;">
+      <div class="row"><label>视频检索根</label>
+        <input type="text" name="video_search_root" required placeholder="如 {nas_root}/videos/account_a" style="flex:1;">
+      </div>
+      <div class="row"><label>封面检索根</label>
+        <input type="text" name="cover_search_root" required placeholder="如 {nas_root}/covers/account_a" style="flex:1;">
       </div>
       <div style="margin-top: 8px;">
         <button type="submit" class="primary">添加账号</button>

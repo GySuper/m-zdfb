@@ -28,10 +28,18 @@ def _make_settings_with_accounts(tmp_path: Path) -> Settings:
     settings = make_settings(tmp_path, tmp_path)
     settings.accounts = {
         "account_a": AccountConfig(
-            display_name="美食号", daily_limit=20, user_data_dir=tmp_path / "a"
+            display_name="美食号",
+            daily_limit=20,
+            user_data_dir=tmp_path / "a",
+            video_search_root=tmp_path / "videos_a",
+            cover_search_root=tmp_path / "covers_a",
         ),
         "account_b": AccountConfig(
-            display_name="健身号", daily_limit=20, user_data_dir=tmp_path / "b"
+            display_name="健身号",
+            daily_limit=20,
+            user_data_dir=tmp_path / "b",
+            video_search_root=tmp_path / "videos_b",
+            cover_search_root=tmp_path / "covers_b",
         ),
     }
     return settings

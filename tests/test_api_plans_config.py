@@ -124,14 +124,14 @@ app:
   timezone: Asia/Shanghai
 paths:
   nas_root: /tmp/nas
-  video_search_root: /tmp/nas/videos
-  cover_search_root: /tmp/nas/covers
 accounts:
   account_a:
     display_name: 美食号
     enabled: true
     daily_limit: 20
     user_data_dir: ./data/chrome-profiles/account_a
+    video_search_root: /tmp/nas/videos
+    cover_search_root: /tmp/nas/covers
 scheduler:
   daily_cron_hour: 9
   daily_cron_minute: 0
@@ -192,8 +192,6 @@ def _form(**overrides: Any) -> dict[str, Any]:
         "app_logs_dir": "./logs",
         "app_timezone": "Asia/Shanghai",
         "paths_nas_root": "/tmp/nas",
-        "paths_video_search_root": "/tmp/nas/videos",
-        "paths_cover_search_root": "/tmp/nas/covers",
         "sched_hour": "9",
         "sched_minute": "0",
         "sched_strategy": "round-robin",
@@ -251,8 +249,16 @@ def test_config_get_renders_form_fields(
     assert r.status_code == 200
     # 表单存在
     assert 'action="/config"' in r.text and 'method="post"' in r.text
-    # 各 section 标题
-    for section in ["应用", "路径", "调度", "发布器", "飞书集成", "通知 / 告警", "Web UI"]:
+    # 各 section 标题(调度文案改为 "定时触发")
+    for section in [
+        "应用",
+        "NAS 路径",
+        "定时触发",
+        "发布器",
+        "飞书集成",
+        "通知 / 告警",
+        "Web UI",
+    ]:
         assert section in r.text
     # 关键 input name 都在
     for name in [
@@ -404,9 +410,10 @@ def test_config_post_no_notify_on_writes_empty_list(
 # ============== 账号 CRUD ==============
 
 
-def test_accounts_add_writes_new_entry(
+def test_accounts_add_writes_new_entry_and_auto_user_data_dir(
     client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """add 不接 user_data_dir,后端按 account_id 自动生成。"""
     cfg = _setup(tmp_path, monkeypatch)
     r = client_empty.post(
         "/config/accounts/add",
@@ -414,7 +421,8 @@ def test_accounts_add_writes_new_entry(
             "account_id": "account_z",
             "display_name": "搞笑号",
             "daily_limit": "15",
-            "user_data_dir": str(tmp_path / "z"),
+            "video_search_root": "/tmp/nas/videos/z",
+            "cover_search_root": "/tmp/nas/covers/z",
             "enabled": "on",
         },
         follow_redirects=False,
@@ -422,9 +430,13 @@ def test_accounts_add_writes_new_entry(
     assert r.status_code == 303
     assert "已添加账号 account_z" in unquote(r.headers["location"])
     disk = yaml.safe_load(cfg.read_text("utf-8"))
-    assert "account_z" in disk["accounts"]
-    assert disk["accounts"]["account_z"]["display_name"] == "搞笑号"
-    assert disk["accounts"]["account_z"]["daily_limit"] == 15
+    new = disk["accounts"]["account_z"]
+    assert new["display_name"] == "搞笑号"
+    assert new["daily_limit"] == 15
+    assert new["video_search_root"] == "/tmp/nas/videos/z"
+    assert new["cover_search_root"] == "/tmp/nas/covers/z"
+    # user_data_dir 自动按 account_id 生成,用户没传过
+    assert new["user_data_dir"] == "./data/chrome-profiles/account_z"
 
 
 def test_accounts_add_rejects_duplicate(
@@ -438,7 +450,8 @@ def test_accounts_add_rejects_duplicate(
             "account_id": "account_a",  # 已存在
             "display_name": "x",
             "daily_limit": "10",
-            "user_data_dir": "./x",
+            "video_search_root": "/tmp/nas/videos/x",
+            "cover_search_root": "/tmp/nas/covers/x",
             "enabled": "on",
         },
         follow_redirects=False,
@@ -446,6 +459,93 @@ def test_accounts_add_rejects_duplicate(
     assert r.status_code == 303
     assert "已存在" in unquote(r.headers["location"])
     assert cfg.read_text("utf-8") == snap
+
+
+def test_accounts_add_rejects_empty_id(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _setup(tmp_path, monkeypatch)
+    r = client_empty.post(
+        "/config/accounts/add",
+        data={
+            "account_id": "   ",
+            "display_name": "x",
+            "daily_limit": "10",
+            "video_search_root": "/tmp/v",
+            "cover_search_root": "/tmp/c",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "不能为空" in unquote(r.headers["location"])
+
+
+def test_accounts_update_writes_changes(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _setup(tmp_path, monkeypatch)
+    r = client_empty.post(
+        "/config/accounts/account_a/update",
+        data={
+            "display_name": "美食号改名了",
+            "daily_limit": "30",
+            "video_search_root": "/tmp/nas/new-videos",
+            "cover_search_root": "/tmp/nas/new-covers",
+            "enabled": "on",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "已更新账号 account_a" in unquote(r.headers["location"])
+    disk = yaml.safe_load(cfg.read_text("utf-8"))
+    a = disk["accounts"]["account_a"]
+    assert a["display_name"] == "美食号改名了"
+    assert a["daily_limit"] == 30
+    assert a["video_search_root"] == "/tmp/nas/new-videos"
+    assert a["cover_search_root"] == "/tmp/nas/new-covers"
+    assert a["enabled"] is True
+    # user_data_dir 不被改动
+    assert a["user_data_dir"] == "./data/chrome-profiles/account_a"
+
+
+def test_accounts_update_unknown_no_op(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _setup(tmp_path, monkeypatch)
+    snap = cfg.read_text("utf-8")
+    r = client_empty.post(
+        "/config/accounts/no_such/update",
+        data={
+            "display_name": "x",
+            "daily_limit": "10",
+            "video_search_root": "/v",
+            "cover_search_root": "/c",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "不存在" in unquote(r.headers["location"])
+    assert cfg.read_text("utf-8") == snap
+
+
+def test_accounts_edit_query_shows_inline_form(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """?edit=<id> 让该账号行展开编辑表单。"""
+    _setup(tmp_path, monkeypatch)
+    r = client_empty.get("/config?edit=account_a")
+    assert r.status_code == 200
+    # 表单 action 是 update 端点
+    assert 'action="/config/accounts/account_a/update"' in r.text
+    # 字段都在
+    for name in [
+        "display_name",
+        "enabled",
+        "daily_limit",
+        "video_search_root",
+        "cover_search_root",
+    ]:
+        assert f'name="{name}"' in r.text
 
 
 def test_accounts_delete_removes_entry(

@@ -5,34 +5,43 @@ app:
   timezone: Asia/Shanghai
 
 # ============== 路径(NAS 友好,跨平台) ==============
+# 只配 NAS 挂载根目录;每个账号的 video/cover 检索路径在 accounts 下各自配。
 # Windows 示例: nas_root: "Z:/wxsp" 或 "\\\\server\\share\\wxsp"
 paths:
   nas_root: /Volumes/NAS/wxsp
-  video_search_root: "{nas_root}/videos"
-  cover_search_root: "{nas_root}/covers"
 
 # ============== 账号 ==============
+# 每账号都要配 video_search_root / cover_search_root,可用 {nas_root} 占位
+# user_data_dir 由 Web UI 添加账号时自动生成为 ./data/chrome-profiles/<id>
 accounts:
   account_a:
     display_name: "美食号"
     enabled: true
     daily_limit: 20
     user_data_dir: ./data/chrome-profiles/account_a
+    video_search_root: "{nas_root}/videos/account_a"
+    cover_search_root: "{nas_root}/covers/account_a"
   account_b:
     display_name: "健身号"
     enabled: true
     daily_limit: 20
     user_data_dir: ./data/chrome-profiles/account_b
+    video_search_root: "{nas_root}/videos/account_b"
+    cover_search_root: "{nas_root}/covers/account_b"
   account_c:
     display_name: "旅游号"
     enabled: true
     daily_limit: 20
     user_data_dir: ./data/chrome-profiles/account_c
+    video_search_root: "{nas_root}/videos/account_c"
+    cover_search_root: "{nas_root}/covers/account_c"
   account_d:
     display_name: "搞笑号"
     enabled: true
     daily_limit: 20
     user_data_dir: ./data/chrome-profiles/account_d
+    video_search_root: "{nas_root}/videos/account_d"
+    cover_search_root: "{nas_root}/covers/account_d"
 
 # ============== 调度 ==============
 scheduler:

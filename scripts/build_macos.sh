@@ -14,8 +14,14 @@ echo "==> 清理旧产物"
 rm -rf dist build
 
 echo "==> Nuitka 编译"
+# --lto=no: 关 LTO,链接快 5-10 倍,代价是产物体积大些(0.1.0 不在乎)
+# --jobs=2: 限制并行 clang 进程数,避免 GHA 14GB runner 内存爆掉
+# --show-scons: 让 clang 输出可见,卡住时能定位
 uv run python -m nuitka \
   --standalone \
+  --lto=no \
+  --jobs=2 \
+  --show-scons \
   --macos-create-app-bundle \
   --macos-app-name=wxsp \
   --macos-app-icon=assets/icon.icns \

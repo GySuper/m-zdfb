@@ -12,8 +12,12 @@ Write-Host "==> 清理旧产物"
 Remove-Item -Recurse -Force dist, build -ErrorAction SilentlyContinue
 
 Write-Host "==> Nuitka 编译"
+# --lto=no / --jobs=2 / --show-scons: 同 macOS 脚本,见注释
 uv run python -m nuitka `
   --standalone `
+  --lto=no `
+  --jobs=2 `
+  --show-scons `
   --windows-console-mode=disable `
   --include-package=wxsp `
   --include-package-data=wxsp `

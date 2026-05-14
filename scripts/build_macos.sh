@@ -25,9 +25,14 @@ echo "==> 写 launcher"
 mkdir -p build
 cat > build/launcher.py <<'EOF'
 """wxsp PyInstaller 入口。"""
+import sys
+
 from wxsp.cli import app
 
 if __name__ == "__main__":
+    # 双击 .app 时 sys.argv 只有可执行路径无子命令;默认起 Web UI(运营要的体验)。
+    if len(sys.argv) == 1:
+        sys.argv.append("web")
     app()
 EOF
 

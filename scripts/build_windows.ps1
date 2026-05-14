@@ -16,9 +16,14 @@ Write-Host "==> 写 launcher"
 New-Item -ItemType Directory -Force -Path build | Out-Null
 @'
 """wxsp PyInstaller 入口。"""
+import sys
+
 from wxsp.cli import app
 
 if __name__ == "__main__":
+    # 双击 .exe 等同于无参调用;默认起 Web UI。
+    if len(sys.argv) == 1:
+        sys.argv.append("web")
     app()
 '@ | Out-File -Encoding utf8 build/launcher.py
 

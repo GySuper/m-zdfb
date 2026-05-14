@@ -132,17 +132,23 @@ def _enable_windows() -> None:
     fd, tmp_str = tempfile.mkstemp(suffix="-wxsp-task.xml")
     tmp = Path(tmp_str)
     try:
-        os.write(fd, b"\xff\xfe" + xml.encode("utf-16-le"))
-    finally:
-        os.close(fd)
+        try:
+            os.write(fd, b"\xff\xfe" + xml.encode("utf-16-le"))
+        finally:
+            os.close(fd)
 
-    result = subprocess.run(
-        ["schtasks", "/Create", "/TN", _TASK_NAME, "/XML", str(tmp), "/F"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise AutostartError(f"schtasks /Create 失败: {result.stderr or result.stdout}")
+        result = subprocess.run(
+            ["schtasks", "/Create", "/TN", _TASK_NAME, "/XML", str(tmp), "/F"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise AutostartError(f"schtasks /Create 失败: {result.stderr or result.stdout}")
+    finally:
+        try:
+            os.unlink(tmp_str)
+        except OSError:
+            pass
 
 
 def _disable_windows() -> None:

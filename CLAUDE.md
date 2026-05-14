@@ -83,8 +83,8 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 
 ### 2. Cookie 寿命短(实际 3-7 天)
 - 每次发布前要做 Cookie 健康检查(打开账号主页验证登录态)
-- Cookie 接近过期(默认 < 1.5 天)→ 推送告警
-- Cookie 失效错误**不重试**,等待 `wxsp login` 扫码
+- Cookie idle 太久(距上次 `cookie_last_active_at` > `monitoring.cookie_warn_days`,默认 1.5 天)即使本次能登录也标 `warn` 状态 + 推 `cookie_warning` 告警(提醒主动续命,避免下次真过期才发现)
+- Cookie 失效(本次登录就失败)→ 标 `expired`,**不重试**,等待 `wxsp login` 扫码
 - 健康指标用 `cookie_last_active_at`(上次成功打开账号主页时间),不是"导入时间"
 
 ### 2.5 同 IP 多账号并发是风控特征
@@ -103,9 +103,10 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 - 永远不要静默吞掉异常
 
 ### 5. NAS 访问的特殊性
-- 视频文件路径完全可配置,支持 NAS 挂载路径(如 `/Volumes/NAS/videos/`)
-- 启动时 `doctor` 必须检查每个配置的路径是否可访问
+- 视频/封面路径完全可配置,支持 NAS 挂载路径(如 `/Volumes/NAS/videos/`);**每账号独立** `video_search_root` / `cover_search_root`,可用 `{nas_root}` 占位
+- 启动时 `doctor` 必须检查每个账号配置的路径是否可访问
 - 读 NAS 文件时要捕获网络错误,作为 `nas_unreachable` 错误类型
+- `stage_to_tmp` 优先 symlink(零拷贝);Windows 默认账户没 `SeCreateSymbolicLinkPrivilege` 时 fallback 到 `shutil.copy2`(M10 修)
 - 不做本地缓存(假设千兆 LAN,直接读),但保留接口便于后期加缓存
 
 ---
@@ -217,34 +218,43 @@ app:
   timezone: Asia/Shanghai
 
 # ============== 路径(NAS 友好,跨平台) ==============
+# 只配 NAS 挂载根目录;每个账号的 video / cover 检索路径在 accounts 下各自配。
 # Windows 示例: nas_root: "Z:/wxsp" 或 "\\\\server\\share\\wxsp"
 paths:
-  nas_root: /Volumes/NAS/wxsp           # NAS 挂载根目录(mac 示例)
-  video_search_root: "{nas_root}/videos"   # 视频检索根目录(递归搜文件名)
-  cover_search_root: "{nas_root}/covers"   # 封面检索根目录(递归搜文件名)
+  nas_root: /Volumes/NAS/wxsp
 
 # ============== 账号 ==============
+# 每账号都要配 video_search_root / cover_search_root,可用 {nas_root} 占位。
+# user_data_dir 是独立 Chrome profile(cookie 由 persistent context 持久化,无 cookie.json)。
 accounts:
   account_a:
     display_name: "美食号"
     enabled: true
     daily_limit: 20
-    user_data_dir: ./data/chrome-profiles/account_a  # 独立 Chrome profile(cookie 由 persistent context 自动管理,无独立 cookie.json)
+    user_data_dir: ./data/chrome-profiles/account_a
+    video_search_root: "{nas_root}/videos/account_a"
+    cover_search_root: "{nas_root}/covers/account_a"
   account_b:
     display_name: "健身号"
     enabled: true
     daily_limit: 20
     user_data_dir: ./data/chrome-profiles/account_b
+    video_search_root: "{nas_root}/videos/account_b"
+    cover_search_root: "{nas_root}/covers/account_b"
   account_c:
     display_name: "旅游号"
     enabled: true
     daily_limit: 20
     user_data_dir: ./data/chrome-profiles/account_c
+    video_search_root: "{nas_root}/videos/account_c"
+    cover_search_root: "{nas_root}/covers/account_c"
   account_d:
     display_name: "搞笑号"
     enabled: true
     daily_limit: 20
     user_data_dir: ./data/chrome-profiles/account_d
+    video_search_root: "{nas_root}/videos/account_d"
+    cover_search_root: "{nas_root}/covers/account_d"
 
 # ============== 调度 ==============
 scheduler:
@@ -287,9 +297,9 @@ feishu:
     # 不再有 pull_interval_seconds: 飞书 sync 改成按需调用(worker 入口前自动 + 手动按钮)
     write_back_enabled: true
 
-# ============== 告警 ==============
+# ============== 告警 + 归档(M9) ==============
 monitoring:
-  cookie_warn_days: 1.5
+  cookie_warn_days: 1.5               # 距上次 active_at 超过此天数仍能登录 → status=warn 触发 cookie_warning
   notifiers:
     wecom:                            # 第一版只做企微;其他实现接口预留
       enabled: true
@@ -301,6 +311,10 @@ monitoring:
     - task_failed
     - element_not_found               # 可能改版,需关注
     - nas_unreachable
+    - backlog_high                    # 历史积压(execute_date<today + pending/interrupted)超阈值
+  log_retention_days: 30              # 日志按天滚动,过期清除(daemon 启动时 cleanup)
+  screenshot_retention_days: 90       # 错误截图保留期
+  backlog_warn_threshold: 20          # 历史积压超此数触发 backlog_high 告警
 
 # ============== Web UI ==============
 webui:
@@ -325,11 +339,11 @@ SQLite 是唯一的运行时事实来源,所有任务从飞书拉取。Web UI **
 
 | 飞书字段名 | 类型 | 必填 | 工具读写 | 说明 |
 |----------|------|-----|---------|------|
-| 视频文件 | 单行文本 | **是** | 读 | **仅文件名**(如 `国庆短片01.mp4`),系统在 `video_search_root` 递归搜;同名取 **mtime 最新** |
+| 视频文件 | 单行文本 | **是** | 读 | **仅文件名**(如 `国庆短片01.mp4`),系统在**该任务所属账号的** `video_search_root` 下递归搜;同名取 **mtime 最新** |
 | 标题 | 单行文本 | **是** | 读 | 16-30 字 |
 | 描述 | 多行文本 | 否 | 读 | |
 | 标签 | 多选 | 否 | 读 | ≤ 5 个 |
-| 封面文件 | 单行文本 | 否 | 读 | **仅文件名**,在 `cover_search_root` 递归搜,同名取 mtime 最新 |
+| 封面文件 | 单行文本 | 否 | 读 | **仅文件名**,在**账号的** `cover_search_root` 递归搜,同名取 mtime 最新 |
 | 合集 | 单选 | 否 | 读 | 视频号合集名(需提前在平台建好) |
 | 原创 | 复选框 | 否 | 读 | |
 | 账号 | 单选 | 否 | 读 | 空 → round-robin 分配;否则锁定 account_a/b/c/d |
@@ -362,7 +376,7 @@ wxsp run --daemon
 3. 通过 → 写本地 `Video` + 创建 `Task(status=pending, execute_date, publish_at)`
 4. 不通过 → 飞书回写"失败 + 错因"(具体到哪个字段)
 
-注意:**视频文件不在飞书附件里**,飞书只存文件名;实际文件由 `nas.find_video()` 在 NAS `video_search_root` 下递归 `rglob` 搜索得到绝对路径。
+注意:**视频文件不在飞书附件里**,飞书只存文件名;实际文件由 `nas.find_video()` 在**目标账号的** `video_search_root` 下递归 `rglob` 搜索得到绝对路径。
 
 ---
 
@@ -474,7 +488,10 @@ wxsp accounts pause <id> [--hours h] 暂停账号
 wxsp accounts resume <id>            恢复账号
 
 # 健康检查
-wxsp doctor                          检查账号 / Cookie / NAS 可达 / 飞书 API
+wxsp doctor                          检查账号 / Cookie / NAS 可达 / 飞书 API;cookie idle 超 cookie_warn_days 标 warn 并推 cookie_warning
+
+# 归档清理
+wxsp cleanup                         按 monitoring.{log,screenshot}_retention_days 清过期日志/截图
 
 # 飞书同步(按需)
 wxsp sync                            立即拉飞书一次,不跑任务

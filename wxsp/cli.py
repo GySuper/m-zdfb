@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -22,6 +23,28 @@ from wxsp.notify import NotifyEvent, notify
 from wxsp.publisher import AlreadyClaimed, publish
 from wxsp.scheduler import run_today_pending, start_daemon
 from wxsp.sync import sync_now
+
+
+def _force_utf8_stdout() -> None:
+    """让 stdout/stderr 强制走 UTF-8 + errors='replace'。
+
+    Windows 中文版 Python 默认 stdout 是 cp936/gbk,遇到 emoji(✅ ❌ ✓ ✗)
+    会抛 UnicodeEncodeError 把命令搞挂。mac/Linux 默认就是 UTF-8,reconfigure
+    是无操作。CliRunner 把 stdout 换成 StringIO 没有 reconfigure 方法 →
+    AttributeError 被 try 兜住,不影响测试。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass  # 流被替换 / 已关闭 / 不支持 → 跳过,绝不让 cli 启动失败
+
+
+_force_utf8_stdout()
+
 
 app = typer.Typer(
     name="wxsp",

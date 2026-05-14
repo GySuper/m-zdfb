@@ -29,6 +29,66 @@ def test_accounts_subcommand_exists(sub: str) -> None:
     assert sub in result.stdout
 
 
+# ============== Windows emoji 兼容(_force_utf8_stdout)==============
+
+
+def test_force_utf8_stdout_calls_reconfigure_when_available() -> None:
+    """有 .reconfigure 的 stream(真 TextIOWrapper)应该被强制 UTF-8 + replace。"""
+    import sys
+
+    from wxsp.cli import _force_utf8_stdout
+
+    captured: list[tuple[str, str]] = []
+
+    class FakeStream:
+        def reconfigure(self, *, encoding: str, errors: str) -> None:
+            captured.append((encoding, errors))
+
+    fake_out, fake_err = FakeStream(), FakeStream()
+    real_out, real_err = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = fake_out, fake_err  # type: ignore[assignment]
+    try:
+        _force_utf8_stdout()
+    finally:
+        sys.stdout, sys.stderr = real_out, real_err
+
+    # stdout + stderr 各一次,编码都是 utf-8,errors=replace
+    assert captured == [("utf-8", "replace"), ("utf-8", "replace")]
+
+
+def test_force_utf8_stdout_silent_when_stream_has_no_reconfigure() -> None:
+    """StringIO 之类无 .reconfigure 的流不应该让函数 crash。"""
+    import sys
+    from io import StringIO
+
+    from wxsp.cli import _force_utf8_stdout
+
+    real_out, real_err = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = StringIO(), StringIO()  # 无 reconfigure 方法
+    try:
+        _force_utf8_stdout()  # 不应该抛
+    finally:
+        sys.stdout, sys.stderr = real_out, real_err
+
+
+def test_force_utf8_stdout_silent_when_reconfigure_raises() -> None:
+    """流已关闭等场景 reconfigure 抛异常 → 兜住,不让 cli 启动挂掉。"""
+    import sys
+
+    from wxsp.cli import _force_utf8_stdout
+
+    class CrashingStream:
+        def reconfigure(self, *, encoding: str, errors: str) -> None:
+            raise ValueError("stream is detached")
+
+    real_out, real_err = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = CrashingStream(), CrashingStream()  # type: ignore[assignment]
+    try:
+        _force_utf8_stdout()  # 不应该抛
+    finally:
+        sys.stdout, sys.stderr = real_out, real_err
+
+
 def test_run_supports_today_flag() -> None:
     result = runner.invoke(app, ["run", "--help"])
     assert result.exit_code == 0

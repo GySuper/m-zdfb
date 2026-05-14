@@ -416,18 +416,24 @@ def web(
 
     import uvicorn
 
-    settings = load_settings()
-    # M9 文件 sink:web 进程也写文件日志,运维要 tail 时有东西可看
+    # M11 setup mode: config.yaml 不存在时,用默认参数起 Web UI,让向导接管。
     try:
-        install_file_sink(
-            logs_dir=settings.app.logs_dir,
-            retention_days=settings.monitoring.log_retention_days,
-        )
-    except Exception as exc:
-        typer.echo(f"[wxsp] 装日志 sink 失败(继续 stderr): {exc}")
-    bind_host = host or settings.webui.host
-    bind_port = port or settings.webui.port
-    open_browser = settings.webui.open_browser_on_start and not no_browser
+        settings = load_settings()
+        try:
+            install_file_sink(
+                logs_dir=settings.app.logs_dir,
+                retention_days=settings.monitoring.log_retention_days,
+            )
+        except Exception as exc:
+            typer.echo(f"[wxsp] 装日志 sink 失败(继续 stderr): {exc}")
+        bind_host = host or settings.webui.host
+        bind_port = port or settings.webui.port
+        open_browser = settings.webui.open_browser_on_start and not no_browser
+    except FileNotFoundError:
+        typer.echo("[wxsp] 未发现 config.yaml,以 setup 模式启动(浏览器会跳向导)")
+        bind_host = host or "127.0.0.1"
+        bind_port = port or 8765
+        open_browser = not no_browser
 
     if open_browser:
 

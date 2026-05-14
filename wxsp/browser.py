@@ -36,12 +36,18 @@ LOGGED_IN_SELECTOR = (
 
 
 def _chromium_root() -> Path | None:
-    """打包模式返回内嵌 chromium 目录;开发模式返回 None 让 patchright 自己找。"""
+    """打包模式返回内嵌 chromium 目录;开发模式返回 None 让 patchright 自己找。
+
+    优先 PyInstaller 的 _MEIPASS(onedir/onefile 都有)。退化到 sys.executable 相邻目录
+    兼容老 Nuitka --standalone 布局。
+    """
     if not is_packaged():
         return None
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass) / "chromium"
     exe = Path(sys.executable)
     if sys.platform == "darwin":
-        # /Applications/wxsp.app/Contents/MacOS/wxsp → ../Resources/chromium
         return exe.parent.parent / "Resources" / "chromium"
     return exe.parent / "chromium"
 

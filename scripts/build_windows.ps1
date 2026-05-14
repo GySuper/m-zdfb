@@ -1,45 +1,47 @@
-﻿# wxsp Windows 打包(M11)。Nuitka standalone → Inno Setup → setup.exe
+﻿# wxsp Windows 打包(M11)。PyInstaller → onedir bundle → Inno Setup → setup.exe
+# 同 macOS 设计:纯 PyInstaller,字节码保护对付运营/一般技术人员够用。
 $ErrorActionPreference = "Stop"
 
 $Version = if ($env:WXSP_VERSION) { $env:WXSP_VERSION } else { "0.1.0" }
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $ProjectRoot
 
-Write-Host "==> 装 Nuitka(若缺)"
-uv add --dev nuitka 2>&1 | Out-Null
+Write-Host "==> 装 PyInstaller(若缺)"
+uv add --dev pyinstaller 2>&1 | Out-Null
 
 Write-Host "==> 清理旧产物"
-Remove-Item -Recurse -Force dist, build -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force dist, build, wxsp.spec -ErrorAction SilentlyContinue
 
-Write-Host "==> Nuitka 编译"
-# --nofollow-import-to / --lto=no / --jobs=2 / --show-scons: 同 macOS 脚本,见注释
-uv run python -m nuitka `
-  --standalone `
-  --nofollow-import-to=lark_oapi,pydantic,sqlalchemy,sqlmodel,fastapi,starlette,uvicorn,jinja2,apscheduler,loguru,patchright,httpx,httpcore,anyio,typer,click,sniffio,h11 `
-  --lto=no `
-  --jobs=2 `
-  --show-scons `
-  --windows-console-mode=disable `
-  --include-package=wxsp `
-  --include-package-data=wxsp `
-  --include-data-dir=wxsp/templates=wxsp/templates `
-  --include-data-files=deploy/wxsp.plist.tmpl=deploy/wxsp.plist.tmpl `
-  --include-data-files=deploy/wxsp-task.xml.tmpl=deploy/wxsp-task.xml.tmpl `
-  --output-dir=dist `
-  --assume-yes-for-downloads `
-  --remove-output `
-  wxsp/__main__.py
+Write-Host "==> 写 launcher"
+New-Item -ItemType Directory -Force -Path build | Out-Null
+@'
+"""wxsp PyInstaller 入口。"""
+from wxsp.cli import app
 
-# Nuitka 默认产物名 __main__.dist
-$DistDir = "dist/__main__.dist"
+if __name__ == "__main__":
+    app()
+'@ | Out-File -Encoding utf8 build/launcher.py
+
+Write-Host "==> PyInstaller 打包"
+uv run pyinstaller `
+  --onedir `
+  --console `
+  --name wxsp `
+  --collect-all wxsp `
+  --collect-all jinja2 `
+  --collect-all fastapi `
+  --collect-all uvicorn `
+  --collect-all lark_oapi `
+  --collect-all patchright `
+  --noconfirm `
+  build/launcher.py
+
+$DistDir = "dist/wxsp"
 if (-not (Test-Path $DistDir)) {
-  throw "Nuitka 未生成 $DistDir"
+  throw "PyInstaller 未生成 $DistDir"
 }
-Rename-Item $DistDir "wxsp.dist"
-$DistDir = "dist/wxsp.dist"
-Rename-Item "$DistDir/__main__.exe" "wxsp.exe"
 
-Write-Host "==> 内嵌 patchright chromium"
+Write-Host "==> 内嵌 patchright chromium 到 _internal/chromium/"
 $ChromiumSrc = uv run python -c "
 import patchright, os
 d = os.path.join(os.path.dirname(patchright.__file__), 'driver')
@@ -48,7 +50,7 @@ assert c, 'no chromium'
 print(os.path.join(d, c[0]))
 "
 Write-Host "    chromium 源: $ChromiumSrc"
-$ChromiumDst = "$DistDir/chromium"
+$ChromiumDst = "$DistDir/_internal/chromium"
 New-Item -ItemType Directory -Force -Path $ChromiumDst | Out-Null
 Copy-Item -Recurse -Force "$ChromiumSrc/*" $ChromiumDst
 
@@ -57,7 +59,7 @@ $InnoPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 if (-not (Test-Path $InnoPath)) {
   throw "未找到 Inno Setup,装它: choco install innosetup -y"
 }
-& $InnoPath /Qp "/DAppVersion=$Version" "/DSourceDir=$ProjectRoot\dist\wxsp.dist" scripts/setup.iss
+& $InnoPath /Qp "/DAppVersion=$Version" "/DSourceDir=$ProjectRoot\dist\wxsp" scripts/setup.iss
 
 Write-Host "==> 完成"
 Get-ChildItem "dist/*setup*.exe" | Format-Table Name, Length

@@ -15,13 +15,22 @@ from pydantic import BaseModel, Field, model_validator
 
 
 def is_packaged() -> bool:
-    """判断当前是否运行在 Nuitka 编译的二进制里。
+    """判断当前是否运行在打包产物里。
 
-    Nuitka 会给 sys.modules['__main__'] 注入 __compiled__ 属性。
-    WXSP_DEV_MODE=1 可以强制走开发模式(用于在打包产物里本地调试)。
+    覆盖三种打包形态:
+    - PyInstaller bundle:`sys.frozen = True`
+    - Nuitka --standalone(整个 app 编译):`sys.modules['__main__'].__compiled__`
+    - Nuitka --module(只编 wxsp 包成 .so,PyInstaller 包外壳):`wxsp.__compiled__`
+
+    WXSP_DEV_MODE=1 强制走开发模式(用于在打包产物里本地调试)。
     """
     if os.environ.get("WXSP_DEV_MODE") == "1":
         return False
+    if getattr(sys, "frozen", False):
+        return True
+    wxsp_pkg = sys.modules.get("wxsp")
+    if wxsp_pkg is not None and hasattr(wxsp_pkg, "__compiled__"):
+        return True
     return hasattr(sys.modules.get("__main__"), "__compiled__")
 
 

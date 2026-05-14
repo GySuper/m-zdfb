@@ -1,48 +1,58 @@
 #!/usr/bin/env bash
-# wxsp macOS 打包脚本(M11)。Nuitka standalone → app bundle → .dmg。
+# wxsp macOS 打包脚本(M11)。PyInstaller standalone → .app bundle → .dmg。
 # CI 用 macos-latest 跑;本地编译需要 brew install create-dmg。
+#
+# 设计说明:
+# 之前试过 Nuitka(60+ min)和 Nuitka-module+PyInstaller(Python ABI 不兼容),
+# 都不行。这版改用纯 PyInstaller:把 Python 3.11 解释器 + 全依赖 + wxsp 源码
+# (.pyc 字节码)打成 onedir 形式的 .app bundle。
+#
+# 保护强度:Python 3.11 字节码,公开反编译工具(uncompyle6/decompyle3)对 3.11
+# 支持很差,够拦"运营 / 一般技术人员"。
 set -euo pipefail
 
 VERSION="${WXSP_VERSION:-0.1.0}"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-echo "==> 安装 nuitka(若缺)"
-uv add --dev nuitka || true
+echo "==> 安装 PyInstaller(若缺)"
+uv add --dev pyinstaller || true
 
 echo "==> 清理旧产物"
-rm -rf dist build
+rm -rf dist build wxsp.spec
 
-echo "==> Nuitka 编译"
-# --nofollow-import-to: 第三方依赖不进 C 编译,以 .pyc 字节码方式打包。第三方库本就开源,
-# 无需保护;砍掉它们的 C 编译能把 Nuitka 阶段从 ~60 min 缩到 ~5-10 min。
-# 排除的是 file 数量大头(lark_oapi 一家就上千个 auto-gen 模型文件)+ fastapi 全家桶。
-# --lto=no / --jobs=2 / --show-scons: 关 LTO、限并行避免 14GB runner 爆内存、显示进度
-uv run python -m nuitka \
-  --standalone \
-  --nofollow-import-to=lark_oapi,pydantic,sqlalchemy,sqlmodel,fastapi,starlette,uvicorn,jinja2,apscheduler,loguru,patchright,httpx,httpcore,anyio,typer,click,sniffio,h11 \
-  --lto=no \
-  --jobs=2 \
-  --show-scons \
-  --macos-create-app-bundle \
-  --macos-app-name=wxsp \
-  --macos-app-icon=assets/icon.icns \
-  --include-package=wxsp \
-  --include-package-data=wxsp \
-  --include-data-dir=wxsp/templates=wxsp/templates \
-  --include-data-files=deploy/wxsp.plist.tmpl=deploy/wxsp.plist.tmpl \
-  --include-data-files=deploy/wxsp-task.xml.tmpl=deploy/wxsp-task.xml.tmpl \
-  --output-dir=dist \
-  --assume-yes-for-downloads \
-  --remove-output \
-  wxsp/__main__.py
+echo "==> 写 launcher"
+mkdir -p build
+cat > build/launcher.py <<'EOF'
+"""wxsp PyInstaller 入口。"""
+from wxsp.cli import app
 
-APP_PATH="dist/__main__.app"
-# Nuitka 默认按 __main__ 命名,改成 wxsp.app
-mv "$APP_PATH" "dist/wxsp.app"
+if __name__ == "__main__":
+    app()
+EOF
+
+echo "==> PyInstaller 打包"
+uv run pyinstaller \
+  --onedir \
+  --windowed \
+  --name wxsp \
+  --osx-bundle-identifier com.wxsp.app \
+  --collect-all wxsp \
+  --collect-all jinja2 \
+  --collect-all fastapi \
+  --collect-all uvicorn \
+  --collect-all lark_oapi \
+  --collect-all patchright \
+  --noconfirm \
+  build/launcher.py
+
 APP_PATH="dist/wxsp.app"
+if [ ! -d "$APP_PATH" ]; then
+  echo "PyInstaller 未生成 $APP_PATH" >&2
+  exit 1
+fi
 
-echo "==> 内嵌 patchright chromium"
+echo "==> 内嵌 patchright chromium 到 _internal/chromium/"
 CHROMIUM_SRC="$(uv run python -c "
 import patchright, os
 driver = os.path.join(os.path.dirname(patchright.__file__), 'driver')
@@ -51,12 +61,14 @@ assert candidates, f'未在 {driver} 找到 chromium 目录'
 print(os.path.join(driver, candidates[0]))
 ")"
 echo "    chromium 源: $CHROMIUM_SRC"
-mkdir -p "$APP_PATH/Contents/Resources/chromium"
-cp -R "$CHROMIUM_SRC/." "$APP_PATH/Contents/Resources/chromium/"
+# PyInstaller .app 在 mac 下:bundle/Contents/Frameworks/ = _MEIPASS
+CHROMIUM_DST="$APP_PATH/Contents/Frameworks/chromium"
+mkdir -p "$CHROMIUM_DST"
+cp -R "$CHROMIUM_SRC/." "$CHROMIUM_DST/"
 
 echo "==> 修可执行位"
-find "$APP_PATH/Contents/Resources/chromium" -name "Chromium" -exec chmod +x {} \; 2>/dev/null || true
-find "$APP_PATH/Contents/Resources/chromium" -name "chrome" -exec chmod +x {} \; 2>/dev/null || true
+find "$CHROMIUM_DST" -name "Chromium" -exec chmod +x {} \; 2>/dev/null || true
+find "$CHROMIUM_DST" -name "chrome" -exec chmod +x {} \; 2>/dev/null || true
 
 echo "==> 用 create-dmg 打包"
 if ! command -v create-dmg >/dev/null 2>&1; then

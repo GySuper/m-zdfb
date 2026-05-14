@@ -22,12 +22,6 @@ jobs:
       - name: uv sync
         run: uv sync --all-extras
 
-      - name: Cache patchright chromium
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: chromium-mac-${{ hashFiles('uv.lock') }}
-
       - name: Install chromium
         run: uv run patchright install chromium
 
@@ -59,12 +53,6 @@ jobs:
 
       - name: uv sync
         run: uv sync --all-extras
-
-      - name: Cache patchright chromium
-        uses: actions/cache@v4
-        with:
-          path: ~\AppData\Local\ms-playwright
-          key: chromium-win-${{ hashFiles('uv.lock') }}
 
       - name: Install chromium
         run: uv run patchright install chromium

@@ -8,43 +8,49 @@
 
 ---
 
-## 系统要求
+## 安装
 
-- **Python 3.10+**(由 `uv` 管理)
-- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — 包管理器
-- **Chromium**(由 `patchright install chromium` 自动装,带反检测补丁)
-- **NAS 挂载**(可选,把视频/封面文件放本地路径也行)
-- **飞书企业账号** + 已建好 Bitable 多维表格(字段见 CLAUDE.md "飞书 Bitable 表结构")
-- **企微机器人 webhook**(可选,告警渠道)
+### 普通运营用户(推荐)
+
+**macOS**:
+1. 从 [Releases](https://github.com/your-org/wxsp/releases) 下载 `wxsp-x.y.z.dmg`
+2. 双击挂载,把 `wxsp.app` 拖到 `/Applications`
+3. **首次打开**:右键 `wxsp.app` → 「打开」→ 确认。普通双击会被 Gatekeeper 拦截(因为没苹果开发者签名)
+4. 浏览器会自动弹到 http://127.0.0.1:8765/setup —— 走完 6 步向导
+
+**Windows**:
+1. 下载 `wxsp-x.y.z-setup.exe`
+2. **首次打开**:SmartScreen 警告 → 「更多信息」→ 「仍要运行」
+3. 安装向导默认勾选「开机自启」+ 「桌面快捷方式」,确认后安装
+4. 装完自动启动,浏览器弹到 setup 向导
+
+### 开发者(从源码)
+
+需要 Python 3.10+、[uv](https://docs.astral.sh/uv/getting-started/installation/)、Chromium(由 patchright 自动装)、飞书企业账号、企微机器人 webhook(可选)。
+
+```bash
+git clone <repo-url> wechat-sph-upload
+cd wechat-sph-upload
+uv sync
+uv run patchright install chromium
+cp config.example.yaml config.yaml  # 然后编辑
+export FEISHU_APP_SECRET='cli_xxx'
+export WECOM_BOT_WEBHOOK='https://...'
+uv run wxsp doctor                  # 应输出 配置✓ DB✓ NAS✓ 飞书✓
+uv run wxsp web                     # 起 web UI
+```
 
 ---
 
-## 安装
+## 首次设置向导
 
-```bash
-# 1. 克隆
-git clone <repo-url> wechat-sph-upload
-cd wechat-sph-upload
+普通用户装完打开就是向导,走 6 步:**欢迎/自检 → 飞书 → NAS → 账号 → 告警 → 完成**。完成后会自动跳到「账号」页扫码登录。
 
-# 2. 创建虚拟环境 + 安装依赖
-uv sync
+数据落盘位置:
+- macOS: `~/Library/Application Support/wxsp/`
+- Windows: `%APPDATA%\wxsp\`
 
-# 3. 装 Chromium(patchright 加固版)
-uv run patchright install chromium
-
-# 4. 配置
-cp config.example.yaml config.yaml
-# 编辑 config.yaml:填飞书 app_id / bitable / 账号 / NAS 路径
-
-# 5. 设置环境变量(secret 不进 yaml)
-export FEISHU_APP_SECRET='cli_xxx'      # mac/Linux
-export WECOM_BOT_WEBHOOK='https://...'
-# Windows PowerShell:  $env:FEISHU_APP_SECRET="cli_xxx"
-
-# 6. 健康检查
-uv run wxsp doctor
-# 应输出: 配置 ✓ / DB ✓ / NAS ✓ / 飞书 API ✓
-```
+迁机:把上面这个目录整个拷到新机的同位置,新机装好 app 后启动直接跳过向导进 Dashboard。
 
 ---
 

@@ -700,7 +700,7 @@ class NotifyEvent:
 
 ## 起步任务清单(Milestones)
 
-11 个 milestone,每个有明确的可验证成功标准。详细验收标准见 [docs/superpowers/specs/2026-05-12-wxsp-design.md](docs/superpowers/specs/2026-05-12-wxsp-design.md) §7。
+12 个 milestone,每个有明确的可验证成功标准。详细验收标准见 [docs/superpowers/specs/2026-05-12-wxsp-design.md](docs/superpowers/specs/2026-05-12-wxsp-design.md) §7。
 
 ```
 M0 脚手架 ──→ M1 数据层 ──┬──→ M2 浏览器+登录 ──┐
@@ -714,6 +714,9 @@ M0 脚手架 ──→ M1 数据层 ──┬──→ M2 浏览器+登录 ─�
                                                                                                 │
                                                                                                 ↓
                                                                                        M10 部署+文档
+                                                                                                │
+                                                                                                ↓
+                                                                                   M11 安装器+向导
 ```
 
 | # | 主题 | 关键交付 |
@@ -729,8 +732,9 @@ M0 脚手架 ──→ M1 数据层 ──┬──→ M2 浏览器+登录 ─�
 | M8 | Web UI | FastAPI + Jinja2 + HTMX:Dashboard / Accounts / Tasks / TaskDetail / Logs(SSE) / Config + 扫码二维码嵌入 + 手动触发按钮 |
 | M9 | 监控 + 归档 | Dashboard 显示积压 + 重新入队按钮 + 日志/截图清理 |
 | M10 | 部署 + 文档 | deploy/wxsp.plist(mac launchd)+ deploy/wxsp-task.xml(Windows 任务计划程序)+ README |
+| M11 | 安装器 + 设置向导 | Nuitka 编译 + .dmg/.exe 出包 + Web UI 6 页向导 + `wxsp autostart enable/disable` |
 
-**合计 ~15 工作日**。**MVP 截止点 = M7 完成**(端到端跑通:飞书 → 发布 → 通知);M8-M10 是体验/运维优化,生产前不能跳。
+**合计 ~22.5 工作日**。**MVP 截止点 = M7 完成**(端到端跑通:飞书 → 发布 → 通知);M8-M11 是体验/运维优化,生产前不能跳。
 
 **每个 milestone 完成后**:
 1. 跑当前 milestone 的验收标准(详见 design doc §7),**逐项打勾**

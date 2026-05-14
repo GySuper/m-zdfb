@@ -16,11 +16,15 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from patchright.sync_api import Page, sync_playwright
+
+from wxsp.config import is_packaged
 
 WECHAT_CHANNELS_HOME = "https://channels.weixin.qq.com"
 
@@ -29,6 +33,17 @@ WECHAT_CHANNELS_HOME = "https://channels.weixin.qq.com"
 LOGGED_IN_SELECTOR = (
     'div:has-text("发表视频"), button:has-text("发表"), button:has-text("发布视频")'
 )
+
+
+def _chromium_root() -> Path | None:
+    """打包模式返回内嵌 chromium 目录;开发模式返回 None 让 patchright 自己找。"""
+    if not is_packaged():
+        return None
+    exe = Path(sys.executable)
+    if sys.platform == "darwin":
+        # /Applications/wxsp.app/Contents/MacOS/wxsp → ../Resources/chromium
+        return exe.parent.parent / "Resources" / "chromium"
+    return exe.parent / "chromium"
 
 
 @contextmanager
@@ -45,6 +60,9 @@ def browser_context(
     - 反检测靠 patchright 自身的 CDP 指纹修补 + `--disable-blink-features=
       AutomationControlled`,**不再注入** `stealth_js.INIT_SCRIPT`(见模块 docstring)。
     """
+    chromium_root = _chromium_root()
+    if chromium_root is not None:
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(chromium_root)
     user_data_dir.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(

@@ -7,6 +7,10 @@ manually in M2 acceptance (Task 8) and by `wxsp login` against the test account
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
 
 def test_wechat_channels_home_constant_is_https():
     from wxsp.browser import WECHAT_CHANNELS_HOME
@@ -82,3 +86,40 @@ def test_check_cookie_returns_false_when_wait_returns_false(tmp_path, monkeypatc
 
     result = browser_mod.check_cookie(tmp_path / "udd", timeout_ms=1000)
     assert result is False
+
+
+def test_chromium_root_dev_mode_returns_none(monkeypatch) -> None:
+    """开发模式不动 PLAYWRIGHT_BROWSERS_PATH,patchright 走默认查找。"""
+    from wxsp.browser import _chromium_root
+
+    monkeypatch.delenv("WXSP_DEV_MODE", raising=False)
+    # 默认 pytest 不是 Nuitka 编译,is_packaged() False
+    assert _chromium_root() is None
+
+
+def test_chromium_root_packaged_mac(monkeypatch) -> None:
+    """打包模式 mac:返回 sys.executable 上溯 2 级 + Resources/chromium。"""
+    from wxsp import browser
+
+    main_module = sys.modules["__main__"]
+    fake_exec = Path("/Applications/wxsp.app/Contents/MacOS/wxsp")
+    with patch.object(main_module, "__compiled__", True, create=True):
+        monkeypatch.delenv("WXSP_DEV_MODE", raising=False)
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(sys, "executable", str(fake_exec))
+        result = browser._chromium_root()
+        assert result == Path("/Applications/wxsp.app/Contents/Resources/chromium")
+
+
+def test_chromium_root_packaged_windows(monkeypatch) -> None:
+    """打包模式 win:返回 sys.executable 同级 chromium 目录。"""
+    from wxsp import browser
+
+    main_module = sys.modules["__main__"]
+    fake_exec = Path("C:/Program Files/wxsp/wxsp.exe")
+    with patch.object(main_module, "__compiled__", True, create=True):
+        monkeypatch.delenv("WXSP_DEV_MODE", raising=False)
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(sys, "executable", str(fake_exec))
+        result = browser._chromium_root()
+        assert result == Path("C:/Program Files/wxsp/chromium")

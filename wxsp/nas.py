@@ -56,8 +56,7 @@ def stage_to_tmp(src: Path, *, task_id: int, tmp_root: Path) -> Path:
     except OSError as symlink_exc:
         # Windows 上无权限 (WinError 1314) 是最常见原因;不区分细分类,统一兜底
         logger.warning(
-            f"[nas] symlink 失败,fallback 到 copy(src={src.name} task_id={task_id}): "
-            f"{symlink_exc}"
+            f"[nas] symlink 失败,fallback 到 copy(src={src.name} task_id={task_id}): {symlink_exc}"
         )
         try:
             shutil.copy2(src, out_path)

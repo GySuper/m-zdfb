@@ -15,9 +15,10 @@ from wxsp.archive import cleanup_old_files, install_file_sink
 from wxsp.browser import check_cookie
 from wxsp.config import load_settings
 from wxsp.db import get_engine, init_db, session_scope
-from wxsp.doctor import check_nas, record_cookie_check, refresh_cookie_status
+from wxsp.doctor import check_feishu, check_nas, record_cookie_check, refresh_cookie_status
 from wxsp.feishu import FeishuApiError
 from wxsp.models import Account
+from wxsp.notify import NotifyEvent, notify
 from wxsp.publisher import AlreadyClaimed, publish
 from wxsp.scheduler import run_today_pending, start_daemon
 from wxsp.sync import sync_now
@@ -160,12 +161,14 @@ def accounts_resume(account_id: str = typer.Argument(..., help="账号 ID")) -> 
 
 @app.command("doctor")
 def doctor() -> None:
-    """健康检查:账号 / Cookie + NAS(M2 cookie,M4 NAS)。"""
+    """健康检查:账号 / Cookie + NAS + 飞书 API。"""
 
     # cookie_checker 注入点:生产用 wxsp.browser.check_cookie(打开浏览器);测试可 monkeypatch
     def cookie_checker(user_data_dir: Path) -> bool:
         return check_cookie(user_data_dir, timeout_ms=15_000)
 
+    settings = load_settings()
+    warn_threshold = timedelta(days=settings.monitoring.cookie_warn_days)
     cookie_failed = False
 
     with _open_session() as session:
@@ -173,20 +176,40 @@ def doctor() -> None:
         if not session.exec(select(Account)).first():
             typer.echo("[wxsp] 无账号。先 `wxsp accounts add`,再 `wxsp login <id>` 扫码。")
         else:
-            rows = refresh_cookie_status(session, cookie_checker=cookie_checker)
+            rows = refresh_cookie_status(
+                session,
+                cookie_checker=cookie_checker,
+                warn_threshold=warn_threshold,
+            )
             typer.echo(f"{'ID':<14} {'Cookie':<10} {'最后活跃':<20}")
             for row in rows:
                 last_active = (
                     row.last_active_at.strftime("%Y-%m-%d %H:%M") if row.last_active_at else "-"
                 )
                 typer.echo(f"{row.account_id:<14} {row.status:<10} {last_active:<20}")
-                if row.status != "ok":
+                if row.status == "warn":
+                    # 推 cookie_warning 告警(notify_on 里启用时才真发到企微)
+                    notify(
+                        NotifyEvent(
+                            type="cookie_warning",
+                            level="warn",
+                            title=f"Cookie 即将过期: {row.account_id}",
+                            content=(
+                                f"账号 {row.account_id} 距上次成功活跃已超过 "
+                                f"{settings.monitoring.cookie_warn_days} 天,"
+                                f"cookie 可能不稳定,建议主动 `wxsp login {row.account_id}` 续命。"
+                            ),
+                            account_id=row.account_id,
+                        ),
+                        session=session,
+                        settings=settings,
+                    )
+                elif row.status != "ok":
                     cookie_failed = True
 
     # NAS section
-    typer.echo("")  # 空行分隔
+    typer.echo("")
     typer.echo("NAS:")
-    settings = load_settings()
     nas_rows = check_nas(settings)
     nas_failed = False
     for nas_row in nas_rows:
@@ -195,7 +218,17 @@ def doctor() -> None:
         if not nas_row.ok:
             nas_failed = True
 
-    if cookie_failed or nas_failed:
+    # 飞书 API section
+    typer.echo("")
+    typer.echo("飞书:")
+    feishu_failed = False
+    feishu_row = check_feishu(settings)
+    mark = "✅" if feishu_row.ok else "❌"
+    typer.echo(f"  {mark} {feishu_row.label:<20} {feishu_row.detail}")
+    if not feishu_row.ok:
+        feishu_failed = True
+
+    if cookie_failed or nas_failed or feishu_failed:
         raise typer.Exit(code=1)
 
 

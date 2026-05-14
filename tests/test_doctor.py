@@ -6,7 +6,7 @@ exercise it without ever launching a real browser.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +19,7 @@ from wxsp.models import (
     COOKIE_STATUS_EXPIRED,
     COOKIE_STATUS_OK,
     COOKIE_STATUS_UNKNOWN,
+    COOKIE_STATUS_WARN,
     Account,
 )
 
@@ -122,6 +123,101 @@ def test_record_cookie_check_does_not_commit(session: Session) -> None:
     assert account is not None
     assert account.cookie_status == "unknown"  # default, not "ok"
     assert account.cookie_last_active_at is None
+
+
+# ============== record_cookie_check warn 阈值 ==============
+
+
+def test_record_cookie_check_marks_warn_when_last_active_too_old(session: Session) -> None:
+    """idle 太久(now - last_active > warn_threshold)即便本次能登录也要标 warn。"""
+    from wxsp.doctor import record_cookie_check
+
+    old = datetime(2026, 5, 10, 0, 0, 0)
+    account = _add_account(session)
+    account.cookie_last_active_at = old
+    session.add(account)
+    session.commit()
+
+    now = datetime(2026, 5, 12, 12, 0, 0)  # 距 old 2.5 天 > 1.5 天阈值
+    record_cookie_check(
+        session,
+        "account_a",
+        is_logged_in=True,
+        now=now,
+        warn_threshold=timedelta(days=1.5),
+    )
+    session.commit()
+
+    a = session.get(Account, "account_a")
+    assert a is not None
+    assert a.cookie_status == COOKIE_STATUS_WARN
+    # last_active_at 仍然刷新为 now(刚验证过 cookie 活的)
+    assert a.cookie_last_active_at == now
+
+
+def test_record_cookie_check_stays_ok_within_warn_threshold(session: Session) -> None:
+    """idle 时间 < warn_threshold 时维持 ok 不变 warn。"""
+    from wxsp.doctor import record_cookie_check
+
+    yesterday = datetime(2026, 5, 11, 12, 0, 0)
+    account = _add_account(session)
+    account.cookie_last_active_at = yesterday
+    session.add(account)
+    session.commit()
+
+    now = datetime(2026, 5, 12, 12, 0, 0)  # 距 yesterday 1 天 < 1.5 天阈值
+    record_cookie_check(
+        session,
+        "account_a",
+        is_logged_in=True,
+        now=now,
+        warn_threshold=timedelta(days=1.5),
+    )
+    session.commit()
+
+    a = session.get(Account, "account_a")
+    assert a is not None
+    assert a.cookie_status == COOKIE_STATUS_OK
+
+
+def test_record_cookie_check_stays_ok_when_no_prior_last_active(session: Session) -> None:
+    """从未成功过 → last_active_at is None → 不算 idle,首次成功直接 ok。"""
+    from wxsp.doctor import record_cookie_check
+
+    _add_account(session)
+    now = datetime(2026, 5, 12, 12, 0, 0)
+
+    record_cookie_check(
+        session,
+        "account_a",
+        is_logged_in=True,
+        now=now,
+        warn_threshold=timedelta(days=1.5),
+    )
+    session.commit()
+
+    a = session.get(Account, "account_a")
+    assert a is not None
+    assert a.cookie_status == COOKIE_STATUS_OK
+
+
+def test_record_cookie_check_ignores_warn_when_threshold_is_none(session: Session) -> None:
+    """不传 warn_threshold(login 命令场景)→ 永远不 warn,行为不变。"""
+    from wxsp.doctor import record_cookie_check
+
+    old = datetime(2026, 5, 1, 0, 0, 0)
+    account = _add_account(session)
+    account.cookie_last_active_at = old
+    session.add(account)
+    session.commit()
+
+    now = datetime(2026, 5, 12, 12, 0, 0)  # 11 天前,任何阈值都会 warn
+    record_cookie_check(session, "account_a", is_logged_in=True, now=now)  # 不传 threshold
+    session.commit()
+
+    a = session.get(Account, "account_a")
+    assert a is not None
+    assert a.cookie_status == COOKIE_STATUS_OK
 
 
 # ============== refresh_cookie_status ==============
@@ -239,6 +335,26 @@ def test_refresh_cookie_status_passes_pathlib_path_to_checker(session: Session) 
     assert str(received[0]) == "/tmp/profiles/account_a"
 
 
+def test_refresh_cookie_status_forwards_warn_threshold(session: Session) -> None:
+    """refresh 应该把 warn_threshold 透传给 record_cookie_check。"""
+    from wxsp.doctor import refresh_cookie_status
+
+    a = _add_account(session, "account_a")
+    a.cookie_last_active_at = datetime(2026, 5, 10, 0, 0, 0)  # 2.5 天前
+    session.add(a)
+    session.commit()
+
+    rows = refresh_cookie_status(
+        session,
+        cookie_checker=lambda _p: True,
+        now_fn=lambda: datetime(2026, 5, 12, 12, 0, 0),
+        warn_threshold=timedelta(days=1.5),
+    )
+    session.commit()
+
+    assert [(r.account_id, r.status) for r in rows] == [("account_a", COOKIE_STATUS_WARN)]
+
+
 # ============== check_nas(按账号循环)==============
 
 
@@ -317,6 +433,65 @@ def test_check_nas_both_missing(tmp_path: Path) -> None:
     rows = check_nas(settings)
 
     assert all(not r.ok for r in rows)
+
+
+# ============== check_feishu(飞书 API 探测)==============
+
+
+def _settings_with_feishu(tmp_path: Path, *, enabled: bool = True) -> Settings:
+    s = make_settings(tmp_path, tmp_path)
+    s.feishu.enabled = enabled
+    s.feishu.app_id = "cli_test"
+    s.feishu.app_secret = "secret_test"
+    s.feishu.bitable.app_token = "tok_test"
+    s.feishu.bitable.table_id = "tbl_test"
+    return s
+
+
+def test_check_feishu_returns_ok_when_prober_succeeds(tmp_path: Path) -> None:
+    from wxsp.doctor import check_feishu
+
+    settings = _settings_with_feishu(tmp_path)
+    called: list[Settings] = []
+
+    def fake_prober(cfg: Settings) -> None:
+        called.append(cfg)  # 不抛 = ping 成功
+
+    row = check_feishu(settings, prober=fake_prober)
+
+    assert called == [settings]
+    assert row.ok is True
+    assert "tok_test" in row.detail
+    assert "tbl_test" in row.detail
+
+
+def test_check_feishu_returns_failure_when_prober_raises(tmp_path: Path) -> None:
+    from wxsp.doctor import check_feishu
+    from wxsp.feishu import FeishuApiError
+
+    settings = _settings_with_feishu(tmp_path)
+
+    def crashing_prober(cfg: Settings) -> None:
+        raise FeishuApiError("simulated 401 invalid token")
+
+    row = check_feishu(settings, prober=crashing_prober)
+
+    assert row.ok is False
+    assert "simulated 401" in row.detail
+
+
+def test_check_feishu_skipped_when_disabled(tmp_path: Path) -> None:
+    """feishu.enabled=False 时不发起任何探测,直接返回 ok=True 说明已跳过。"""
+    from wxsp.doctor import check_feishu
+
+    settings = _settings_with_feishu(tmp_path, enabled=False)
+
+    def must_not_call(cfg: Settings) -> None:
+        raise AssertionError("prober 不应被调用")
+
+    row = check_feishu(settings, prober=must_not_call)
+    assert row.ok is True
+    assert "未启用" in row.detail or "禁用" in row.detail or "跳过" in row.detail
 
 
 def test_check_nas_returns_empty_when_no_accounts(tmp_path: Path) -> None:

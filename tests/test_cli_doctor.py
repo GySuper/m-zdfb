@@ -254,3 +254,62 @@ def test_doctor_nas_section_runs_even_without_accounts(
     # 即便没账号,NAS section 仍然要出现
     assert "无账号" in result.output
     assert "NAS" in result.output
+
+
+def test_doctor_prints_feishu_section_when_disabled(
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """飞书未启用时 doctor 也要打 '飞书:' section,内容显示已跳过。"""
+    video_root = tmp_path / "videos"
+    cover_root = tmp_path / "covers"
+    video_root.mkdir()
+    cover_root.mkdir()
+    settings = make_settings(video_root, cover_root)  # feishu.enabled 默认 False
+
+    from wxsp import cli as cli_module
+
+    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["doctor"])
+
+    assert "飞书" in result.output
+    assert "跳过" in result.output or "未启用" in result.output
+    assert result.exit_code == 0  # 飞书禁用不算诊断失败
+
+
+def test_doctor_cookie_warn_does_not_fail_exit_code(
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """cookie 标 warn(idle 太久但仍能登录)→ doctor exit 0,不当成失败。"""
+    from datetime import datetime, timedelta
+
+    from sqlmodel import Session as _Session
+
+    # 先建账号,把 last_active 拨到 5 天前(远超默认 cookie_warn_days=1.5)
+    _add_account(db_env, "account_a")
+    engine = get_engine(db_env)
+    with _Session(engine) as s:
+        a = s.get(Account, "account_a")
+        assert a is not None
+        a.cookie_last_active_at = datetime.now() - timedelta(days=5)
+        s.add(a)
+        s.commit()
+
+    video_root = tmp_path / "videos"
+    cover_root = tmp_path / "covers"
+    video_root.mkdir()
+    cover_root.mkdir()
+    settings = _settings_with_account_paths(tmp_path, video_root, cover_root)
+
+    from wxsp import cli as cli_module
+
+    # cookie 仍能登录 → 触发 warn 而不是 expired
+    monkeypatch.setattr(cli_module, "check_cookie", lambda path, *, timeout_ms: True)
+    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0, result.output  # warn 不算失败
+    assert "warn" in result.output

@@ -525,7 +525,7 @@ M0 脚手架 ──→ M1 数据层 ──┬──→ M2 浏览器+登录 ─�
 | **M7** | 通知 + 回写 | `notify.py` + `WecomNotifier` + 飞书回写 + 5 类告警事件 | 故意造 (a) cookie_expired (b) risk_control (c) element_not_found (d) task_failed,企微收到卡片,飞书状态正确回写 | 1d | **M7 完成 (2026-05-13)** —— 真账号企微卡片验收延后
 | **M8** | Web UI | FastAPI + Jinja2 + HTMX:Dashboard / Accounts / Tasks / TaskDetail / Logs(SSE) / Config + 扫码二维码嵌入 + 手动触发按钮 | 打开 `127.0.0.1:8765`:看到 4 账号卡片;点 Task #N "重试"立刻触发;Logs 实时流动 | 3d | **M8 完成 (2026-05-13)** —— 扫码弹 patchright 窗口而非内嵌二维码(Web UI 不持浏览器),其余项目验收通过 |
 | **M9** | 监控 + 归档 | Dashboard 显示积压 + 重新入队按钮 + 日志/截图清理 | 塞 50 条历史 pending,Dashboard 显示"历史积压 X 条";点"重新入队到今天"能改 execute_date;过保留期文件被清掉 | 1d | **M9 完成 (2026-05-14)** —— backlog 查询覆盖 pending+interrupted;`/tasks?backlog=1` 视图 + 行内"重新入队到今天"按钮;`wxsp/archive.py`(cleanup_old_files + install_file_sink + CleanupReport);`wxsp cleanup` CLI;daemon/web 启动时装文件 sink + 调清理 + 跑积压告警;`monitoring.{log,screenshot}_retention_days` 和 `backlog_warn_threshold` 进 config + UI
-| **M10** | 部署 + 文档 | `deploy/wxsp.plist` + `deploy/wxsp-task.xml` + README | mac `launchctl load` 后开机起 daemon;Windows 任务计划程序同效 | 1d |
+| **M10** | 部署 + 文档 | `deploy/wxsp.plist` + `deploy/wxsp-task.xml` + README | mac `launchctl load` 后开机起 daemon;Windows 任务计划程序同效 | 1d | **M10 完成 (2026-05-14)** —— `deploy/wxsp.plist`(macOS LaunchAgent,`gui/$UID` 用户会话,plutil 通过)+ `deploy/wxsp-task.xml`(Windows LogonTrigger,登录后 30s 触发,xmllint 通过)+ README 重写覆盖安装/扫码/启动/开机自启(mac+Win)/故障排查/项目结构/开发约定;真机 `launchctl bootstrap` / `schtasks /Create` 验收延后(无 Windows 环境) |
 
 **合计 ~15 工作日**(单人,不含并行)。**MVP 截止点 = M7 完成**(能端到端跑通飞书 → 发布 → 通知);M8-M10 是体验/运维优化,但生产前不能跳。
 

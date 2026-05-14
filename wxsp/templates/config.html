@@ -11,33 +11,233 @@
     <div class="card" style="border-left: 4px solid var(--error);">
       <h2 style="margin: 0 0 8px 0; color: var(--error);">保存失败,以下问题需要修正</h2>
       <ul style="margin: 0; padding-left: 20px;">
-        {% for e in errors %}
-          <li><code>{{ e }}</code></li>
-        {% endfor %}
+        {% for e in errors %}<li><code>{{ e }}</code></li>{% endfor %}
       </ul>
     </div>
   {% endif %}
 
   <div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-      <h2 style="margin: 0;">config.yaml{% if not exists %} <span class="badge error">未找到</span>{% endif %}</h2>
-    </div>
-    <p class="muted">路径:<code>{{ abs_path }}</code></p>
-    <p class="muted">
-      含 <code>app_secret</code> / <code>webhook</code> / <code>secret</code> / <code>token</code> / <code>password</code> 字样的字段已被掩码为 <code>***</code>;
-      <code>${ENV_VAR}</code> 形式的引用保留。<strong>保存时</strong>没改动的 <code>***</code> 行会自动还原成磁盘上的原值,只覆盖你真正动过的部分。
+    <p class="muted" style="margin: 0;">
+      文件:<code>{{ abs_path }}</code>{% if not exists %} <span class="badge error">未找到</span>{% endif %}
+      · 保存前会自动备份到 <code>config.yaml.bak</code> · 改完立即生效,无需重启服务
     </p>
-    <p class="muted">保存前会自动备份旧文件到 <code>config.yaml.bak</code>。提交后立刻生效;<code>config.yaml</code> 是每次请求都重新读的,无需重启服务。</p>
+  </div>
 
-    <form method="post" action="/config">
-      <textarea name="yaml_text" style="font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; min-height: 480px;" {% if not exists %}readonly{% endif %}>{{ yaml_text }}</textarea>
-      <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+  <form method="post" action="/config">
+
+    <!-- ============== 应用 ============== -->
+    <div class="card">
+      <h2>应用</h2>
+      <div class="row"><label>数据目录</label>
+        <input type="text" name="app_data_dir" value="{{ vm.app_data_dir }}" style="flex:1;">
+      </div>
+      <div class="row"><label>日志目录</label>
+        <input type="text" name="app_logs_dir" value="{{ vm.app_logs_dir }}" style="flex:1;">
+      </div>
+      <div class="row"><label>时区</label>
+        <input type="text" name="app_timezone" value="{{ vm.app_timezone }}" style="flex:1;">
+        <span class="muted" style="font-size: 12px;">如 Asia/Shanghai</span>
+      </div>
+    </div>
+
+    <!-- ============== 路径 ============== -->
+    <div class="card">
+      <h2>路径(NAS)</h2>
+      <div class="row"><label>NAS 根目录</label>
+        <input type="text" name="paths_nas_root" value="{{ vm.paths_nas_root }}" style="flex:1;">
+      </div>
+      <div class="row"><label>视频检索根</label>
+        <input type="text" name="paths_video_search_root" value="{{ vm.paths_video_search_root }}" style="flex:1;">
+        <span class="muted" style="font-size: 12px;">可用 {nas_root} 占位</span>
+      </div>
+      <div class="row"><label>封面检索根</label>
+        <input type="text" name="paths_cover_search_root" value="{{ vm.paths_cover_search_root }}" style="flex:1;">
+      </div>
+    </div>
+
+    <!-- ============== 调度 ============== -->
+    <div class="card">
+      <h2>调度</h2>
+      <div class="row"><label>每日触发(小时)</label>
+        <input type="number" name="sched_hour" value="{{ vm.sched_hour }}" min="0" max="23" style="width: 80px;">
+        <label style="min-width: auto;">分钟</label>
+        <input type="number" name="sched_minute" value="{{ vm.sched_minute }}" min="0" max="59" style="width: 80px;">
+        <span class="muted" style="font-size: 12px;">cron,默认 09:00</span>
+      </div>
+      <div class="row"><label>账号分配策略</label>
+        <select name="sched_strategy">
+          <option value="round-robin" {% if vm.sched_strategy=="round-robin" %}selected{% endif %}>round-robin(轮询)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ============== 发布器 ============== -->
+    <div class="card">
+      <h2>发布器</h2>
+      <div class="row"><label>启用后台静默模式</label>
+        <input type="checkbox" name="pub_headless" {% if vm.pub_headless %}checked{% endif %}>
+        <span class="muted" style="font-size: 12px;">视频号风控敏感,建议保持关闭</span>
+      </div>
+      <div class="row"><label>上传超时(秒)</label>
+        <input type="number" name="pub_upload_timeout" value="{{ vm.pub_upload_timeout }}" min="30" max="3600" style="width: 120px;">
+      </div>
+      <div class="row"><label>步骤间随机停顿</label>
+        <input type="number" name="pub_step_pause_min" value="{{ vm.pub_step_pause_min }}" step="0.1" min="0" style="width: 80px;">
+        <span>~</span>
+        <input type="number" name="pub_step_pause_max" value="{{ vm.pub_step_pause_max }}" step="0.1" min="0" style="width: 80px;">
+        <span class="muted" style="font-size: 12px;">秒,模拟人工节奏</span>
+      </div>
+      <div class="row"><label>失败时截图</label>
+        <input type="checkbox" name="pub_screenshot_on_error" {% if vm.pub_screenshot_on_error %}checked{% endif %}>
+      </div>
+      <div class="row"><label>并发账号上限</label>
+        <input type="number" name="pub_max_concurrent" value="{{ vm.pub_max_concurrent }}" min="1" max="4" style="width: 80px;">
+        <span class="muted" style="font-size: 12px;">同 IP 多账号并发是风控特征,建议 1</span>
+      </div>
+    </div>
+
+    <!-- ============== 飞书 ============== -->
+    <div class="card">
+      <h2>飞书集成</h2>
+      <div class="row"><label>启用</label>
+        <input type="checkbox" name="feishu_enabled" {% if vm.feishu_enabled %}checked{% endif %}>
+      </div>
+      <div class="row"><label>App ID</label>
+        <input type="text" name="feishu_app_id" value="{{ vm.feishu_app_id }}" style="flex:1;">
+      </div>
+      <div class="row"><label>App Secret</label>
+        <input type="password" name="feishu_app_secret" value="{{ vm.feishu_app_secret_display }}" placeholder="留空 = 保持原值;${ENV_VAR} 形式也可" style="flex:1;">
+      </div>
+      <div class="row"><label>Bitable app_token</label>
+        <input type="text" name="feishu_bitable_app_token" value="{{ vm.feishu_bitable_app_token }}" style="flex:1;">
+      </div>
+      <div class="row"><label>Bitable table_id</label>
+        <input type="text" name="feishu_bitable_table_id" value="{{ vm.feishu_bitable_table_id }}" style="flex:1;">
+      </div>
+      <div class="row"><label>同步后回写飞书</label>
+        <input type="checkbox" name="feishu_sync_writeback" {% if vm.feishu_sync_writeback %}checked{% endif %}>
+        <span class="muted" style="font-size: 12px;">发布完成 / 失败时回写"状态 / 链接 / 错误信息"列</span>
+      </div>
+
+      <details style="margin-top: 12px;">
+        <summary style="cursor: pointer; font-weight: 500;">字段名映射(飞书表里的列名 → 工具内部字段)</summary>
+        <div style="margin-top: 12px;">
+          {% for key, default_label in field_map_keys %}
+          <div class="row">
+            <label><code>{{ key }}</code></label>
+            <input type="text" name="feishu_fm_{{ key }}" value="{{ vm.feishu_fm[key] }}" style="flex:1;">
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+    </div>
+
+    <!-- ============== 通知 / 告警 ============== -->
+    <div class="card">
+      <h2>通知 / 告警</h2>
+      <div class="row"><label>Cookie 警告阈值(天)</label>
+        <input type="number" name="mon_cookie_warn_days" value="{{ vm.mon_cookie_warn_days }}" step="0.1" min="0" style="width: 100px;">
+        <span class="muted" style="font-size: 12px;">距离过期不足 N 天就告警</span>
+      </div>
+      <div class="row"><label>企微机器人启用</label>
+        <input type="checkbox" name="mon_wecom_enabled" {% if vm.mon_wecom_enabled %}checked{% endif %}>
+      </div>
+      <div class="row"><label>企微 Webhook</label>
+        <input type="password" name="mon_wecom_webhook" value="{{ vm.mon_wecom_webhook_display }}" placeholder="留空 = 保持原值;${ENV_VAR} 形式也可" style="flex:1;">
+      </div>
+
+      <div style="margin-top: 12px;">
+        <label style="display: block; margin-bottom: 8px;">发送告警的事件类型</label>
+        {% for value, label in notify_on_options %}
+          <label style="display: inline-flex; align-items: center; margin-right: 16px; min-width: auto;">
+            <input type="checkbox" name="notify_on" value="{{ value }}"
+                   {% if value in vm.notify_on %}checked{% endif %}>
+            <span style="margin-left: 4px;">{{ label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- ============== Web UI ============== -->
+    <div class="card">
+      <h2>Web UI</h2>
+      <div class="row"><label>监听 host</label>
+        <input type="text" name="webui_host" value="{{ vm.webui_host }}" style="flex:1;">
+      </div>
+      <div class="row"><label>监听端口</label>
+        <input type="number" name="webui_port" value="{{ vm.webui_port }}" min="1024" max="65535" style="width: 120px;">
+      </div>
+      <div class="row"><label>启动时自动开浏览器</label>
+        <input type="checkbox" name="webui_open_browser" {% if vm.webui_open_browser %}checked{% endif %}>
+      </div>
+    </div>
+
+    <div class="card" style="position: sticky; bottom: 0; background: var(--card); box-shadow: 0 -4px 8px rgba(0,0,0,0.04);">
+      <div style="display: flex; gap: 8px; align-items: center;">
         <button type="submit" class="primary" {% if not exists %}disabled{% endif %}>保存配置</button>
         <a class="btn" href="/config">放弃修改</a>
         <span class="muted" style="margin-left: auto; font-size: 12px;">
-          保存会触发 YAML 解析 + Pydantic 校验,任一失败都不会写盘
+          保存会触发 Pydantic 校验,任一字段非法都不会写盘
         </span>
+      </div>
+    </div>
+  </form>
+
+  <!-- ============== 账号(独立 CRUD)============== -->
+  <div class="card">
+    <h2>账号({{ vm.accounts|length }})</h2>
+    <p class="muted" style="margin-top: 0;">账号列表通过下面单独的添加 / 删除操作维护,改动会立即写盘并校验。</p>
+
+    {% if vm.accounts %}
+    <table>
+      <thead>
+        <tr><th>账号 ID</th><th>显示名</th><th>启用</th><th>日发上限</th><th>Chrome profile 目录</th><th>操作</th></tr>
+      </thead>
+      <tbody>
+        {% for aid, a in vm.accounts.items() %}
+        <tr>
+          <td><code>{{ aid }}</code></td>
+          <td>{{ a.display_name }}</td>
+          <td>{% if a.enabled %}<span class="badge ok">启用</span>{% else %}<span class="badge muted">禁用</span>{% endif %}</td>
+          <td class="muted">{{ a.daily_limit }}</td>
+          <td class="muted"><code>{{ a.user_data_dir }}</code></td>
+          <td>
+            <form method="post" action="/config/accounts/{{ aid }}/delete"
+                  onsubmit="return confirm('确认删除账号 {{ aid }}?(配置文件里的条目会被移除,Chrome profile 目录不会删)');"
+                  style="display:inline;">
+              <button class="danger" type="submit">删除</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="muted">还没有账号,在下方添加一个。</p>
+    {% endif %}
+
+    <h3 style="margin-top: 24px; font-size: 14px;">添加新账号</h3>
+    <form method="post" action="/config/accounts/add">
+      <div class="row"><label>账号 ID</label>
+        <input type="text" name="account_id" required placeholder="如 account_a" style="flex:1;">
+        <span class="muted" style="font-size: 12px;">小写字母 + 下划线;不可与现有账号重复</span>
+      </div>
+      <div class="row"><label>显示名</label>
+        <input type="text" name="display_name" required placeholder="如 美食号" style="flex:1;">
+      </div>
+      <div class="row"><label>启用</label>
+        <input type="checkbox" name="enabled" checked>
+      </div>
+      <div class="row"><label>日发布上限</label>
+        <input type="number" name="daily_limit" value="20" min="1" max="200" style="width: 100px;">
+      </div>
+      <div class="row"><label>Chrome profile 目录</label>
+        <input type="text" name="user_data_dir" required placeholder="./data/chrome-profiles/account_a" style="flex:1;">
+      </div>
+      <div style="margin-top: 8px;">
+        <button type="submit" class="primary">添加账号</button>
       </div>
     </form>
   </div>
+
 {% endblock %}

@@ -75,7 +75,11 @@ jobs:
       - name: Build setup.exe
         env:
           WXSP_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.0.0-dev' }}
-        run: powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
+        shell: pwsh
+        run: |
+          $OutputEncoding = [System.Text.UTF8Encoding]::new()
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+          .\scripts\build_windows.ps1
 
       - uses: actions/upload-artifact@v4
         with:

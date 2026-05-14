@@ -1,4 +1,4 @@
-# wxsp Windows 打包(M11)。Nuitka standalone → Inno Setup → setup.exe
+﻿# wxsp Windows 打包(M11)。Nuitka standalone → Inno Setup → setup.exe
 $ErrorActionPreference = "Stop"
 
 $Version = if ($env:WXSP_VERSION) { $env:WXSP_VERSION } else { "0.1.0" }

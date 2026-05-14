@@ -47,7 +47,8 @@ if (-not (Test-Path $DistDir)) {
 }
 
 Write-Host "==> 内嵌 patchright chromium 到 _internal/chromium/"
-# patchright/playwright 默认装到 %LOCALAPPDATA%\ms-playwright
+# patchright 跑 launch 时按 <PLAYWRIGHT_BROWSERS_PATH>/chromium-<版本>/... 查找,
+# 所以保留 chromium-<版本> 这一层目录。
 $ChromiumSrc = uv run python -c "
 import os, glob
 root = os.environ.get('PLAYWRIGHT_BROWSERS_PATH') or os.path.expandvars(r'%LOCALAPPDATA%\ms-playwright')
@@ -58,7 +59,8 @@ print(c[-1])
 Write-Host "    chromium 源: $ChromiumSrc"
 $ChromiumDst = "$DistDir/_internal/chromium"
 New-Item -ItemType Directory -Force -Path $ChromiumDst | Out-Null
-Copy-Item -Recurse -Force "$ChromiumSrc/*" $ChromiumDst
+# 注意:Copy-Item 用 $src 整个目录(不加 \*)让 chromium-XXXX 名字保留
+Copy-Item -Recurse -Force $ChromiumSrc $ChromiumDst
 
 Write-Host "==> 运行 Inno Setup"
 $InnoPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"

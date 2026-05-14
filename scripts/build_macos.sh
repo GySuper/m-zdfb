@@ -58,8 +58,8 @@ if [ ! -d "$APP_PATH" ]; then
 fi
 
 echo "==> 内嵌 patchright chromium 到 _internal/chromium/"
-# patchright/playwright 把 chromium 装在 PLAYWRIGHT_BROWSERS_PATH 指定的目录
-# (默认 mac: ~/Library/Caches/ms-playwright,win: %LOCALAPPDATA%\ms-playwright)
+# patchright 跑 launch 时按 <PLAYWRIGHT_BROWSERS_PATH>/chromium-<版本>/chrome-mac-arm64/...
+# 查找,所以打包后我们要保留 chromium-<版本> 这一层目录(不是把它的内容铺平)。
 CHROMIUM_SRC="$(uv run python -c "
 import os, glob
 root = os.environ.get('PLAYWRIGHT_BROWSERS_PATH') or os.path.expanduser('~/Library/Caches/ms-playwright')
@@ -71,9 +71,11 @@ echo "    chromium 源: $CHROMIUM_SRC"
 # PyInstaller .app 在 mac 下:bundle/Contents/Frameworks/ = _MEIPASS
 CHROMIUM_DST="$APP_PATH/Contents/Frameworks/chromium"
 mkdir -p "$CHROMIUM_DST"
-cp -R "$CHROMIUM_SRC/." "$CHROMIUM_DST/"
+# 注意:cp 后加 / 让 src 整个目录(含 chromium-XXXX 名字)拷到 dst 下,而不是铺内容
+cp -R "$CHROMIUM_SRC" "$CHROMIUM_DST/"
 
-echo "==> 修可执行位"
+echo "==> 修可执行位(Chrome for Testing / Chromium / chrome 都覆盖)"
+find "$CHROMIUM_DST" -name "Google Chrome for Testing" -exec chmod +x {} \; 2>/dev/null || true
 find "$CHROMIUM_DST" -name "Chromium" -exec chmod +x {} \; 2>/dev/null || true
 find "$CHROMIUM_DST" -name "chrome" -exec chmod +x {} \; 2>/dev/null || true
 

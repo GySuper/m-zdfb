@@ -4,11 +4,56 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
+from platformdirs import user_data_dir as _platform_user_data_dir
+from platformdirs import user_log_dir as _platform_user_log_dir
 from pydantic import BaseModel, Field, model_validator
+
+
+def is_packaged() -> bool:
+    """判断当前是否运行在 Nuitka 编译的二进制里。
+
+    Nuitka 会给 sys.modules['__main__'] 注入 __compiled__ 属性。
+    WXSP_DEV_MODE=1 可以强制走开发模式(用于在打包产物里本地调试)。
+    """
+    if os.environ.get("WXSP_DEV_MODE") == "1":
+        return False
+    return hasattr(sys.modules.get("__main__"), "__compiled__")
+
+
+def get_user_data_dir() -> Path:
+    """返回 data/ 目录绝对路径。
+
+    打包模式:平台规范位置 / wxsp / data
+        mac: ~/Library/Application Support/wxsp/data
+        win: %APPDATA%\\wxsp\\data
+    开发模式:项目根 ./data
+    """
+    if is_packaged():
+        return Path(_platform_user_data_dir("wxsp")) / "data"
+    return Path("./data").resolve()
+
+
+def get_user_logs_dir() -> Path:
+    """返回 logs/ 目录绝对路径。打包模式走 platformdirs,开发模式 ./logs。"""
+    if is_packaged():
+        return Path(_platform_user_log_dir("wxsp"))
+    return Path("./logs").resolve()
+
+
+def get_config_path() -> Path:
+    """返回 config.yaml 的绝对路径。
+
+    打包模式:user_data_dir("wxsp")/config.yaml(与 data/ 同级)
+    开发模式:./config.yaml
+    """
+    if is_packaged():
+        return Path(_platform_user_data_dir("wxsp")) / "config.yaml"
+    return Path("./config.yaml").resolve()
 
 
 class AppConfig(BaseModel):
@@ -148,7 +193,7 @@ def _expand_env_vars(text: str) -> str:
 def load_settings(config_path: Path | None = None) -> Settings:
     """Load and validate config.yaml; expand ${ENV_VAR} and {nas_root}."""
     if config_path is None:
-        config_path = Path("config.yaml")
+        config_path = get_config_path()
     if not config_path.exists():
         raise FileNotFoundError(f"找不到配置文件: {config_path}")
     raw = config_path.read_text(encoding="utf-8")

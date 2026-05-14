@@ -25,12 +25,18 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import ValidationError
 
 from wxsp.api.deps import templates
-from wxsp.config import Settings, _expand_env_vars
+from wxsp.config import Settings, _expand_env_vars, get_config_path
 
 router = APIRouter()
 
-_CONFIG_PATH = Path("config.yaml")
-_BACKUP_PATH = Path("config.yaml.bak")
+
+def _config_path() -> Path:
+    return get_config_path()
+
+
+def _backup_path() -> Path:
+    return get_config_path().with_suffix(".yaml.bak")
+
 
 NOTIFY_ON_OPTIONS: list[tuple[str, str]] = [
     ("cookie_expired", "Cookie 失效"),
@@ -65,9 +71,9 @@ def _profile_dir_for(account_id: str) -> str:
 
 
 def _load_raw_yaml() -> dict[str, Any]:
-    if not _CONFIG_PATH.exists():
+    if not _config_path().exists():
         return {}
-    text = _CONFIG_PATH.read_text(encoding="utf-8")
+    text = _config_path().read_text(encoding="utf-8")
     data = yaml.safe_load(text) or {}
     return data if isinstance(data, dict) else {}
 
@@ -99,10 +105,10 @@ def _validate_dict(data: dict[str, Any]) -> list[str]:
 
 def _save_yaml(data: dict[str, Any]) -> None:
     """备份 + 原子写。"""
-    if _CONFIG_PATH.exists():
-        shutil.copy2(_CONFIG_PATH, _BACKUP_PATH)
+    if _config_path().exists():
+        shutil.copy2(_config_path(), _backup_path())
     text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
-    _atomic_write(_CONFIG_PATH, text)
+    _atomic_write(_config_path(), text)
 
 
 def _display_secret(value: str) -> str:
@@ -192,8 +198,8 @@ def _render_config(
         "config.html",
         {
             "active": "config",
-            "abs_path": str(_CONFIG_PATH.resolve()),
-            "exists": _CONFIG_PATH.exists(),
+            "abs_path": str(_config_path().resolve()),
+            "exists": _config_path().exists(),
             "flash": flash,
             "errors": errors or [],
             "vm": _view_model(data),
@@ -346,7 +352,7 @@ def config_save(
         return _render_config(request, data=new_data, errors=errors, status_code=400)
 
     _save_yaml(new_data)
-    return _render_config(request, data=new_data, flash=f"已保存,旧版本备份在 {_BACKUP_PATH}")
+    return _render_config(request, data=new_data, flash=f"已保存,旧版本备份在 {_backup_path()}")
 
 
 # ---------- 账号 CRUD ----------

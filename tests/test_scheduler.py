@@ -15,8 +15,10 @@ from wxsp.models import Account, Task, Video
 from wxsp.publisher import PublishResult
 from wxsp.scheduler import (
     RunSummary,
+    count_backlog,
     make_scheduler,
     mark_stale_running_as_interrupted,
+    maybe_warn_backlog,
     queue_today,
     run_today_pending,
 )
@@ -372,3 +374,111 @@ def test_make_scheduler_registers_daily_cron_with_configured_time(
     field_values = {f.name: str(f) for f in trigger.fields}
     assert field_values["hour"] == "9"
     assert field_values["minute"] == "0"
+
+
+# ============== M9 count_backlog + maybe_warn_backlog ==============
+
+
+def _seed_task_with_status(
+    session: Session, *, video_id: str, exec_date: date, status: str
+) -> None:
+    _seed_account_video(session, video_id=video_id)
+    session.add(
+        Task(
+            video_id=video_id,
+            account_id="a",
+            execute_date=exec_date,
+            publish_at=datetime.combine(exec_date, datetime.min.time()),
+            status=status,
+        )
+    )
+
+
+def test_count_backlog_only_counts_past_pending_and_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    two_days_ago = today - timedelta(days=2)
+
+    with session_scope(engine) as session:
+        # 计入
+        _seed_task_with_status(session, video_id="v1", exec_date=yesterday, status="pending")
+        _seed_task_with_status(session, video_id="v2", exec_date=two_days_ago, status="interrupted")
+        # 不计入
+        _seed_task_with_status(session, video_id="v3", exec_date=yesterday, status="success")
+        _seed_task_with_status(session, video_id="v4", exec_date=yesterday, status="failed")
+        _seed_task_with_status(session, video_id="v5", exec_date=today, status="pending")
+
+    with Session(engine) as session:
+        assert count_backlog(session, today=today) == 2
+
+
+def test_maybe_warn_backlog_pushes_notification_when_over_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """积压 > 阈值时调用 notify();==阈值不触发。"""
+    from wxsp import scheduler as sched_mod
+
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    with session_scope(engine) as session:
+        for i in range(3):
+            _seed_task_with_status(session, video_id=f"v{i}", exec_date=yesterday, status="pending")
+
+    settings = make_settings(tmp_path, tmp_path)
+    settings.monitoring.backlog_warn_threshold = 2  # 3 > 2 → 应触发
+
+    captured: list = []
+    monkeypatch.setattr(
+        sched_mod, "notify", lambda event, *, session, settings: captured.append(event)
+    )
+
+    with Session(engine) as session:
+        backlog = maybe_warn_backlog(settings, session=session)
+
+    assert backlog == 3
+    assert len(captured) == 1
+    assert captured[0].type == "backlog_high"
+    assert captured[0].level == "warn"
+    assert captured[0].context["backlog"] == 3
+
+
+def test_maybe_warn_backlog_silent_when_at_or_under_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from wxsp import scheduler as sched_mod
+
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    with session_scope(engine) as session:
+        for i in range(2):
+            _seed_task_with_status(session, video_id=f"v{i}", exec_date=yesterday, status="pending")
+
+    settings = make_settings(tmp_path, tmp_path)
+    settings.monitoring.backlog_warn_threshold = 2  # 2 == 阈值,不触发(spec: > 阈值)
+
+    captured: list = []
+    monkeypatch.setattr(
+        sched_mod, "notify", lambda event, *, session, settings: captured.append(event)
+    )
+
+    with Session(engine) as session:
+        backlog = maybe_warn_backlog(settings, session=session)
+
+    assert backlog == 2
+    assert captured == []

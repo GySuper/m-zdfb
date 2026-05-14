@@ -41,6 +41,8 @@ ERROR_TYPE_CN: dict[str, str] = {
     "upload_failed": "上传失败",
     "feishu_api_error": "飞书 API 错误",
     "unknown": "未知错误",
+    "cookie_warning": "Cookie 即将过期",
+    "backlog_high": "历史积压超阈值",
 }
 
 

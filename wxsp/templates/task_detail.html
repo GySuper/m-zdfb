@@ -11,6 +11,11 @@
             <button class="primary" type="submit">重试</button>
           </form>
         {% endif %}
+        {% if requeueable %}
+          <form method="post" action="/tasks/{{ task.id }}/requeue" style="display:inline;">
+            <button type="submit" title="把执行日期改成今天,需再点'立即跑今天'才会真跑">重新入队到今天</button>
+          </form>
+        {% endif %}
       </div>
     </div>
   </div>

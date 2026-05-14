@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import date as _date
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -201,3 +202,172 @@ def test_run_today_spawns_scheduler(
     r = c.post("/tasks/run-today", follow_redirects=False)
     assert r.status_code == 303
     assert calls == ["run-today"]
+
+
+# ============== 重新入队 + backlog 过滤(M9) ==============
+
+
+def _seed_backlog_task(
+    engine: Any,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+    *,
+    task_id: int,
+    video_id: str,
+    title: str,
+    exec_date: _date,
+    status: str,
+) -> None:
+    """单独建一条积压任务,跟 client_with_data 里的 task #1 不冲突。"""
+    with session_scope(engine) as s:
+        s.add(
+            Video(
+                id=video_id,
+                file_path=f"/x/{video_id}.mp4",
+                title=title,
+                description=None,
+                tags_json="[]",
+                cover_path=None,
+                topic=None,
+                original_claim=False,
+                file_hash=None,
+                ingested_at=datetime.now(),
+            )
+        )
+        s.add(
+            Task(
+                id=task_id,
+                video_id=video_id,
+                account_id="account_a",
+                execute_date=exec_date,
+                publish_at=datetime.combine(exec_date, datetime.min.time()),
+                status=status,
+            )
+        )
+
+
+def test_tasks_backlog_filter_shows_only_past_pending_and_interrupted(
+    client_with_data: tuple[TestClient, _date],
+    tmp_path: Path,
+) -> None:
+    c, today = client_with_data
+    engine = get_engine(tmp_path / "db.sqlite")
+    yesterday = today - timedelta(days=1)
+    two_days_ago = today - timedelta(days=2)
+    _seed_backlog_task(
+        engine,
+        tmp_path,
+        task_id=2,
+        video_id="rec2",
+        title="昨天pending",
+        exec_date=yesterday,
+        status="pending",
+    )
+    _seed_backlog_task(
+        engine,
+        tmp_path,
+        task_id=3,
+        video_id="rec3",
+        title="前天interrupted",
+        exec_date=two_days_ago,
+        status="interrupted",
+    )
+    _seed_backlog_task(
+        engine,
+        tmp_path,
+        task_id=4,
+        video_id="rec4",
+        title="昨天成功",
+        exec_date=yesterday,
+        status="success",
+    )
+
+    r = c.get("/tasks?backlog=1")
+    assert r.status_code == 200
+    assert "昨天pending" in r.text
+    assert "前天interrupted" in r.text
+    assert "昨天成功" not in r.text  # success 不算积压
+    assert "国庆短片" not in r.text  # client_with_data 里 task #1 是 today 的 failed
+
+
+def test_requeue_changes_execute_date_to_today_and_resets_to_pending(
+    client_with_data: tuple[TestClient, _date],
+    tmp_path: Path,
+) -> None:
+    c, today = client_with_data
+    engine = get_engine(tmp_path / "db.sqlite")
+    yesterday = today - timedelta(days=1)
+    _seed_backlog_task(
+        engine,
+        tmp_path,
+        task_id=2,
+        video_id="rec2",
+        title="t",
+        exec_date=yesterday,
+        status="interrupted",
+    )
+
+    r = c.post("/tasks/2/requeue", follow_redirects=False)
+    assert r.status_code == 303
+
+    with session_scope(engine) as s:
+        t = s.get(Task, 2)
+        assert t is not None
+        assert t.execute_date == today
+        assert t.status == "pending"
+        assert t.lease_token is None
+        assert t.lease_expires_at is None
+
+
+def test_requeue_rejects_when_already_today(
+    client_with_data: tuple[TestClient, _date],
+    tmp_path: Path,
+) -> None:
+    c, today = client_with_data
+    engine = get_engine(tmp_path / "db.sqlite")
+    _seed_backlog_task(
+        engine,
+        tmp_path,
+        task_id=2,
+        video_id="rec2",
+        title="t",
+        exec_date=today,
+        status="pending",
+    )
+
+    r = c.post("/tasks/2/requeue", follow_redirects=False)
+    assert r.status_code == 303
+    with session_scope(engine) as s:
+        t = s.get(Task, 2)
+        assert t is not None
+        assert t.execute_date == today  # 没变,确认幂等
+
+
+def test_requeue_rejects_non_backlog_status(
+    client_with_data: tuple[TestClient, _date],
+    tmp_path: Path,
+) -> None:
+    c, today = client_with_data
+    engine = get_engine(tmp_path / "db.sqlite")
+    yesterday = today - timedelta(days=1)
+    _seed_backlog_task(
+        engine,
+        tmp_path,
+        task_id=2,
+        video_id="rec2",
+        title="t",
+        exec_date=yesterday,
+        status="success",
+    )
+
+    r = c.post("/tasks/2/requeue", follow_redirects=False)
+    assert r.status_code == 303
+    with session_scope(engine) as s:
+        t = s.get(Task, 2)
+        assert t is not None
+        assert t.execute_date == yesterday  # 不动
+        assert t.status == "success"
+
+
+def test_requeue_unknown_task_404(client_with_data: tuple[TestClient, _date]) -> None:
+    c, _ = client_with_data
+    assert c.post("/tasks/999/requeue").status_code == 404

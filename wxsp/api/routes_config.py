@@ -39,6 +39,7 @@ NOTIFY_ON_OPTIONS: list[tuple[str, str]] = [
     ("task_failed", "任务失败"),
     ("element_not_found", "元素未找到(可能改版)"),
     ("nas_unreachable", "NAS 不可达"),
+    ("backlog_high", "历史积压超阈值"),
 ]
 
 FIELD_MAP_KEYS: list[tuple[str, str]] = [
@@ -164,6 +165,10 @@ def _view_model(data: dict[str, Any]) -> dict[str, Any]:
         "mon_wecom_enabled": bool(wecom.get("enabled", True)),
         "mon_wecom_webhook_display": _display_secret(wecom.get("webhook", "")),
         "notify_on": mon.get("notify_on", []) or [],
+        # M9 归档 + 积压
+        "mon_log_retention_days": mon.get("log_retention_days", 30),
+        "mon_screenshot_retention_days": mon.get("screenshot_retention_days", 90),
+        "mon_backlog_warn_threshold": mon.get("backlog_warn_threshold", 20),
         # webui
         "webui_host": webui.get("host", "127.0.0.1"),
         "webui_port": webui.get("port", 8765),
@@ -258,6 +263,9 @@ def config_save(
     mon_wecom_enabled: bool = Form(False),
     mon_wecom_webhook: str = Form(""),
     notify_on: list[str] = Form(default_factory=list),
+    mon_log_retention_days: int = Form(30),
+    mon_screenshot_retention_days: int = Form(90),
+    mon_backlog_warn_threshold: int = Form(20),
     # webui
     webui_host: str = Form(...),
     webui_port: int = Form(...),
@@ -322,6 +330,9 @@ def config_save(
                 },
             },
             "notify_on": notify_on,
+            "log_retention_days": mon_log_retention_days,
+            "screenshot_retention_days": mon_screenshot_retention_days,
+            "backlog_warn_threshold": mon_backlog_warn_threshold,
         },
         "webui": {
             "host": webui_host,

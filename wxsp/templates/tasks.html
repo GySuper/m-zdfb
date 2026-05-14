@@ -8,9 +8,15 @@
   {% endif %}
 
   <div class="card">
+    {% if backlog_mode %}
+      <p style="margin: 0 0 8px 0;">
+        <strong>历史积压视图</strong> · 仅显示执行日期早于今天且仍是待发布/已中断的任务
+        · <a class="btn" href="/tasks">返回今日</a>
+      </p>
+    {% endif %}
     <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 12px;">
       <form method="get" action="/tasks" style="display: flex; gap: 12px; align-items: flex-end;">
-        <label>执行日期 <input type="date" name="date" value="{{ filter_date }}"></label>
+        <label>执行日期 <input type="date" name="date" value="{{ filter_date or '' }}"></label>
         <label>账号
           <select name="account">
             <option value="">全部</option>
@@ -67,6 +73,11 @@
             {% if r.retryable %}
               <form method="post" action="/tasks/{{ r.id }}/retry" style="display:inline;">
                 <button class="primary" type="submit">重试</button>
+              </form>
+            {% endif %}
+            {% if r.requeueable %}
+              <form method="post" action="/tasks/{{ r.id }}/requeue" style="display:inline;">
+                <button type="submit" title="把执行日期改成今天,需再点'立即跑今天'才会真跑">重新入队到今天</button>
               </form>
             {% endif %}
           </td>

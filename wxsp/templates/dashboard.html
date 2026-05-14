@@ -3,8 +3,12 @@
 {% block content %}
   <div class="card">
     <h2>今日总览 · {{ today }}</h2>
-    <p class="muted">当前时间 {{ now.strftime("%Y-%m-%d %H:%M:%S") }} · 历史积压(执行日期早于今天且仍待发布):
-      <strong>{{ backlog }}</strong> 条</p>
+    <p class="muted">当前时间 {{ now.strftime("%Y-%m-%d %H:%M:%S") }} · 历史积压(执行日期早于今天且仍待发布/已中断):
+      {% if backlog > 0 %}
+        <a href="/tasks?backlog=1"><strong>{{ backlog }}</strong> 条 →</a>
+      {% else %}
+        <strong>{{ backlog }}</strong> 条
+      {% endif %}</p>
     <div>
       <span class="badge muted">待发布 {{ counts.pending }}</span>
       <span class="badge ok">已发布 {{ counts.success }}</span>

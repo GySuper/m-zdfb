@@ -7,11 +7,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from wxsp.api.deps import get_session, get_settings, templates
 from wxsp.config import Settings
-from wxsp.models import Account, Event, Task
+from wxsp.models import TASK_STATUS_INTERRUPTED, TASK_STATUS_PENDING, Account, Event, Task
 
 router = APIRouter()
 
@@ -43,11 +43,16 @@ def dashboard(
         bucket = per_account.setdefault(t.account_id, dict.fromkeys(counts, 0))
         bucket[t.status] = bucket.get(t.status, 0) + 1
 
-    # 历史积压:execute_date < today 且 status=pending
+    # 历史积压:execute_date < today 且 status ∈ {pending, interrupted}
+    # spec §5.6:pending(还没跑)+ interrupted(跑了一半挂了)都算积压;
+    # failed/success/skipped 不计(需要走重试或已经走完了)。
     backlog = len(
         list(
             session.exec(
-                select(Task).where(Task.execute_date < today, Task.status == "pending")
+                select(Task).where(
+                    Task.execute_date < today,
+                    col(Task.status).in_([TASK_STATUS_PENDING, TASK_STATUS_INTERRUPTED]),
+                )
             ).all()
         )
     )

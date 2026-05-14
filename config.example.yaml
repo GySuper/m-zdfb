@@ -82,7 +82,7 @@ feishu:
   sync:
     write_back_enabled: true
 
-# ============== 告警 ==============
+# ============== 告警 + 归档(M9) ==============
 monitoring:
   cookie_warn_days: 1.5
   notifiers:
@@ -96,6 +96,12 @@ monitoring:
     - task_failed
     - element_not_found
     - nas_unreachable
+    - backlog_high
+  # 启动时清旧文件用(spec §6.3)
+  log_retention_days: 30
+  screenshot_retention_days: 90
+  # 历史积压(execute_date<today + pending/interrupted)超此数推 backlog_high 告警
+  backlog_warn_threshold: 20
 
 # ============== Web UI ==============
 webui:

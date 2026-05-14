@@ -94,6 +94,11 @@ class MonitoringConfig(BaseModel):
     cookie_warn_days: float = 1.5
     notifiers: NotifiersConfig
     notify_on: list[str] = Field(default_factory=list)
+    # M9 归档保留期(spec §6.3)
+    log_retention_days: int = 30
+    screenshot_retention_days: int = 90
+    # M9 积压告警阈值(spec §5.6),> 此数推一条 backlog_high 告警
+    backlog_warn_threshold: int = 20
 
 
 class WebUIConfig(BaseModel):

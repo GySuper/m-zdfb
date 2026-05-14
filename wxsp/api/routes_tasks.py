@@ -18,15 +18,26 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from wxsp.api.deps import get_session, get_settings, templates
 from wxsp.config import Settings
-from wxsp.models import Account, Event, Task, Video
+from wxsp.models import (
+    TASK_STATUS_INTERRUPTED,
+    TASK_STATUS_PENDING,
+    Account,
+    Event,
+    Task,
+    Video,
+)
 
 router = APIRouter()
 
 RETRYABLE_STATUSES = {"failed", "interrupted"}
+# 重新入队适用于"积压"的两类:还没跑(pending)+ 跑了一半挂了(interrupted)。
+# 失败任务(failed)走"重试"按钮——重试会重新认领 + 后台 spawn 跑;
+# 重新入队只改 execute_date,等下次手动 run-today / 09:00 cron 才跑。
+REQUEUE_STATUSES = {TASK_STATUS_PENDING, TASK_STATUS_INTERRUPTED}
 
 
 def _spawn(name: str, fn: Any, *args: Any, **kwargs: Any) -> None:
@@ -45,24 +56,34 @@ def tasks_page(
     date: str | None = None,
     account: str | None = None,
     status: str | None = None,
+    backlog: int | None = None,
     flash: str | None = None,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
-    parsed_date = _parse_date(date) if date else _date.today()
+    today = _date.today()
+    backlog_mode = bool(backlog)
+    parsed_date = None if backlog_mode else (_parse_date(date) if date else today)
 
     stmt = select(Task, Video).join(Video, Task.video_id == Video.id)  # type: ignore[arg-type]
-    if parsed_date is not None:
+    if backlog_mode:
+        # spec §5.6 "历史积压":execute_date < today AND status ∈ {pending, interrupted}
+        stmt = stmt.where(
+            Task.execute_date < today,
+            col(Task.status).in_([TASK_STATUS_PENDING, TASK_STATUS_INTERRUPTED]),
+        )
+    elif parsed_date is not None:
         stmt = stmt.where(Task.execute_date == parsed_date)
     if account:
         stmt = stmt.where(Task.account_id == account)
     if status:
         stmt = stmt.where(Task.status == status)
-    stmt = stmt.order_by(Task.publish_at.asc())  # type: ignore[attr-defined]
+    stmt = stmt.order_by(Task.execute_date.asc(), Task.publish_at.asc())  # type: ignore[attr-defined]
 
     pairs = list(session.exec(stmt).all())
     rows: list[dict[str, Any]] = []
     for t, v in pairs:
+        is_backlog_row = t.execute_date < today and t.status in REQUEUE_STATUSES
         rows.append(
             {
                 "id": t.id,
@@ -75,6 +96,7 @@ def tasks_page(
                 "last_error_type": t.last_error_type,
                 "remote_url": t.remote_url,
                 "retryable": t.status in RETRYABLE_STATUSES,
+                "requeueable": is_backlog_row,
             }
         )
 
@@ -88,6 +110,7 @@ def tasks_page(
             "filter_date": parsed_date,
             "filter_account": account or "",
             "filter_status": status or "",
+            "backlog_mode": backlog_mode,
             "account_options": account_options,
             "status_options": ["pending", "running", "success", "failed", "skipped", "interrupted"],
             "flash": flash,
@@ -120,6 +143,7 @@ def task_detail(
     except Exception:
         screenshots = []
 
+    today = _date.today()
     return templates.TemplateResponse(
         request,
         "task_detail.html",
@@ -131,6 +155,7 @@ def task_detail(
             "events": events,
             "screenshots": screenshots,
             "retryable": task.status in RETRYABLE_STATUSES,
+            "requeueable": task.execute_date < today and task.status in REQUEUE_STATUSES,
         },
     )
 
@@ -160,6 +185,45 @@ def retry_task(
     session.add(task)
     _spawn("retry", _run_publish, task_id, settings)
     return RedirectResponse(url=f"/tasks/{task_id}?flash=已加入队列重试", status_code=303)
+
+
+@router.post("/tasks/{task_id}/requeue")
+def requeue_task(
+    task_id: int,
+    session: Session = Depends(get_session),
+) -> RedirectResponse:
+    """把积压(execute_date<today + pending/interrupted)的 task 改 execute_date=today。
+
+    spec §5.6:不做自动 rollover,运营在 Dashboard 看到积压后手动决定要不要拉到今天。
+    本路由只改日期 + 重置到 pending(清错误/lease);需要运营再点"立即跑今天"才会真跑。
+    """
+    task = session.get(Task, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} 不存在")
+    today = _date.today()
+    if task.status not in REQUEUE_STATUSES:
+        return RedirectResponse(
+            url=f"/tasks/{task_id}?flash=当前状态不能重新入队: {task.status}",
+            status_code=303,
+        )
+    if task.execute_date >= today:
+        return RedirectResponse(
+            url=f"/tasks/{task_id}?flash=执行日期已是今天或更晚,无需重新入队",
+            status_code=303,
+        )
+    task.execute_date = today
+    task.status = "pending"
+    task.lease_token = None
+    task.lease_expires_at = None
+    task.started_at = None
+    task.finished_at = None
+    task.last_error_type = None
+    task.last_error_msg = None
+    session.add(task)
+    return RedirectResponse(
+        url=f"/tasks/{task_id}?flash=已重新入队到今天(还需点'立即跑今天'才会真跑)",
+        status_code=303,
+    )
 
 
 @router.post("/tasks/run-today")

@@ -11,6 +11,7 @@ import typer
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from wxsp.archive import cleanup_old_files, install_file_sink
 from wxsp.browser import check_cookie
 from wxsp.config import load_settings
 from wxsp.db import get_engine, init_db, session_scope
@@ -294,6 +295,25 @@ def logs(
     _not_implemented(f"logs --task-id {task_id} --follow {follow}")
 
 
+@app.command("cleanup")
+def cleanup() -> None:
+    """清理过保留期的日志 / 失败截图(M9)。
+
+    保留期来自 config.yaml/monitoring.log_retention_days (默认 30) +
+    monitoring.screenshot_retention_days (默认 90)。daemon 启动也会自动跑一次。
+    """
+    settings = load_settings()
+    report = cleanup_old_files(
+        logs_dir=settings.app.logs_dir,
+        log_retention_days=settings.monitoring.log_retention_days,
+        screenshot_retention_days=settings.monitoring.screenshot_retention_days,
+    )
+    typer.echo(
+        f"[wxsp] 清理完成: 日志 {report.logs_removed} 个 / 截图 {report.screenshots_removed} 个 "
+        f"/ 释放 {report.bytes_freed} bytes"
+    )
+
+
 @app.command("web")
 def web(
     port: int | None = typer.Option(None, "--port", "-p", help="覆盖 config.yaml 的端口"),
@@ -312,6 +332,14 @@ def web(
     import uvicorn
 
     settings = load_settings()
+    # M9 文件 sink:web 进程也写文件日志,运维要 tail 时有东西可看
+    try:
+        install_file_sink(
+            logs_dir=settings.app.logs_dir,
+            retention_days=settings.monitoring.log_retention_days,
+        )
+    except Exception as exc:
+        typer.echo(f"[wxsp] 装日志 sink 失败(继续 stderr): {exc}")
     bind_host = host or settings.webui.host
     bind_port = port or settings.webui.port
     open_browser = settings.webui.open_browser_on_start and not no_browser

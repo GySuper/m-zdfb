@@ -524,7 +524,7 @@ M0 脚手架 ──→ M1 数据层 ──┬──→ M2 浏览器+登录 ─�
 | **M6** | 调度 daemon | `scheduler.py` (09:00 cron + 手动 fire,无 polling) + `wxsp run --daemon` + `wxsp run --today` + `wxsp sync` + worker 入口前自动调 `feishu.sync_now()` + 启动扫描 running→interrupted | 09:00 cron 触发时先 sync 飞书再扫 today pending 入队;手动 `wxsp run --today` 等效;`wxsp sync` 只拉飞书不跑任务;kill 后重启 running→interrupted | 1.5d | **M6 完成 (2026-05-13)** |
 | **M7** | 通知 + 回写 | `notify.py` + `WecomNotifier` + 飞书回写 + 5 类告警事件 | 故意造 (a) cookie_expired (b) risk_control (c) element_not_found (d) task_failed,企微收到卡片,飞书状态正确回写 | 1d | **M7 完成 (2026-05-13)** —— 真账号企微卡片验收延后
 | **M8** | Web UI | FastAPI + Jinja2 + HTMX:Dashboard / Accounts / Tasks / TaskDetail / Logs(SSE) / Config + 扫码二维码嵌入 + 手动触发按钮 | 打开 `127.0.0.1:8765`:看到 4 账号卡片;点 Task #N "重试"立刻触发;Logs 实时流动 | 3d | **M8 完成 (2026-05-13)** —— 扫码弹 patchright 窗口而非内嵌二维码(Web UI 不持浏览器),其余项目验收通过 |
-| **M9** | 监控 + 归档 | Dashboard 显示积压 + 重新入队按钮 + 日志/截图清理 | 塞 50 条历史 pending,Dashboard 显示"历史积压 X 条";点"重新入队到今天"能改 execute_date;过保留期文件被清掉 | 1d |
+| **M9** | 监控 + 归档 | Dashboard 显示积压 + 重新入队按钮 + 日志/截图清理 | 塞 50 条历史 pending,Dashboard 显示"历史积压 X 条";点"重新入队到今天"能改 execute_date;过保留期文件被清掉 | 1d | **M9 完成 (2026-05-14)** —— backlog 查询覆盖 pending+interrupted;`/tasks?backlog=1` 视图 + 行内"重新入队到今天"按钮;`wxsp/archive.py`(cleanup_old_files + install_file_sink + CleanupReport);`wxsp cleanup` CLI;daemon/web 启动时装文件 sink + 调清理 + 跑积压告警;`monitoring.{log,screenshot}_retention_days` 和 `backlog_warn_threshold` 进 config + UI
 | **M10** | 部署 + 文档 | `deploy/wxsp.plist` + `deploy/wxsp-task.xml` + README | mac `launchctl load` 后开机起 daemon;Windows 任务计划程序同效 | 1d |
 
 **合计 ~15 工作日**(单人,不含并行)。**MVP 截止点 = M7 完成**(能端到端跑通飞书 → 发布 → 通知);M8-M10 是体验/运维优化,但生产前不能跳。

@@ -14,6 +14,7 @@ from loguru import logger
 from sqlalchemy import update
 from sqlmodel import Session, col, select
 
+from wxsp.archive import cleanup_old_files, install_file_sink
 from wxsp.config import Settings
 from wxsp.db import get_engine, init_db, session_scope
 from wxsp.models import (
@@ -23,6 +24,7 @@ from wxsp.models import (
     Account,
     Task,
 )
+from wxsp.notify import NotifyEvent, notify
 from wxsp.publisher import AlreadyClaimed, publish
 from wxsp.sync import sync_now
 
@@ -49,6 +51,48 @@ def queue_today(session: Session, *, today: _date | None = None) -> list[int]:
         .order_by(col(Task.publish_at).asc())
     )
     return [task.id for task in session.exec(stmt) if task.id is not None]
+
+
+def count_backlog(session: Session, *, today: _date | None = None) -> int:
+    """spec §5.6 历史积压计数:execute_date < today AND status ∈ {pending, interrupted}。
+
+    Daemon 启动用、积压告警判定用。本函数只读、不 commit。
+    """
+    if today is None:
+        today = _date.today()
+    stmt = select(Task).where(
+        Task.execute_date < today,
+        col(Task.status).in_([TASK_STATUS_PENDING, TASK_STATUS_INTERRUPTED]),
+    )
+    return len(list(session.exec(stmt).all()))
+
+
+def maybe_warn_backlog(settings: Settings, *, session: Session) -> int:
+    """积压超阈值 → 推一条 backlog_high 通知(企微 + Event 表)。返回当前积压数。
+
+    阈值 = `monitoring.backlog_warn_threshold`(默认 20)。
+    去重交给 notify() 自己 —— 这里每次调用都会落一条 Event,但只有 backlog_high
+    在 `monitoring.notify_on` 里时才推外部渠道。重复推送由调用频率决定(目前每天 09:00
+    cron + daemon 启动各一次),不在本函数里防抖。
+    """
+    backlog = count_backlog(session)
+    if backlog > settings.monitoring.backlog_warn_threshold:
+        notify(
+            NotifyEvent(
+                type="backlog_high",
+                level="warn",
+                title=f"历史积压 {backlog} 条",
+                content=(
+                    f"今天之前还有 {backlog} 条任务没跑完(pending/interrupted),"
+                    f"超过阈值 {settings.monitoring.backlog_warn_threshold}。"
+                    f"建议在 Web UI 的'历史积压'视图里逐条处理。"
+                ),
+                context={"backlog": backlog},
+            ),
+            session=session,
+            settings=settings,
+        )
+    return backlog
 
 
 def mark_stale_running_as_interrupted(session: Session, *, now: datetime | None = None) -> int:
@@ -153,16 +197,44 @@ def make_scheduler(settings: Settings, *, blocking: bool = False) -> BaseSchedul
 
 
 def start_daemon(settings: Settings) -> None:
-    """daemon 入口:启动时 (1) 标 interrupted (2) 起 blocking scheduler。
+    """daemon 入口:启动时 (1) 标 interrupted (2) 清过期日志/截图 (3) 积压告警判定
+    (4) 起 blocking scheduler。
 
     `BlockingScheduler.start()` 会阻塞当前线程,直到 SIGINT/SIGTERM。
     """
+    # M9 文件 sink:必须在 cleanup_old_files 之前装,否则启动日志只在 stderr
+    try:
+        install_file_sink(
+            logs_dir=settings.app.logs_dir,
+            retention_days=settings.monitoring.log_retention_days,
+        )
+    except Exception as exc:
+        logger.warning(f"[scheduler] 装日志 sink 失败,继续走 stderr: {exc}")
+
     engine = get_engine()
     init_db(engine)
     with session_scope(engine) as session:
         touched = mark_stale_running_as_interrupted(session)
     if touched:
         logger.warning(f"[scheduler] 启动时标 interrupted: {touched} 条僵尸 running")
+
+    # M9 启动时一次性归档(spec §6.3),失败不影响 daemon
+    try:
+        cleanup_old_files(
+            logs_dir=settings.app.logs_dir,
+            log_retention_days=settings.monitoring.log_retention_days,
+            screenshot_retention_days=settings.monitoring.screenshot_retention_days,
+        )
+    except Exception as exc:
+        logger.warning(f"[scheduler] 启动归档失败,忽略: {exc}")
+
+    # M9 启动时一次性积压告警(spec §5.6)
+    with session_scope(engine) as session:
+        try:
+            backlog = maybe_warn_backlog(settings, session=session)
+            logger.info(f"[scheduler] 启动时历史积压: {backlog} 条")
+        except Exception as exc:
+            logger.warning(f"[scheduler] 启动积压检查失败,忽略: {exc}")
 
     scheduler = make_scheduler(settings, blocking=True)
     logger.info(

@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -131,3 +131,67 @@ def test_dashboard_shows_today_task_counts_and_recent_event(
     assert r.status_code == 200
     assert "已发布 1" in r.text
     assert "风控触发" in r.text  # i18n 映射 risk_control → 风控触发
+
+
+def test_dashboard_backlog_includes_pending_and_interrupted_from_past_days(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """积压 = execute_date<today AND status IN (pending, interrupted)。
+
+    spec §5.6:历史积压定义涵盖未跑完(pending)和中途断掉(interrupted)两类;
+    success/failed/skipped 不计入,今天的也不计入。
+    """
+    engine = get_engine(tmp_path / "db.sqlite")
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    two_days_ago = today - timedelta(days=2)
+    with session_scope(engine) as s:
+        s.add(
+            Account(
+                id="account_a",
+                display_name="美食号",
+                user_data_dir=str(tmp_path / "a"),
+                daily_limit=20,
+            )
+        )
+        # 3 个视频 + 任务,只有前两个该计入积压
+        for i, (exec_date, status) in enumerate(
+            [
+                (yesterday, "pending"),  # 计入
+                (two_days_ago, "interrupted"),  # 计入
+                (yesterday, "success"),  # 不计入(已完成)
+                (yesterday, "failed"),  # 不计入(失败,需走重试)
+                (today, "pending"),  # 不计入(今天的)
+            ]
+        ):
+            vid = f"rec{i}"
+            s.add(
+                Video(
+                    id=vid,
+                    file_path=f"/x/{vid}.mp4",
+                    title=f"t{i}",
+                    description=None,
+                    tags_json="[]",
+                    cover_path=None,
+                    topic=None,
+                    original_claim=False,
+                    file_hash=None,
+                    ingested_at=datetime.now(),
+                )
+            )
+            s.add(
+                Task(
+                    video_id=vid,
+                    account_id="account_a",
+                    execute_date=exec_date,
+                    publish_at=datetime.combine(exec_date, datetime.min.time()),
+                    status=status,
+                )
+            )
+
+    r = client.get("/")
+    assert r.status_code == 200
+    # 期望积压数 = 2
+    assert "<strong>2</strong>" in r.text or "积压" in r.text  # 弱断言:数字 2 + "积压" 关键字
+    # 强断言:必须看到 "积压 ... 2" 上下文
+    assert "2</strong>" in r.text

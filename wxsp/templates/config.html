@@ -159,6 +159,23 @@
       </div>
     </div>
 
+    <!-- ============== 归档 + 积压(M9) ============== -->
+    <div class="card">
+      <h2>归档 + 积压</h2>
+      <div class="row"><label>日志保留天数</label>
+        <input type="number" name="mon_log_retention_days" value="{{ vm.mon_log_retention_days }}" min="1" style="width: 100px;">
+        <span class="muted" style="font-size: 12px;">超过 N 天的 wxsp.*.log(含 zip)会被启动时清掉</span>
+      </div>
+      <div class="row"><label>失败截图保留天数</label>
+        <input type="number" name="mon_screenshot_retention_days" value="{{ vm.mon_screenshot_retention_days }}" min="1" style="width: 100px;">
+        <span class="muted" style="font-size: 12px;">超过 N 天的 logs/screenshots/* 会被清掉</span>
+      </div>
+      <div class="row"><label>积压告警阈值</label>
+        <input type="number" name="mon_backlog_warn_threshold" value="{{ vm.mon_backlog_warn_threshold }}" min="0" style="width: 100px;">
+        <span class="muted" style="font-size: 12px;">历史积压(早于今天的 pending/interrupted)超过此数 → 企微告警(需把 backlog_high 加进上方"发送告警的事件类型")</span>
+      </div>
+    </div>
+
     <!-- ============== Web UI ============== -->
     <div class="card">
       <h2>Web UI</h2>

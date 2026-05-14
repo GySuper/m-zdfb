@@ -12,10 +12,10 @@ Write-Host "==> 清理旧产物"
 Remove-Item -Recurse -Force dist, build -ErrorAction SilentlyContinue
 
 Write-Host "==> Nuitka 编译"
-# --follow-import-to=wxsp / --lto=no / --jobs=2 / --show-scons: 同 macOS 脚本,见注释
+# --nofollow-import-to / --lto=no / --jobs=2 / --show-scons: 同 macOS 脚本,见注释
 uv run python -m nuitka `
   --standalone `
-  --follow-import-to=wxsp `
+  --nofollow-import-to=lark_oapi,pydantic,sqlalchemy,sqlmodel,fastapi,starlette,uvicorn,jinja2,apscheduler,loguru,patchright,httpx,httpcore,anyio,typer,click,sniffio,h11 `
   --lto=no `
   --jobs=2 `
   --show-scons `

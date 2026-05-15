@@ -278,7 +278,7 @@ class ApcClient:
 ```json
 {
   "schema_version": 1,
-  "device_id": "550e8400-e29b-41d4-a716-446655440000",
+  "device_id": null,
   "last_success_at": "2026-05-15T08:23:00+08:00",
   "today_date": "2026-05-15",
   "today_verdict": "pass",
@@ -286,7 +286,7 @@ class ApcClient:
 }
 ```
 
-- `device_id`:首次写入时 SDK 自己 uuid4 生成;APC 服务端响应里如果带 `did`,后续以服务端为准
+- `device_id`:**首次 bootstrap 时为 `None`**;首次调 `/session/init` 时 SDK 把 `null` 送给后台,后台分配并通过 JWT 的 `did` claim 回传,SDK 存下来。后续启动 SDK 送已存的 did,后台 refresh 同一台(返回 did 不变)。SDK **不本地 uuid4 生成**,避免 APC 后台堆积"假设备"
 - `last_success_at`:最近一次 `/session/init` 返回 200 + JWT 校验通过的时间;**首次安装写为 `now()`**(给 7 天试用)
 - `today_date` + `today_verdict`:当日缓存判决,跨日清空
 - `license_jwt`:留存最近一次成功签发的 JWT,**仅作 debug 参考,不参与判决**
@@ -304,11 +304,13 @@ def check(self) -> Verdict:
     if cache.get("today_date") == today:
         return Verdict(cache["today_verdict"])
 
-    # 2. 跨日,清今日缓存,保留 last_success_at + device_id
+    # 2. 跨日,清今日缓存,保留 last_success_at + device_id(可能为 None)
     try:
+        # 首次启动 cache.get("device_id") 为 None,POST 时序列化成 "device_id": null
         license_jwt = self._fetch_session(cache.get("device_id"))
         claims = self._crypto.verify_jwt(license_jwt, self._config.public_key)
-        new_device_id = claims.get("did") or cache.get("device_id") or str(uuid.uuid4())
+        # 后台始终把 did 写进 JWT;首次签发本地 None → 用后台给的,后续两边一致
+        new_device_id = claims.get("did") or cache.get("device_id")
         self._cache.update(
             device_id=new_device_id,
             license_jwt=license_jwt,
@@ -340,7 +342,7 @@ def _bootstrap_if_empty(self, cache: dict) -> dict:
     if not cache:
         cache = {
             "schema_version": 1,
-            "device_id": str(uuid.uuid4()),
+            "device_id": None,           # 等 APC 后台首次签发时分配并通过 JWT.did 回传
             "last_success_at": now_iso(),  # 给 7 天试用
         }
         self._cache.save(cache)
@@ -357,23 +359,53 @@ Headers:
 - `X-T: {秒级 Unix 时间戳}`
 - `X-Sig: HMAC-SHA256(secret, "POST\n/api/v2/session/init\n{ts}\n{sha256(body)}")`
 
-Body:
+Body(请求):
 ```json
 {
-  "device_id": "uuid 或 null",
-  "client_meta": {"app_version": "0.1.4", "platform": "darwin"}
+  "device_id": null,
+  "client_meta": {"channel": "视频号", "app_version": "0.1.4", "platform": "darwin", "hostname": "..."}
+}
+```
+
+- 首次启动 `device_id=null`(SDK cache 里 bootstrap 时就是 `None`)
+- 后续启动 SDK 送已存的 did;后台识别后 `_handle_known_device(did)`,返回同一台的新 JWT(refreshed,did 不变)
+
+Body(响应,200):
+```json
+{
+  "ok": true,
+  "data": {
+    "device_id": "845836f5-9e9a-44cc-ab79-622db70736ef",
+    "token": "<JWT>",
+    "expires_at": 1778918673,
+    "ttl_seconds": 86400,
+    "grace_period_seconds": 86400
+  }
 }
 ```
 
 错误处理:
-- `200` → 拿 `data.license` JWT,RS256 验签 → PASS
+- `200` → 拿 `data.token` JWT,RS256 验签 → PASS
 - `4xx`(含 401 / 403 / 404)→ raise `ApcDenied`(client.py 翻译成 DENY)
 - `5xx` / 超时 / 连接失败 / TLS 失败 → raise `ApcNetworkError`(client.py 走 grace 逻辑)
 
+JWT claims(实际):
+```json
+{
+  "iss": "session",
+  "sub": "<app_id>",
+  "did": "<device_id>",
+  "iat": 1778832273,
+  "exp": 1778918673,
+  "ttl": 86400,
+  "grace": 86400
+}
+```
+
 JWT 校验额外项:
 - `exp` / `nbf`(`pyjwt` 自动)
-- `aud` 必须等于 `app_id`(防 token 被错配到其他项目)
-- `did` 必须等于本地 `device_id`(防 token 被搬到别的机器;首次签发时 local device_id 为空,跳过这一检查)
+- **`sub` 必须等于 `app_id`**(防 token 被错配到其他项目;APC 后台用 `sub` 不是 `aud`)
+- `did` 必须等于本地存的 `device_id`(防 token 被搬到别的机器;首次签发时 local device_id 为 `None`,跳过这一检查,改用 JWT.did 写入本地)
 
 ### 4.5 自签证书 pinning(pinning.py)
 
@@ -568,3 +600,23 @@ else:
 9. **build_macos.sh + build_windows.ps1 patch** — 凭据注入 + trap
 10. **GitHub Actions** — 加 5 个 secrets
 11. **手工验收** — 跑 §7 第 8-10 条
+
+---
+
+## 11. 联调修订(2026-05-15)
+
+线上首次跟 APC 后台联调时发现的 contract 偏差,已对齐(commit `ece1714`、`89c9277`)。同期顺手修了 build 脚本的 chromium 拷贝 bug(commit `10cb9c1`)。本节记录上下文,避免后续人按旧版 spec 排查时绕路。
+
+| 项 | 最初 spec | 实际 APC 后台 | 修复位置 |
+|----|----------|---------------|---------|
+| 响应里 JWT 字段 | `payload.license`(顶层) | `payload.data.token`(嵌一层) | `apc_sdk/_http.py` |
+| JWT 标识 app 的 claim | `aud = app_id`(`pyjwt` 自动 audience 校验) | `sub = app_id`(无 `aud` claim) | `apc_sdk/crypto.py` |
+| `device_id` 首次签发 | SDK `uuid.uuid4()` bootstrap,送给 APC | APC 不复用客户端送的 UUID,每收到陌生 did 就当新设备登记 → SDK 应送 `null`,等 APC 分配并通过 JWT.did 回传 | `apc_sdk/cache.py` |
+| build_macos.sh 拷 chromium | `cp -R src dst/` 留版本目录 | BSD cp 把内容铺平,patchright 找不到浏览器 | `scripts/build_macos.sh` |
+
+**回归测试覆盖**:
+- `test_http.py::test_fetch_session_200_missing_data_raises_network` / `_data_without_token_raises_network` —— 响应壳错误必须走 NetworkError 分支(而不是静默放行)
+- `test_crypto_jwt.py::test_verify_jwt_wrong_subject_rejects` —— `sub` mismatch 拒绝(原 `aud` 测试用例的对位)
+- `test_cache.py::test_bootstrap_device_id_is_none` —— bootstrap 不再生成本地 UUID
+
+**未来契约稳定性约定**:APC 后台同学如要改响应壳 / claim 名,**先提 issue 跟 SDK 这边对齐**。SDK 已写死按 `data.token` + `sub` 解析,改了直接挂。

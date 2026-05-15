@@ -41,3 +41,7 @@ if client.check() == Verdict.PASS:
 else:
     sys.exit(1)
 ```
+
+---
+
+完整接入设计、grace 语义、隐蔽性威胁模型见同仓 [`docs/superpowers/specs/2026-05-15-apc-sdk-integration-design.md`](../docs/superpowers/specs/2026-05-15-apc-sdk-integration-design.md)。

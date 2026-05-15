@@ -33,9 +33,10 @@ def fetch_session(client: httpx.Client, cfg: ApcConfig, *, device_id: str | None
         ApcNetworkError: 5xx / 网络异常 / 响应缺 license 字段。
     """
     body_dict = {"device_id": device_id, "client_meta": dict(cfg.client_meta)}
-    body_bytes = json.dumps(body_dict, separators=(",", ":")).encode("utf-8")
+    body_str = json.dumps(body_dict, separators=(",", ":"))
+    body_bytes = body_str.encode("utf-8")
     ts = str(int(time.time()))
-    sig = hmac_sign(cfg.app_secret, "POST", _PATH, ts, body_bytes.decode("utf-8"))
+    sig = hmac_sign(cfg.app_secret, "POST", _PATH, ts, body_str)
 
     url = cfg.endpoint.rstrip("/") + _PATH
     headers = {
@@ -46,7 +47,9 @@ def fetch_session(client: httpx.Client, cfg: ApcConfig, *, device_id: str | None
     }
 
     try:
-        response = client.post(url, content=body_bytes, headers=headers)
+        response = client.post(
+            url, content=body_bytes, headers=headers, timeout=cfg.request_timeout_seconds
+        )
     except httpx.HTTPError as exc:
         raise ApcNetworkError(f"APC 请求失败: {exc!r}") from exc
 

@@ -66,7 +66,7 @@ def test_fetch_session_403_raises_denied(tmp_path):
         return_value=httpx.Response(403, json={"error": "DEVICE_DISABLED"})
     )
     client = httpx.Client()
-    with pytest.raises(ApcDenied):
+    with pytest.raises(ApcDenied, match=r"403"):
         fetch_session(client, cfg, device_id="dev-1")
 
 
@@ -81,7 +81,7 @@ def test_fetch_session_500_raises_network(tmp_path):
         return_value=httpx.Response(503, text="upstream down")
     )
     client = httpx.Client()
-    with pytest.raises(ApcNetworkError):
+    with pytest.raises(ApcNetworkError, match=r"503"):
         fetch_session(client, cfg, device_id="dev-1")
 
 

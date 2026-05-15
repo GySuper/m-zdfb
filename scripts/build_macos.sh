@@ -36,6 +36,28 @@ if __name__ == "__main__":
     app()
 EOF
 
+echo "==> 注入 APC 凭据"
+: "${APC_ENDPOINT:?APC_ENDPOINT env var 必填(GitHub Actions secrets)}"
+: "${APC_APP_ID:?APC_APP_ID env var 必填}"
+: "${APC_APP_SECRET:?APC_APP_SECRET env var 必填}"
+: "${APC_PUBLIC_KEY:?APC_PUBLIC_KEY env var 必填}"
+${APC_CERT_FP+:} false || { echo "APC_CERT_FP env var 必填(无自签证书时设为空字符串)" >&2; exit 1; }
+
+# 任何退出路径都恢复源码占位符状态(成功 / 失败 / Ctrl-C)
+trap 'git checkout -- wxsp/apc_config.py 2>/dev/null || true' EXIT
+
+uv run python - <<'PYEOF'
+import os, pathlib
+p = pathlib.Path("wxsp/apc_config.py")
+content = p.read_text()
+for key in ("APC_ENDPOINT", "APC_APP_ID", "APC_APP_SECRET", "APC_PUBLIC_KEY", "APC_CERT_FP"):
+    val = os.environ[key]
+    # 用 repr 把字符串转成合法 Python 字面量,处理特殊字符 + 换行(PUBLIC_KEY 多行 PEM)
+    content = content.replace(f'"__{key}__"', repr(val))
+p.write_text(content)
+print(f"==> 凭据已注入 wxsp/apc_config.py(打包后 trap 会 revert)")
+PYEOF
+
 echo "==> PyInstaller 打包"
 uv run pyinstaller \
   --onedir \
@@ -43,6 +65,7 @@ uv run pyinstaller \
   --name wxsp \
   --osx-bundle-identifier com.wxsp.app \
   --collect-all wxsp \
+  --collect-all apc_sdk \
   --collect-all jinja2 \
   --collect-all fastapi \
   --collect-all uvicorn \

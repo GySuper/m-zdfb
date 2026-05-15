@@ -3,11 +3,24 @@
 
 def test_imports() -> None:
     from apc_sdk import (
+        ApcConfig,
+        ApcConfigError,
+        ApcDenied,
+        ApcError,
+        ApcNetworkError,
         Verdict,
     )
 
     assert Verdict.PASS.value == "pass"
     assert Verdict.DENY.value == "deny"
+
+    # ApcError is the base; the other three derive from it
+    assert issubclass(ApcConfigError, ApcError)
+    assert issubclass(ApcDenied, ApcError)
+    assert issubclass(ApcNetworkError, ApcError)
+
+    # ApcConfig is a dataclass (callable type)
+    assert callable(ApcConfig)
 
 
 def test_apc_config_construction() -> None:

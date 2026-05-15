@@ -177,15 +177,16 @@ def test_publish_dev_mode_no_apc_call(
     pending_task: tuple[int, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """pytest 默认 is_packaged()=False → check_pass True,不触 ApcClient。"""
+    """显式 patch is_dev_mode=True → check_pass 短路返 True,不触 ApcClient。"""
     task_id, tmp_path = pending_task
     settings = make_settings(tmp_path, tmp_path)
 
-    # 让 _client() 一旦被调到就爆炸(确认 dev-mode 短路)
+    # 显式强制 dev-mode,避免 is_packaged() 在 CI 返 True 走 fail-open 而掩盖测试意图
+    monkeypatch.setattr("wxsp.apc.is_dev_mode", lambda: True)
+    # 让 _client() 一旦被调到就爆炸(确认 dev-mode 短路,根本不到这里)
     monkeypatch.setattr(
         "wxsp.apc._client", lambda: (_ for _ in ()).throw(AssertionError("dev-mode 不应调网络"))
     )
-    monkeypatch.delenv("WXSP_DEV_MODE", raising=False)
 
     overrides = _noop_steps(
         extract_remote_video_id_and_url=lambda page: ("rid", "https://channels/x"),

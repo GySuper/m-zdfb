@@ -21,7 +21,7 @@
 **Windows**:
 1. 下载 `wxsp-x.y.z-setup.exe`
 2. **首次打开**:SmartScreen 警告 → 「更多信息」→ 「仍要运行」
-3. 安装向导默认勾选「开机自启」+ 「桌面快捷方式」,确认后安装
+3. 默认勾选「桌面快捷方式」,确认后安装
 4. 装完自动启动,浏览器弹到 setup 向导
 
 ### 开发者(从源码)
@@ -79,68 +79,6 @@ uv run wxsp run --daemon
 
 ---
 
-## 开机自启
-
-### macOS (launchd)
-
-1. **替换占位符**:打开 [deploy/wxsp.plist](deploy/wxsp.plist),把:
-   - `__INSTALL_DIR__` → 项目绝对路径(运行 `pwd` 得到)
-   - `__UV_BIN__` → uv 绝对路径(运行 `which uv` 得到,通常 `/opt/homebrew/bin/uv` 或 `/Users/you/.local/bin/uv`)
-
-2. **安装 + 启动**:
-   ```bash
-   cp deploy/wxsp.plist ~/Library/LaunchAgents/com.wxsp.daemon.plist
-   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.wxsp.daemon.plist
-   launchctl kickstart -k gui/$(id -u)/com.wxsp.daemon   # 立即起一次
-   ```
-
-3. **查看状态 / 日志**:
-   ```bash
-   launchctl print gui/$(id -u)/com.wxsp.daemon | head -20
-   tail -f logs/launchd.err.log logs/wxsp.*.log
-   ```
-
-4. **卸载**:
-   ```bash
-   launchctl bootout gui/$(id -u)/com.wxsp.daemon
-   rm ~/Library/LaunchAgents/com.wxsp.daemon.plist
-   ```
-
-> 用 **LaunchAgent** (`gui/`) 不要用 LaunchDaemon (`system/`):后者跑在 root + Session 0,没有桌面会话,视频号浏览器开不起来。
-
-### Windows (任务计划程序)
-
-1. **替换占位符**:打开 [deploy/wxsp-task.xml](deploy/wxsp-task.xml),把:
-   - `__INSTALL_DIR__` → 项目绝对路径(如 `C:\Users\you\wechat-sph-upload`)
-   - `__UV_BIN__` → uv 路径(运行 `where uv` 得到,通常 `C:\Users\you\.local\bin\uv.exe`)
-   - `__USERNAME__` → 登录用户名(运行 `echo %USERNAME%` 得到)
-
-2. **注册任务**:
-   ```cmd
-   schtasks /Create /TN "wxsp-daemon" /XML deploy\wxsp-task.xml
-   ```
-
-   注册时报"参数错误"通常是 XML 编码问题。Win10/11 多数情况下接受 UTF-8,如果失败转 UTF-16 LE 再试:
-   ```powershell
-   Get-Content deploy\wxsp-task.xml | Out-File -FilePath deploy\wxsp-task-utf16.xml -Encoding Unicode
-   schtasks /Create /TN "wxsp-daemon" /XML deploy\wxsp-task-utf16.xml
-   ```
-
-3. **手动启动一次验证**:
-   ```cmd
-   schtasks /Run /TN "wxsp-daemon"
-   schtasks /Query /TN "wxsp-daemon"
-   ```
-
-4. **卸载**:
-   ```cmd
-   schtasks /Delete /TN "wxsp-daemon" /F
-   ```
-
-> 触发器是 **LogonTrigger**(用户登录后 30 秒触发),不是开机时(BootTrigger)。原因同 mac:视频号要桌面会话,Session 0 没 UI。
-
----
-
 ## 常用命令
 
 ```bash
@@ -181,7 +119,6 @@ uv run wxsp web                       # 起 Web UI
 |------|------|
 | `wxsp doctor` 报 NAS 不可达 | `ls $(yq '.paths.nas_root' config.yaml)` 看挂载是否还在 |
 | Cookie 失效循环 | `wxsp login <account>` 重新扫码,Web UI 也能扫 |
-| 浏览器弹不出来(开机自启) | 检查是不是用了 LaunchDaemon(mac)/BootTrigger(Windows);必须是用户会话级 |
 | 视频号"操作过于频繁" | `risk_control` 错误,账号会自动暂停 24h;企微会收到告警;别强行 retry |
 | daemon 不跑 | 看 `logs/wxsp.YYYY-MM-DD.log`(M9 起所有 daemon/web 进程都写文件日志) |
 | 历史积压一直涨 | Web UI Dashboard 顶上 "积压 N 条" 可点,跳到 `/tasks?backlog=1` 一键"重新入队到今天" |
@@ -208,10 +145,6 @@ wxsp/                     # 后端主包
 ├── nas.py                # NAS 文件检索 + stage
 ├── archive.py            # 日志/截图清理 + loguru 文件 sink (M9)
 └── api/ + templates/     # FastAPI + Jinja2 + HTMX Web UI
-
-deploy/
-├── wxsp.plist            # macOS launchd 模板
-└── wxsp-task.xml         # Windows 任务计划程序模板
 
 data/   chrome-profiles/ + db.sqlite + tmp/    (gitignore)
 logs/   wxsp.YYYY-MM-DD.log + screenshots/     (gitignore)

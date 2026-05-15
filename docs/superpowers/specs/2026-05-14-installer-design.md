@@ -1,5 +1,7 @@
 # M11 安装器 + 首次设置向导 设计文档
 
+> **⚠️ 部分废弃(2026-05-15)**:本文档中所有"开机自启 / autostart / launchctl / schtasks / `wxsp/autostart.py` / `deploy/wxsp.plist` / `deploy/wxsp-task.xml`"相关内容(含 §5、§8 表格 autostart 行、向导第 6 步的"开机自启"复选框)**均已从产品移除**。当前形态:daemon 由用户从 Web UI / CLI 手动启动,不再注册到 launchd / 任务计划程序。其余章节(Nuitka 打包、Web UI 向导前 5 步)仍有效。
+>
 > 本文档是整体设计 [`2026-05-12-wxsp-design.md`](2026-05-12-wxsp-design.md) 的 M11 milestone 细化版,**对上层设计的偏离会在 §8 列明**。M11 在 M10(部署 + 文档)之后,目标是把"开发者风格的 CLI 安装流程"换成"运营双击装 + Web UI 配置向导"的产品形态。
 
 **Goal**:运营拿到一个 `.dmg`(mac) / `.exe`(win) 双击装,装完自动起 Web UI,在浏览器里走完一个 5 步向导填飞书 / NAS / 账号 / 告警配置,点完成就能开机自启跑。**运营不接触命令行**,**装出来的程序不暴露 Python 源码**(Nuitka 编译挡一般技术人员)。

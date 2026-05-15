@@ -23,6 +23,7 @@ from wxsp.models import (
     TASK_STATUS_RUNNING,
     Account,
     Task,
+    Video,
 )
 from wxsp.notify import NotifyEvent, notify
 from wxsp.publisher import AlreadyClaimed, publish
@@ -114,10 +115,65 @@ def mark_stale_running_as_interrupted(session: Session, *, now: datetime | None 
     return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
 
+def _emit_run_summary(
+    settings: Settings, *, summary: RunSummary, failed_task_ids: list[int]
+) -> None:
+    """跑完后推一条 run_summary:成功/失败计数 + 按 error_type 聚合的失败明细。
+
+    `attempted == 0` 时直接返回(不刷"今天没任务"的噪音)。
+    """
+    if summary.attempted == 0:
+        return
+    engine = get_engine()
+    grouped: dict[str, list[str]] = {}
+    if failed_task_ids:
+        with Session(engine) as session:
+            for tid in failed_task_ids:
+                task = session.get(Task, tid)
+                if task is None:
+                    continue
+                video = session.get(Video, task.video_id)
+                title = (video.title if video is not None else "?")[:20]
+                etype = task.last_error_type or "unknown"
+                grouped.setdefault(etype, []).append(f"task#{tid} {title}")
+
+    lines: list[str] = [
+        f"今日任务跑完:成功 {summary.succeeded} / 失败 {summary.failed} / "
+        f"跳过(账号暂停) {summary.skipped_paused},共尝试 {summary.attempted}"
+    ]
+    if grouped:
+        lines.append("")
+        lines.append("**失败明细**:")
+        for etype, items in grouped.items():
+            lines.append(f"- `{etype}` 共 {len(items)} 条")
+            for it in items:
+                lines.append(f"    - {it}")
+
+    level = "warn" if summary.failed > 0 else "info"
+    with session_scope(engine) as session:
+        notify(
+            NotifyEvent(
+                type="run_summary",
+                level=level,
+                title=f"今日发布汇总:✓{summary.succeeded} ✗{summary.failed}",
+                content="\n".join(lines),
+                context={
+                    "attempted": summary.attempted,
+                    "succeeded": summary.succeeded,
+                    "failed": summary.failed,
+                    "skipped_paused": summary.skipped_paused,
+                },
+            ),
+            session=session,
+            settings=settings,
+        )
+
+
 def run_today_pending(settings: Settings) -> RunSummary:
     """worker 入口:① sync_now() ② queue_today() ③ 串行跑(跳过 paused 账号)。
 
     任何一条 task 失败 / 抛 AlreadyClaimed 都不阻断后面的;细节走 publish 自己的回写。
+    跑完后推一条 run_summary 汇总通知(attempted=0 时静默)。
     """
     try:
         sync_now(settings)
@@ -125,6 +181,7 @@ def run_today_pending(settings: Settings) -> RunSummary:
         logger.warning(f"[scheduler] sync_now 失败,继续跑已入库的: {exc}")
 
     summary = RunSummary()
+    failed_task_ids: list[int] = []
     engine = get_engine()
     init_db(engine)
     now = datetime.now()
@@ -157,23 +214,32 @@ def run_today_pending(settings: Settings) -> RunSummary:
             result = publish(task_id, dry_run=False, settings=settings)
         except AlreadyClaimed as exc:
             summary.failed += 1
+            failed_task_ids.append(task_id)
             logger.warning(f"[scheduler] task={task_id} 已被认领: {exc}")
             continue
         except Exception as exc:
             summary.failed += 1
+            failed_task_ids.append(task_id)
             logger.exception(f"[scheduler] task={task_id} 跑挂了: {exc}")
             continue
         if result.ok:
             summary.succeeded += 1
         else:
             summary.failed += 1
+            failed_task_ids.append(task_id)
+
+    try:
+        _emit_run_summary(settings, summary=summary, failed_task_ids=failed_task_ids)
+    except Exception as exc:
+        logger.warning(f"[scheduler] 推送 run_summary 失败,忽略: {exc}")
 
     return summary
 
 
 def make_scheduler(settings: Settings, *, blocking: bool = False) -> BaseScheduler:
-    """构造 APScheduler 并注册"每日 09:00 cron job"。
+    """构造 APScheduler;`scheduler.enabled=true` 时注册"每日 cron job"。
 
+    `enabled=false`:返回空 scheduler(无 job),daemon 仍可启动,手动入口照旧。
     blocking=True 用于 daemon 进程(主线程 .start() 阻塞);
     blocking=False(默认)用于测试 / 后台模式。**调用方负责 shutdown**。
     """
@@ -182,6 +248,9 @@ def make_scheduler(settings: Settings, *, blocking: bool = False) -> BaseSchedul
         scheduler = BlockingScheduler(timezone=settings.app.timezone)
     else:
         scheduler = BackgroundScheduler(timezone=settings.app.timezone)
+    if not settings.scheduler.enabled:
+        logger.info("[scheduler] scheduler.enabled=false,跳过注册每日 cron(手动入口仍可用)")
+        return scheduler
     scheduler.add_job(
         run_today_pending,
         trigger=CronTrigger(
@@ -237,9 +306,12 @@ def start_daemon(settings: Settings) -> None:
             logger.warning(f"[scheduler] 启动积压检查失败,忽略: {exc}")
 
     scheduler = make_scheduler(settings, blocking=True)
-    logger.info(
-        f"[scheduler] daemon 启动:每日 "
-        f"{settings.scheduler.daily_cron_hour:02d}:{settings.scheduler.daily_cron_minute:02d} "
-        f"({settings.app.timezone}) 跑 run_today_pending"
-    )
+    if settings.scheduler.enabled:
+        logger.info(
+            f"[scheduler] daemon 启动:每日 "
+            f"{settings.scheduler.daily_cron_hour:02d}:{settings.scheduler.daily_cron_minute:02d} "
+            f"({settings.app.timezone}) 跑 run_today_pending"
+        )
+    else:
+        logger.info("[scheduler] daemon 启动:定时任务已关闭,只服务手动入口")
     scheduler.start()  # 阻塞

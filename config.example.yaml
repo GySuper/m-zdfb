@@ -45,6 +45,7 @@ accounts:
 
 # ============== 调度 ==============
 scheduler:
+  enabled: true                       # false 时关闭每日 09:00 定时任务,daemon 仍启动,手动入口可用
   daily_cron_hour: 9
   daily_cron_minute: 0
   strategy: round-robin
@@ -97,6 +98,7 @@ monitoring:
     - element_not_found
     - nas_unreachable
     - backlog_high
+    - run_summary                     # 每日跑完一次的汇总(成功/失败计数 + 失败明细);attempted=0 不发
   # 启动时清旧文件用(spec §6.3)
   log_retention_days: 30
   screenshot_retention_days: 90

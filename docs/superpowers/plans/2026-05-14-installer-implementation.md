@@ -1,5 +1,7 @@
 # M11 安装器 + 首次设置向导 实施计划
 
+> **⚠️ 部分废弃(2026-05-15)**:本计划中所有"开机自启 / autostart / launchctl / schtasks / `wxsp/autostart.py` / `deploy/wxsp.plist` / `deploy/wxsp-task.xml`"相关 task(Task 3、CLI `autostart` 子命令、Inno Setup `[Run]` 段 autostart 调用、向导第 6 步"开机自启"复选框、`tests/test_autostart.py`、`tests/test_cli_autostart.py`)**均已从产品移除**。当前形态:daemon 由用户从 Web UI / CLI 手动启动。其余 task(Nuitka 打包、Web UI 向导前 5 步、platformdirs 路径分层、Inno Setup 主体)仍有效。
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal**:把 wxsp 从"开发者风格 CLI 安装"换成"运营双击 .dmg / .exe → Web UI 走完 6 步向导 → 开机自启跑"的产品形态,且打包产物用 Nuitka 编译,业务代码不暴露源码。

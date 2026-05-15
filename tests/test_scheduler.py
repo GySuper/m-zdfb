@@ -296,6 +296,114 @@ def test_run_today_pending_skips_tasks_when_account_paused(
     assert summary.skipped_paused == 1
 
 
+def test_run_today_pending_emits_run_summary_with_failure_breakdown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """跑完后推一条 run_summary,失败按 error_type 聚合 + 列 task_id/title。"""
+    from wxsp import scheduler as sched_mod
+    from wxsp.db import transition_task
+
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    today = date.today()
+    now = datetime.now()
+
+    with session_scope(engine) as session:
+        _seed_account_video(session, video_id="v_ok")
+        _seed_account_video(session, video_id="v_fail")
+        session.add(
+            Task(
+                video_id="v_ok",
+                account_id="a",
+                execute_date=today,
+                publish_at=now,
+                status="pending",
+            )
+        )
+        session.add(
+            Task(
+                video_id="v_fail",
+                account_id="a",
+                execute_date=today,
+                publish_at=now + timedelta(hours=1),
+                status="pending",
+            )
+        )
+
+    settings = make_settings(tmp_path, tmp_path)
+    monkeypatch.setattr("wxsp.scheduler.sync_now", lambda settings: None)
+
+    def fake_publish(task_id, *, dry_run, settings):
+        # 模拟 publish 把 last_error_type 写回 DB(真实路径走 transition_task)
+        with session_scope(engine) as session:
+            task = session.get(Task, task_id)
+            if task and task.video_id == "v_fail":
+                transition_task(
+                    session,
+                    task_id=task_id,
+                    status="failed",
+                    last_error_type="risk_control",
+                    last_error_msg="boom",
+                )
+                return PublishResult(
+                    task_id=task_id,
+                    ok=False,
+                    dry_run=False,
+                    error_type="risk_control",
+                    error_msg="boom",
+                )
+        return PublishResult(task_id=task_id, ok=True, dry_run=False)
+
+    monkeypatch.setattr("wxsp.scheduler.publish", fake_publish)
+    captured: list = []
+    monkeypatch.setattr(
+        sched_mod, "notify", lambda event, *, session, settings: captured.append(event)
+    )
+
+    summary = run_today_pending(settings)
+
+    assert summary.attempted == 2
+    assert summary.failed == 1
+    assert summary.succeeded == 1
+    run_summary_events = [e for e in captured if e.type == "run_summary"]
+    assert len(run_summary_events) == 1
+    ev = run_summary_events[0]
+    assert ev.level == "warn"
+    assert "risk_control" in ev.content
+    assert ev.context == {
+        "attempted": 2,
+        "succeeded": 1,
+        "failed": 1,
+        "skipped_paused": 0,
+    }
+
+
+def test_run_today_pending_silent_run_summary_when_nothing_attempted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0 任务时不发 run_summary,避免空跑刷屏。"""
+    from wxsp import scheduler as sched_mod
+
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+
+    settings = make_settings(tmp_path, tmp_path)
+    monkeypatch.setattr("wxsp.scheduler.sync_now", lambda settings: None)
+    captured: list = []
+    monkeypatch.setattr(
+        sched_mod, "notify", lambda event, *, session, settings: captured.append(event)
+    )
+
+    summary = run_today_pending(settings)
+
+    assert summary.attempted == 0
+    assert captured == []
+
+
 def test_run_today_pending_continues_after_a_publish_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -374,6 +482,14 @@ def test_make_scheduler_registers_daily_cron_with_configured_time(
     field_values = {f.name: str(f) for f in trigger.fields}
     assert field_values["hour"] == "9"
     assert field_values["minute"] == "0"
+
+
+def test_make_scheduler_registers_no_job_when_disabled(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path, tmp_path)
+    settings.scheduler.enabled = False
+
+    sched = make_scheduler(settings)
+    assert sched.get_jobs() == []
 
 
 # ============== M9 count_backlog + maybe_warn_backlog ==============

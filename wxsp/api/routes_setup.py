@@ -15,7 +15,6 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.responses import Response as StarletteResponse
 
-from wxsp import autostart
 from wxsp import config as wxsp_config
 from wxsp.api.deps import templates
 
@@ -227,7 +226,7 @@ def submit_notify(request: Request, webhook: str = Form("")) -> RedirectResponse
 
 
 @router.post("/complete")
-def complete(request: Request, enable_autostart: str = Form("")) -> RedirectResponse:
+def complete(request: Request) -> RedirectResponse:
     data = _get_wizard_data(request)
     if _last_completed_step(data) < 5:
         return RedirectResponse(
@@ -240,16 +239,6 @@ def complete(request: Request, enable_autostart: str = Form("")) -> RedirectResp
     config_path.write_text(
         yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
-
-    if enable_autostart == "on":
-        try:
-            autostart.enable_autostart()
-        except Exception as exc:
-            # 开机自启失败不应阻断向导完成(config.yaml 已写,主功能可用)。
-            # 捕获所有异常(不只是 AutostartError):防 FileNotFoundError 等漏出 500。
-            from loguru import logger
-
-            logger.warning(f"开机自启注册失败(向导继续): {exc}")
 
     request.app.state.wizard_data = {}
     return RedirectResponse(url="/accounts", status_code=302)
@@ -315,6 +304,7 @@ def _render_config(data: dict[str, Any]) -> dict[str, Any]:
                 "element_not_found",
                 "nas_unreachable",
                 "backlog_high",
+                "run_summary",
             ],
             "log_retention_days": 30,
             "screenshot_retention_days": 90,

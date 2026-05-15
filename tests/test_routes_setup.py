@@ -87,10 +87,9 @@ def test_step4_rejects_invalid_account_id(fresh_app):
     assert "account_id" in resp.text.lower() or "格式" in resp.text
 
 
-def test_complete_writes_config_yaml(fresh_app, tmp_path, monkeypatch):
+def test_complete_writes_config_yaml(fresh_app, tmp_path):
     """整套 happy path 走完,POST /setup/complete 后 config.yaml 落盘。"""
     app, config_path = fresh_app
-    monkeypatch.setattr("wxsp.autostart.enable_autostart", lambda: None)
     client = TestClient(app, follow_redirects=False)
 
     client.post(
@@ -115,7 +114,7 @@ def test_complete_writes_config_yaml(fresh_app, tmp_path, monkeypatch):
     )
     client.post("/setup/step/5", data={"webhook": ""})
 
-    resp = client.post("/setup/complete", data={"enable_autostart": "on"})
+    resp = client.post("/setup/complete")
     assert resp.status_code == 302
     assert resp.headers["location"] == "/accounts"
     assert config_path.exists()

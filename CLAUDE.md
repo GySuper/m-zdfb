@@ -171,9 +171,6 @@ wxsp/
 │       ├── plans.html
 │       ├── config.html
 │       └── logs.html
-├── deploy/
-│   ├── wxsp.plist                     # macOS launchd 模板(开机自启)
-│   └── wxsp-task.xml                  # Windows 任务计划程序模板(开机自启)
 ├── data/
 │   ├── db.sqlite
 │   ├── chrome-profiles/               # 每账号独立 user_data_dir(cookie 由此持久化,不再有 cookie.json)
@@ -497,7 +494,7 @@ wxsp cleanup                         按 monitoring.{log,screenshot}_retention_d
 wxsp sync                            立即拉飞书一次,不跑任务
 
 # 执行
-wxsp run --daemon                    启动 daemon(FastAPI + 09:00 cron),开机自启场景
+wxsp run --daemon                    启动 daemon(FastAPI + 09:00 cron)
 wxsp run --today                     立即跑今天的 pending(先 sync 再扫再串行跑)
 wxsp run --task-id <N> [--dry-run]   跑单条任务;--dry-run 不点最后的"发布"按钮
 
@@ -731,8 +728,8 @@ M0 脚手架 ──→ M1 数据层 ──┬──→ M2 浏览器+登录 ─�
 | M7 | 通知 + 回写 | notify.py + WecomNotifier + 飞书回写(status/url/error) + 5 类告警事件接入 |
 | M8 | Web UI | FastAPI + Jinja2 + HTMX:Dashboard / Accounts / Tasks / TaskDetail / Logs(SSE) / Config + 扫码二维码嵌入 + 手动触发按钮 |
 | M9 | 监控 + 归档 | Dashboard 显示积压 + 重新入队按钮 + 日志/截图清理 |
-| M10 | 部署 + 文档 | deploy/wxsp.plist(mac launchd)+ deploy/wxsp-task.xml(Windows 任务计划程序)+ README |
-| M11 | 安装器 + 设置向导 | Nuitka 编译 + .dmg/.exe 出包 + Web UI 6 页向导 + `wxsp autostart enable/disable` |
+| M10 | 部署 + 文档 | README |
+| M11 | 安装器 + 设置向导 | Nuitka 编译 + .dmg/.exe 出包 + Web UI 6 页向导 |
 
 **合计 ~22.5 工作日**。**MVP 截止点 = M7 完成**(端到端跑通:飞书 → 发布 → 通知);M8-M11 是体验/运维优化,生产前不能跳。
 

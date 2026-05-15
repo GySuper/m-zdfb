@@ -450,43 +450,5 @@ def web(
     uvicorn.run("wxsp.api.app:app", host=bind_host, port=bind_port, log_level="info")
 
 
-autostart_app = typer.Typer(help="开机自启管理", no_args_is_help=True)
-app.add_typer(autostart_app, name="autostart")
-
-
-@autostart_app.command("enable")
-def autostart_enable() -> None:
-    """注册开机自启(mac launchctl / win 任务计划程序)。"""
-    from wxsp.autostart import AutostartError, enable_autostart
-
-    try:
-        enable_autostart()
-        typer.echo("[wxsp] ✓ 开机自启已注册")
-    except AutostartError as exc:
-        typer.echo(f"[wxsp] ✗ 注册失败:{exc}")
-        raise typer.Exit(code=1) from exc
-
-
-@autostart_app.command("disable")
-def autostart_disable() -> None:
-    """反注册开机自启。"""
-    from wxsp.autostart import disable_autostart
-
-    disable_autostart()
-    typer.echo("[wxsp] ✓ 开机自启已反注册")
-
-
-@autostart_app.command("status")
-def autostart_status() -> None:
-    """查询自启是否注册。"""
-    from wxsp.autostart import is_autostart_enabled
-
-    if is_autostart_enabled():
-        typer.echo("[wxsp] 开机自启:已启用")
-    else:
-        typer.echo("[wxsp] 开机自启:未启用")
-        raise typer.Exit(code=1)
-
-
 if __name__ == "__main__":
     app()

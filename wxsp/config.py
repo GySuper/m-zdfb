@@ -88,6 +88,7 @@ class AccountConfig(BaseModel):
 
 
 class SchedulerConfig(BaseModel):
+    enabled: bool = True  # false 时 daemon 仍启动,但不注册 09:00 cron(手动入口仍可用)
     daily_cron_hour: int = 9
     daily_cron_minute: int = 0
     strategy: str = "round-robin"

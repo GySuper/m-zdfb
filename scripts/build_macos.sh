@@ -92,10 +92,13 @@ print(candidates[-1])
 ")"
 echo "    chromium 源: $CHROMIUM_SRC"
 # PyInstaller .app 在 mac 下:bundle/Contents/Frameworks/ = _MEIPASS
-CHROMIUM_DST="$APP_PATH/Contents/Frameworks/chromium"
+# 必须保留 chromium-<版本> 这一层(patchright 按这个路径找浏览器)。
+# BSD cp 的 `cp -R src dst/` 行为在 dst 已存在时会铺平内容 ——
+# 显式拼出含版本号的 DST,然后用 `src/.` 把内容拷进去。
+CHROMIUM_VERSION_DIR="$(basename "$CHROMIUM_SRC")"
+CHROMIUM_DST="$APP_PATH/Contents/Frameworks/chromium/$CHROMIUM_VERSION_DIR"
 mkdir -p "$CHROMIUM_DST"
-# 注意:cp 后加 / 让 src 整个目录(含 chromium-XXXX 名字)拷到 dst 下,而不是铺内容
-cp -R "$CHROMIUM_SRC" "$CHROMIUM_DST/"
+cp -R "$CHROMIUM_SRC/." "$CHROMIUM_DST/"
 
 echo "==> 修可执行位(Chrome for Testing / Chromium / chrome 都覆盖)"
 find "$CHROMIUM_DST" -name "Google Chrome for Testing" -exec chmod +x {} \; 2>/dev/null || true

@@ -7,6 +7,10 @@ dev-mode(`is_packaged() = False`)永远放行,不触网。
 
 from __future__ import annotations
 
+import socket
+import sys
+from importlib.metadata import PackageNotFoundError, version
+
 from loguru import logger
 
 import wxsp.config as _wxsp_config
@@ -27,6 +31,20 @@ def is_dev_mode() -> bool:
     return not _wxsp_config.is_packaged()
 
 
+def _client_meta() -> dict[str, str]:
+    """上报给 APC 后台的设备元信息,用于后台区分 enable / disable 哪台。"""
+    try:
+        app_version = version("wxsp")
+    except PackageNotFoundError:
+        app_version = "unknown"
+    return {
+        "channel": "视频号",
+        "app_version": app_version,
+        "platform": sys.platform,
+        "hostname": socket.gethostname(),
+    }
+
+
 def _client() -> ApcClient:
     """惰性单例。dev-mode 不应调到这里(check_pass 短路了)。"""
     global _client_singleton
@@ -43,6 +61,7 @@ def _client() -> ApcClient:
                 cert_fingerprint=APC_CERT_FP or None,
                 grace_days=7,
                 request_timeout_seconds=5.0,
+                client_meta=_client_meta(),
             )
         )
     return _client_singleton

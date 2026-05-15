@@ -25,7 +25,9 @@ def test_fetch_session_success_returns_license(tmp_path):
 
     cfg = _basic_config(tmp_path)
     route = respx.post("https://apc.example.com:8443/api/v2/session/init").mock(
-        return_value=httpx.Response(200, json={"license": "eyJ.fake.jwt"})
+        return_value=httpx.Response(
+            200, json={"ok": True, "data": {"token": "eyJ.fake.jwt", "device_id": "dev-1"}}
+        )
     )
     client = httpx.Client()
     license_jwt = fetch_session(client, cfg, device_id="dev-1")
@@ -48,7 +50,7 @@ def test_fetch_session_device_id_none_when_first_call(tmp_path):
 
     cfg = _basic_config(tmp_path)
     route = respx.post("https://apc.example.com:8443/api/v2/session/init").mock(
-        return_value=httpx.Response(200, json={"license": "tok"})
+        return_value=httpx.Response(200, json={"ok": True, "data": {"token": "tok"}})
     )
     client = httpx.Client()
     fetch_session(client, cfg, device_id=None)
@@ -100,17 +102,32 @@ def test_fetch_session_timeout_raises_network(tmp_path):
 
 
 @respx.mock
-def test_fetch_session_200_missing_license_raises_network(tmp_path):
-    """200 但响应里没 license 字段 → 视为协议错(走网络分支,不写 today_verdict)。"""
+def test_fetch_session_200_missing_data_raises_network(tmp_path):
+    """200 但响应里没 data 对象 → 视为协议错(走网络分支,不写 today_verdict)。"""
     from apc_sdk._http import fetch_session
     from apc_sdk.exceptions import ApcNetworkError
 
     cfg = _basic_config(tmp_path)
     respx.post("https://apc.example.com:8443/api/v2/session/init").mock(
-        return_value=httpx.Response(200, json={"oops": "no license"})
+        return_value=httpx.Response(200, json={"ok": False, "error": "...."})
     )
     client = httpx.Client()
-    with pytest.raises(ApcNetworkError):
+    with pytest.raises(ApcNetworkError, match=r"data"):
+        fetch_session(client, cfg, device_id="dev-1")
+
+
+@respx.mock
+def test_fetch_session_200_data_without_token_raises_network(tmp_path):
+    """data 存在但里面没 token 字段 → 协议错。"""
+    from apc_sdk._http import fetch_session
+    from apc_sdk.exceptions import ApcNetworkError
+
+    cfg = _basic_config(tmp_path)
+    respx.post("https://apc.example.com:8443/api/v2/session/init").mock(
+        return_value=httpx.Response(200, json={"ok": True, "data": {"device_id": "x"}})
+    )
+    client = httpx.Client()
+    with pytest.raises(ApcNetworkError, match=r"token"):
         fetch_session(client, cfg, device_id="dev-1")
 
 
@@ -129,7 +146,7 @@ def test_fetch_session_includes_client_meta(tmp_path):
         client_meta={"app_version": "0.1.4", "platform": "darwin"},
     )
     route = respx.post("https://apc.example.com:8443/api/v2/session/init").mock(
-        return_value=httpx.Response(200, json={"license": "tok"})
+        return_value=httpx.Response(200, json={"ok": True, "data": {"token": "tok"}})
     )
     client = httpx.Client()
     fetch_session(client, cfg, device_id="dev-1")

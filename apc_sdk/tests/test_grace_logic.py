@@ -61,7 +61,7 @@ def _make_client(tmp_path, fake_now, *, fetch_result):
 
     # bypass JWT 校验:直接把 fetch 返回值当 device_id 来源
     def fake_verify(license_jwt: str, **_kwargs):
-        return {"did": "dev", "aud": "ap_test"}
+        return {"did": "dev", "sub": "ap_test"}
 
     client._verify_jwt = fake_verify  # type: ignore[attr-defined]
     return client

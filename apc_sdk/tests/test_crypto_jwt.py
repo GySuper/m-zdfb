@@ -1,4 +1,7 @@
-"""JWT RS256 校验。用 cryptography 现场签一个 token,然后让被测函数验证。"""
+"""JWT RS256 校验。用 cryptography 现场签一个 token,然后让被测函数验证。
+
+APC 服务端把 app_id 放在 `sub` claim 里,不用 `aud`。这里测试也用 `sub`。
+"""
 
 from datetime import datetime, timedelta, timezone
 
@@ -38,17 +41,17 @@ def test_verify_jwt_valid_token():
     now = datetime.now(timezone.utc)
     token = _make_jwt(
         priv,
-        aud="ap_test",
+        sub="ap_test",
         did="dev_a",
         iat=int(now.timestamp()),
         exp=int((now + timedelta(hours=1)).timestamp()),
     )
     claims = verify_jwt(token, public_key=pub, audience="ap_test")
     assert claims["did"] == "dev_a"
-    assert claims["aud"] == "ap_test"
+    assert claims["sub"] == "ap_test"
 
 
-def test_verify_jwt_wrong_audience_rejects():
+def test_verify_jwt_wrong_subject_rejects():
     from apc_sdk.crypto import verify_jwt
     from apc_sdk.exceptions import ApcDenied
 
@@ -56,11 +59,11 @@ def test_verify_jwt_wrong_audience_rejects():
     now = datetime.now(timezone.utc)
     token = _make_jwt(
         priv,
-        aud="ap_other",
+        sub="ap_other",
         iat=int(now.timestamp()),
         exp=int((now + timedelta(hours=1)).timestamp()),
     )
-    with pytest.raises(ApcDenied, match="audience"):
+    with pytest.raises(ApcDenied, match="subject"):
         verify_jwt(token, public_key=pub, audience="ap_test")
 
 
@@ -72,7 +75,7 @@ def test_verify_jwt_expired_rejects():
     past = datetime.now(timezone.utc) - timedelta(hours=2)
     token = _make_jwt(
         priv,
-        aud="ap_test",
+        sub="ap_test",
         iat=int(past.timestamp()),
         exp=int((past + timedelta(minutes=1)).timestamp()),
     )
@@ -89,7 +92,7 @@ def test_verify_jwt_wrong_signing_key_rejects():
     attacker_priv, _ = _keypair()
     token = _make_jwt(
         attacker_priv,
-        aud="ap_test",
+        sub="ap_test",
         exp=int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()),
     )
     with pytest.raises(ApcDenied, match="signature"):
@@ -104,7 +107,7 @@ def test_verify_jwt_did_mismatch_when_expected():
     priv, pub = _keypair()
     token = _make_jwt(
         priv,
-        aud="ap_test",
+        sub="ap_test",
         did="actual_device",
         exp=int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()),
     )
@@ -119,7 +122,7 @@ def test_verify_jwt_did_check_skipped_when_expected_is_none():
     priv, pub = _keypair()
     token = _make_jwt(
         priv,
-        aud="ap_test",
+        sub="ap_test",
         did="anything",
         exp=int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()),
     )

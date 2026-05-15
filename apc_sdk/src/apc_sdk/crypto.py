@@ -35,34 +35,38 @@ def verify_jwt(
 ) -> dict[str, Any]:
     """RS256 校验 + 必要 claim 检查。失败一律抛 ApcDenied。
 
+    APC 服务端把 app_id 放在 `sub` claim 里,不用 `aud`。这里参数仍叫
+    `audience` 是因为语义上"指定这个 token 是给谁用的"——历史命名,值就是 app_id。
+
     Args:
         token: 服务端返回的 license JWT。
         public_key: PEM 公钥(含 BEGIN/END 头尾)。
-        audience: 期望 aud,通常 = app_id;不等抛 ApcDenied。
+        audience: 期望 sub(= app_id);不等抛 ApcDenied。
         expected_did: 期望 did(本地已有 device_id);为 None 时跳过(首次签发场景)。
 
     Returns:
         token claims dict。
 
     Raises:
-        ApcDenied: 任何校验失败(过期、签名错、aud 错、did 错)。
+        ApcDenied: 任何校验失败(过期、签名错、sub 错、did 错)。
     """
     try:
         claims = pyjwt.decode(
             token,
             public_key,
             algorithms=["RS256"],
-            audience=audience,
-            options={"require": ["exp", "aud"]},
+            options={"require": ["exp", "sub"]},
         )
     except pyjwt.ExpiredSignatureError as exc:
         raise ApcDenied(f"JWT expired: {exc}") from exc
-    except pyjwt.InvalidAudienceError as exc:
-        raise ApcDenied(f"JWT audience mismatch: {exc}") from exc
     except pyjwt.InvalidSignatureError as exc:
         raise ApcDenied(f"JWT signature invalid: {exc}") from exc
     except pyjwt.PyJWTError as exc:
         raise ApcDenied(f"JWT decode failed: {exc}") from exc
+
+    actual_sub = claims.get("sub")
+    if actual_sub != audience:
+        raise ApcDenied(f"JWT subject mismatch: token sub={actual_sub!r}, expected={audience!r}")
 
     if expected_did is not None:
         actual_did = claims.get("did")

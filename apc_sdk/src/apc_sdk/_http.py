@@ -63,7 +63,11 @@ def fetch_session(client: httpx.Client, cfg: ApcConfig, *, device_id: str | None
     except json.JSONDecodeError as exc:
         raise ApcNetworkError(f"APC 响应非 JSON: {exc}") from exc
 
-    license_jwt = payload.get("license")
+    # APC 实际响应:{"ok": true, "data": {"token": "<JWT>", "device_id": "...", ...}}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise ApcNetworkError(f"APC 响应缺 data 对象: {payload!r}")
+    license_jwt = data.get("token")
     if not isinstance(license_jwt, str) or not license_jwt:
-        raise ApcNetworkError(f"APC 响应缺 license 字段: {payload!r}")
+        raise ApcNetworkError(f"APC 响应 data 里缺 token 字段: {payload!r}")
     return license_jwt

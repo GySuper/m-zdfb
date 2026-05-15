@@ -13,6 +13,7 @@ from loguru import logger
 from patchright.sync_api import Page
 from sqlmodel import Session
 
+import wxsp.apc
 from wxsp import selectors as sel
 from wxsp.browser import browser_context
 from wxsp.config import Settings
@@ -415,6 +416,9 @@ def publish(
     last_step = "init"
 
     try:
+        # APC 守门(spec §3.3 注入点):dev-mode 永远 True;打包模式看 APC 判决
+        apc_passed = wxsp.apc.check_pass()
+
         # [1] stage NAS → tmp
         last_step = "stage"
         staged = stage_to_tmp(video_file_path, task_id=task_id, tmp_root=tmp_root)
@@ -433,6 +437,19 @@ def publish(
                 last_step = "login"
                 verify_logged_in(page)
                 random_pause(step_pause)
+
+                # APC 拒绝时装"等待上传区域超时"故障(spec §3.3)
+                if not apc_passed:
+                    last_step = "wait_upload_area"
+                    time.sleep(random.uniform(45, 75))
+                    shot = screenshot(
+                        page,
+                        task_id=task_id,
+                        step="wait_upload_area",
+                        screenshots_root=screenshots_root,
+                    )
+                    result.screenshots.append(str(shot))
+                    raise ElementNotFound("等待上传区域超时(60s)")
 
                 last_step = "upload"
                 upload_video(page, file_path=staged, timeout_seconds=upload_timeout)

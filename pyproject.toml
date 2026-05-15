@@ -19,6 +19,7 @@ dependencies = [
     "jinja2>=3.1.0",
     "python-multipart>=0.0.9",
     "platformdirs>=4.0.0",
+    "apc-sdk-python",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +34,9 @@ dev = [
 
 [project.scripts]
 wxsp = "wxsp.cli:app"
+
+[tool.uv.sources]
+apc-sdk-python = { path = "./apc_sdk", editable = true }
 
 [build-system]
 requires = ["hatchling"]

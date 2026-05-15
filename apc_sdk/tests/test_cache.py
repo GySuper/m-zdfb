@@ -15,6 +15,15 @@ def test_load_nonexistent_returns_bootstrapped(tmp_path):
     assert (tmp_path / "session.json").exists()
 
 
+def test_bootstrap_device_id_is_none(tmp_path):
+    """bootstrap 不本地生成 UUID:device_id=None,等首次 check 时 APC 分配。"""
+    from apc_sdk.cache import SessionStore
+
+    store = SessionStore(tmp_path / "session.json")
+    cache = store.load_or_bootstrap()
+    assert cache["device_id"] is None
+
+
 def test_load_or_bootstrap_idempotent(tmp_path):
     """两次调用返回相同的 device_id(第二次读已写入的文件,不重写)。"""
     from apc_sdk.cache import SessionStore

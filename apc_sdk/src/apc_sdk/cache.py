@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -55,8 +54,10 @@ class SessionStore:
         return cache
 
     def _bootstrap(self) -> dict[str, Any]:
+        # device_id=None 让首次 check 时 SDK 送 null,由 APC 后台分配并通过 JWT 回传,
+        # 然后本地存下来。客户端不自己编造 UUID(避免后台堆积"假设备")。
         return {
             "schema_version": 1,
-            "device_id": str(uuid.uuid4()),
+            "device_id": None,
             "last_success_at": datetime.now(timezone.utc).isoformat(),
         }

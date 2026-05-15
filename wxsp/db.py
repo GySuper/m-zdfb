@@ -14,21 +14,24 @@ from sqlalchemy import update
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine
 
+from wxsp.config import get_user_data_dir
 from wxsp.models import TASK_STATUS_PENDING, TASK_STATUS_RUNNING, Task
 
-DEFAULT_DB_PATH = Path("data") / "db.sqlite"
 ENV_DB_PATH = "WXSP_DB_PATH"
 
 
 def get_engine(db_path: Path | None = None) -> Engine:
     """构造 SQLAlchemy engine。
 
-    解析顺序:显式参数 > 环境变量 `WXSP_DB_PATH` > 默认 `data/db.sqlite`。
+    解析顺序:显式参数 > 环境变量 `WXSP_DB_PATH` > `get_user_data_dir()/db.sqlite`。
+    默认走 `get_user_data_dir()` 是为了在 PyInstaller bundle 里 anchor 到
+    `~/Library/Application Support/wxsp/data/`(macOS) / `%APPDATA%/wxsp/data/`(Win)。
+    早先版本默认是相对路径 `data/db.sqlite`,双击 .app 时 cwd=/,会 OSError EROFS。
     `check_same_thread=False` 让 SQLAlchemy 连接池可跨线程派发(claim_task 并发测试需要)。
     """
     if db_path is None:
         env = os.environ.get(ENV_DB_PATH)
-        db_path = Path(env) if env else DEFAULT_DB_PATH
+        db_path = Path(env) if env else get_user_data_dir() / "db.sqlite"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     url = f"sqlite:///{db_path}"
     return create_engine(url, connect_args={"check_same_thread": False})

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 import httpx
@@ -51,7 +51,7 @@ class ApcClient:
     def check(self) -> Verdict:
         """同步阻塞调用,返回今日判决。详见 spec §4.3。"""
         cache = self._cache.load_or_bootstrap()
-        today = date.today().isoformat()
+        today = self._clock.utcnow().date().isoformat()
 
         # 1. 当日已判过 → 直接走缓存
         today_verdict = cache.get("today_verdict")
@@ -88,7 +88,11 @@ class ApcClient:
             if last_success_str is None:
                 # 异常情况:缓存丢字段。当作首装,放行。
                 return Verdict.PASS
-            last_success = datetime.fromisoformat(last_success_str)
+            try:
+                last_success = datetime.fromisoformat(last_success_str)
+            except ValueError:
+                # 缓存里的时间戳被改坏。当作首装,放行。
+                return Verdict.PASS
             if last_success.tzinfo is None:
                 last_success = last_success.replace(tzinfo=timezone.utc)
             elapsed = self._clock.utcnow() - last_success

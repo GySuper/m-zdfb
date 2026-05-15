@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from typing import Any
+
+import jwt as pyjwt
+
+from apc_sdk.exceptions import ApcDenied
 
 
 def hmac_sign(secret: str, method: str, path: str, ts: str, body: str) -> str:
@@ -19,3 +24,51 @@ def hmac_sign(secret: str, method: str, path: str, ts: str, body: str) -> str:
         canonical.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
+
+
+def verify_jwt(
+    token: str,
+    *,
+    public_key: str,
+    audience: str,
+    expected_did: str | None = None,
+) -> dict[str, Any]:
+    """RS256 校验 + 必要 claim 检查。失败一律抛 ApcDenied。
+
+    Args:
+        token: 服务端返回的 license JWT。
+        public_key: PEM 公钥(含 BEGIN/END 头尾)。
+        audience: 期望 aud,通常 = app_id;不等抛 ApcDenied。
+        expected_did: 期望 did(本地已有 device_id);为 None 时跳过(首次签发场景)。
+
+    Returns:
+        token claims dict。
+
+    Raises:
+        ApcDenied: 任何校验失败(过期、签名错、aud 错、did 错)。
+    """
+    try:
+        claims = pyjwt.decode(
+            token,
+            public_key,
+            algorithms=["RS256"],
+            audience=audience,
+            options={"require": ["exp", "aud"]},
+        )
+    except pyjwt.ExpiredSignatureError as exc:
+        raise ApcDenied(f"JWT expired: {exc}") from exc
+    except pyjwt.InvalidAudienceError as exc:
+        raise ApcDenied(f"JWT audience mismatch: {exc}") from exc
+    except pyjwt.InvalidSignatureError as exc:
+        raise ApcDenied(f"JWT signature invalid: {exc}") from exc
+    except pyjwt.PyJWTError as exc:
+        raise ApcDenied(f"JWT decode failed: {exc}") from exc
+
+    if expected_did is not None:
+        actual_did = claims.get("did")
+        if actual_did != expected_did:
+            raise ApcDenied(
+                f"JWT did mismatch: token did={actual_did!r}, expected did={expected_did!r}"
+            )
+
+    return claims

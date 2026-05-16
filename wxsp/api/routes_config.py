@@ -148,6 +148,7 @@ def _view_model(data: dict[str, Any]) -> dict[str, Any]:
         # paths(只剩 nas_root)
         "paths_nas_root": paths.get("nas_root", ""),
         # scheduler
+        "sched_enabled": bool(sched.get("enabled", True)),
         "sched_hour": sched.get("daily_cron_hour", 9),
         "sched_minute": sched.get("daily_cron_minute", 0),
         "sched_strategy": sched.get("strategy", "round-robin"),
@@ -234,6 +235,7 @@ def config_save(
     # paths(只剩 nas_root)
     paths_nas_root: str = Form(...),
     # scheduler
+    sched_enabled: bool = Form(False),
     sched_hour: int = Form(...),
     sched_minute: int = Form(...),
     sched_strategy: str = Form(...),
@@ -291,6 +293,7 @@ def config_save(
         # 账号通过单独的 add/edit/delete endpoints 改动,这里直接保留磁盘上现有的
         "accounts": old.get("accounts", {}),
         "scheduler": {
+            "enabled": sched_enabled,
             "daily_cron_hour": sched_hour,
             "daily_cron_minute": sched_minute,
             "strategy": sched_strategy,

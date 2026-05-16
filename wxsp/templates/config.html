@@ -57,6 +57,10 @@
       <p class="muted" style="margin-top: 0;">
         每天到点,自动同步飞书表 + 跑当日待发布任务(本机没开机就跳过这次,下次开机后手动点"立即跑今天"补)
       </p>
+      <div class="row"><label>启用定时任务</label>
+        <input type="checkbox" name="sched_enabled" {% if vm.sched_enabled %}checked{% endif %}>
+        <span class="muted" style="font-size: 12px;">关闭后每天到点不再自动触发,只能手动点"立即跑今天"</span>
+      </div>
       <div class="row"><label>每天触发时间</label>
         <input type="number" name="sched_hour" value="{{ vm.sched_hour }}" min="0" max="23" style="width: 70px;">
         <span>时</span>

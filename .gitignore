@@ -30,4 +30,4 @@ build/
 .vscode/
 *.swp
 *.spec  # PyInstaller spec
-.apc-env
+.apc-env*

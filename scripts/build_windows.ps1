@@ -28,10 +28,16 @@ if __name__ == "__main__":
 '@ | Out-File -Encoding utf8 build/launcher.py
 
 try {
+  # 本地打包便利:有 .apc-env.ps1 就自动加载(gitignored)。CI 走环境变量,文件不存在跳过。
+  if (Test-Path "$ProjectRoot\.apc-env.ps1") {
+    Write-Host "==> 加载 .apc-env.ps1"
+    . "$ProjectRoot\.apc-env.ps1"
+  }
+
   Write-Host "==> 注入 APC 凭据"
   foreach ($k in @("APC_ENDPOINT","APC_APP_ID","APC_APP_SECRET","APC_PUBLIC_KEY","APC_CERT_FP")) {
     if (-not (Test-Path env:$k)) {
-      throw "$k env var 必填(GitHub Actions secrets;无自签证书时 APC_CERT_FP 设为空字符串)"
+      throw "$k env var 必填(放 .apc-env.ps1 里,或导入 GitHub Actions secrets;无自签证书时 APC_CERT_FP 设为空字符串)"
     }
   }
 

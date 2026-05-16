@@ -31,7 +31,6 @@ WizardStyle=modern
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "autostart"; Description: "开机自动启动 wxsp"; GroupDescription: "附加任务"
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务"; Flags: unchecked
 
 [Files]
@@ -43,8 +42,4 @@ Name: "{group}\卸载 wxsp"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\wxsp"; Filename: "{app}\wxsp.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\wxsp.exe"; Parameters: "autostart enable"; Tasks: autostart; Flags: runhidden waituntilterminated
 Filename: "{app}\wxsp.exe"; Description: "启动 wxsp"; Flags: nowait postinstall skipifsilent
-
-[UninstallRun]
-Filename: "{app}\wxsp.exe"; Parameters: "autostart disable"; Flags: runhidden waituntilterminated

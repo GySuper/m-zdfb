@@ -89,7 +89,10 @@ def install_file_sink(
         "compression": "zip",
         "encoding": "utf-8",
         "level": level,
-        "enqueue": True,  # 多线程/多进程友好
+        # enqueue=False: PyInstaller frozen + Windows 下 multiprocessing worker
+        # 子进程启动失败 → 队列里的日志永不落盘(整个文件 0 字节)。
+        # 单 worker(max_concurrent_accounts=1)同步写完全够,没竞态。
+        "enqueue": False,
     }
     sink_id = logger.add(str(logs_dir / "wxsp.{time:YYYY-MM-DD}.log"), **sink_kwargs)
     _INSTALLED_SINK_IDS.append(sink_id)

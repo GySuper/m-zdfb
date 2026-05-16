@@ -251,7 +251,37 @@ def doctor() -> None:
     if not feishu_row.ok:
         feishu_failed = True
 
-    if cookie_failed or nas_failed or feishu_failed:
+    # APC section(只在打包模式跑,dev 模式 apc_config.py 是占位符,跑也只会报错)
+    typer.echo("")
+    typer.echo("APC:")
+    apc_failed = False
+    from wxsp.config import is_packaged
+
+    if not is_packaged():
+        typer.echo("  ⏭  dev 模式,跳过(打包后才走 APC)")
+    else:
+        from wxsp.apc_config import APC_APP_ID, APC_ENDPOINT
+
+        typer.echo(f"  endpoint={APC_ENDPOINT[:40]}{'...' if len(APC_ENDPOINT) > 40 else ''}")
+        typer.echo(f"  app_id={APC_APP_ID[:12]}{'...' if len(APC_APP_ID) > 12 else ''}")
+        try:
+            import wxsp.apc as wxsp_apc
+
+            client = wxsp_apc._client()  # 构造时校验 ApcConfig
+            from apc_sdk._http import fetch_session
+
+            cache = client._cache.load_or_bootstrap()
+            license_jwt = fetch_session(
+                client._get_http(), client._cfg, device_id=cache.get("device_id")
+            )
+            typer.echo(f"  ✅ APC check OK(license 长度={len(license_jwt)})")
+            typer.echo(f"  session.json: device_id={cache.get('device_id')!r}")
+        except Exception as exc:
+            apc_failed = True
+            typer.echo(f"  ❌ APC check 失败: {type(exc).__name__}: {exc}")
+            typer.echo(f"     完整 repr: {exc!r}")
+
+    if cookie_failed or nas_failed or feishu_failed or apc_failed:
         raise typer.Exit(code=1)
 
 
@@ -415,6 +445,12 @@ def web(
     import webbrowser
 
     import uvicorn
+    from loguru import logger as _logger
+
+    # frozen + Windows 下 loguru 默认 stderr sink 不工作(包了 NullWriter 之类),
+    # 这里显式再 add 一个 sys.stderr sink 保底,确保 logger.info/warning 能输出。
+    # 重复 add 不会冲突(各自 sink id),最多多一行重复输出,无害。
+    _logger.add(sys.stderr, level="INFO", format="{time:HH:mm:ss} | {level: <5} | {message}")
 
     # M11 setup mode: config.yaml 不存在时,用默认参数起 Web UI,让向导接管。
     try:

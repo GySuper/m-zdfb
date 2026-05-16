@@ -2,6 +2,11 @@
 # 同 macOS 设计:纯 PyInstaller,字节码保护对付运营/一般技术人员够用。
 $ErrorActionPreference = "Stop"
 
+# GitHub Actions Windows runner 默认 locale=cp1252,Python stdout/file IO 都会
+# 走 cp1252 编码,遇到中文(apc_config.py 的 docstring / print 中文消息)就挂。
+# PYTHONUTF8=1 是 Python 3.7+ 的 UTF-8 mode 开关,强制所有子进程用 UTF-8。
+$env:PYTHONUTF8 = "1"
+
 $Version = if ($env:WXSP_VERSION) { $env:WXSP_VERSION } else { "0.1.0" }
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $ProjectRoot
@@ -48,6 +53,13 @@ try {
   # (v0.2.1 用 here-string + python -c 在 GitHub Actions 上 silently 跑过但不改文件)
   @'
 import os, pathlib, sys
+# 兜底:即使外层没设 PYTHONUTF8=1,这里也强制 stdout/stderr 走 UTF-8,
+# 避免 print 中文消息时被 cp1252 撞挂(Python 3.7+ 都有 reconfigure)。
+for stream in (sys.stdout, sys.stderr):
+    try:
+        stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 p = pathlib.Path("wxsp/apc_config.py")
 # 必须显式 UTF-8:GitHub Actions Windows runner 默认 locale=cp1252,
 # 不指定 encoding 读 UTF-8 文件(apc_config.py 有中文 docstring)直接 UnicodeDecodeError。

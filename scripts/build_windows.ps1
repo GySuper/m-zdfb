@@ -47,15 +47,19 @@ try {
   # 把 Python 代码写到独立文件再跑,避免 PowerShell → uv → python 的命令行参数转义陷阱
   # (v0.2.1 用 here-string + python -c 在 GitHub Actions 上 silently 跑过但不改文件)
   @'
-import os, pathlib
+import os, pathlib, sys
 p = pathlib.Path("wxsp/apc_config.py")
 content = p.read_text()
 changed = []
 for key in ("APC_ENDPOINT","APC_APP_ID","APC_APP_SECRET","APC_PUBLIC_KEY","APC_CERT_FP"):
-    val = os.environ[key]
+    val = os.environ.get(key)
+    if val is None:
+        print(f"FATAL: env var {key} 未设置(GitHub secret 名字对不上?)", file=sys.stderr)
+        sys.exit(1)
     pattern = f'"__{key}__"'
     if pattern not in content:
-        raise SystemExit(f"FATAL: 在 apc_config.py 里找不到占位符 {pattern}")
+        print(f"FATAL: 在 apc_config.py 里找不到占位符 {pattern}", file=sys.stderr)
+        sys.exit(1)
     content = content.replace(pattern, repr(val))
     changed.append(key)
 p.write_text(content)
@@ -63,10 +67,23 @@ p.write_text(content)
 verify = p.read_text()
 for key in changed:
     if f'"__{key}__"' in verify:
-        raise SystemExit(f"FATAL: {key} 占位符 replace 后仍残留")
+        print(f"FATAL: {key} 占位符 replace 后仍残留", file=sys.stderr)
+        sys.exit(1)
 print("==> 凭据已注入 + 校验通过:", ",".join(changed))
 '@ | Out-File -Encoding utf8 build/inject_apc.py
+  Write-Host "==> 注入脚本内容预览(前 5 行):"
+  Get-Content build/inject_apc.py -TotalCount 5 | ForEach-Object { Write-Host "    | $_" }
   uv run python build/inject_apc.py
+  # PowerShell 的 $ErrorActionPreference=Stop 不管原生 .exe 的非零退出码,
+  # 必须手动检查 $LASTEXITCODE,否则注入失败也会继续 PyInstaller 出占位符版本。
+  if ($LASTEXITCODE -ne 0) {
+    throw "APC 凭据注入失败(exit=$LASTEXITCODE),拒绝继续打包"
+  }
+  Write-Host "==> 注入后 apc_config.py 预览(脱敏前 20 字符):"
+  Get-Content wxsp/apc_config.py | ForEach-Object {
+    if ($_.Length -gt 25) { Write-Host "    | $($_.Substring(0, 25))..." }
+    else { Write-Host "    | $_" }
+  }
 
   Write-Host "==> PyInstaller 打包"
   uv run pyinstaller `

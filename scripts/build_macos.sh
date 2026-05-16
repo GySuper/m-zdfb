@@ -25,11 +25,14 @@ echo "==> 写 launcher"
 mkdir -p build
 cat > build/launcher.py <<'EOF'
 """wxsp PyInstaller 入口。"""
+import multiprocessing
 import sys
 
-from wxsp.cli import app
-
 if __name__ == "__main__":
+    # frozen + multiprocessing 在 Windows 上必须;mac 上无害(POSIX fork 默认走)。
+    # loguru / playwright 内部可能用 multiprocessing,没这行会 silent 失败。
+    multiprocessing.freeze_support()
+    from wxsp.cli import app
     # 双击 .app 时 sys.argv 只有可执行路径无子命令;默认起 Web UI(运营要的体验)。
     if len(sys.argv) == 1:
         sys.argv.append("web")
@@ -50,12 +53,22 @@ uv run python - <<'PYEOF'
 import os, pathlib
 p = pathlib.Path("wxsp/apc_config.py")
 content = p.read_text()
+changed = []
 for key in ("APC_ENDPOINT", "APC_APP_ID", "APC_APP_SECRET", "APC_PUBLIC_KEY", "APC_CERT_FP"):
     val = os.environ[key]
+    pattern = f'"__{key}__"'
+    if pattern not in content:
+        raise SystemExit(f"FATAL: apc_config.py 找不到占位符 {pattern}")
     # 用 repr 把字符串转成合法 Python 字面量,处理特殊字符 + 换行(PUBLIC_KEY 多行 PEM)
-    content = content.replace(f'"__{key}__"', repr(val))
+    content = content.replace(pattern, repr(val))
+    changed.append(key)
 p.write_text(content)
-print(f"==> 凭据已注入 wxsp/apc_config.py(打包后 trap 会 revert)")
+# 校验真改了(防止 silent skip):再读回来确认占位符都不在了
+verify = p.read_text()
+for key in changed:
+    if f'"__{key}__"' in verify:
+        raise SystemExit(f"FATAL: {key} 占位符 replace 后仍残留")
+print(f"==> 凭据已注入 + 校验通过:{','.join(changed)}(打包后 trap 会 revert)")
 PYEOF
 
 echo "==> PyInstaller 打包"

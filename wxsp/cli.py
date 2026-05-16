@@ -455,11 +455,15 @@ def web(
     # M11 setup mode: config.yaml 不存在时,用默认参数起 Web UI,让向导接管。
     try:
         settings = load_settings()
+        typer.echo(f"[wxsp] logs_dir = {settings.app.logs_dir}")
         try:
             install_file_sink(
                 logs_dir=settings.app.logs_dir,
                 retention_days=settings.monitoring.log_retention_days,
             )
+            # 装完 sink 立刻写一条横幅,验证文件 sink 是否真在工作(frozen 模式诊断用)
+            _logger.info(f"[wxsp] sink ready: file={settings.app.logs_dir} + stderr + sse")
+            typer.echo(f"[wxsp] 日志已就绪,文件:{settings.app.logs_dir}/wxsp.<日期>.log")
         except Exception as exc:
             typer.echo(f"[wxsp] 装日志 sink 失败(继续 stderr): {exc}")
         bind_host = host or settings.webui.host

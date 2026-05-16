@@ -16,11 +16,14 @@ Write-Host "==> 写 launcher"
 New-Item -ItemType Directory -Force -Path build | Out-Null
 @'
 """wxsp PyInstaller 入口。"""
+import multiprocessing
 import sys
 
-from wxsp.cli import app
-
 if __name__ == "__main__":
+    # frozen + multiprocessing 在 Windows 上必须;没这行 loguru / playwright 用
+    # multiprocessing 的内部 worker 会 silent 失败(日志全卡 queue 不落盘等)。
+    multiprocessing.freeze_support()
+    from wxsp.cli import app
     # 双击 .exe 等同于无参调用;默认起 Web UI。
     if len(sys.argv) == 1:
         sys.argv.append("web")
@@ -41,16 +44,29 @@ try {
     }
   }
 
-  uv run python -c @"
+  # 把 Python 代码写到独立文件再跑,避免 PowerShell → uv → python 的命令行参数转义陷阱
+  # (v0.2.1 用 here-string + python -c 在 GitHub Actions 上 silently 跑过但不改文件)
+  @'
 import os, pathlib
-p = pathlib.Path('wxsp/apc_config.py')
+p = pathlib.Path("wxsp/apc_config.py")
 content = p.read_text()
-for key in ('APC_ENDPOINT','APC_APP_ID','APC_APP_SECRET','APC_PUBLIC_KEY','APC_CERT_FP'):
+changed = []
+for key in ("APC_ENDPOINT","APC_APP_ID","APC_APP_SECRET","APC_PUBLIC_KEY","APC_CERT_FP"):
     val = os.environ[key]
-    content = content.replace(f'\"__{key}__\"', repr(val))
+    pattern = f'"__{key}__"'
+    if pattern not in content:
+        raise SystemExit(f"FATAL: 在 apc_config.py 里找不到占位符 {pattern}")
+    content = content.replace(pattern, repr(val))
+    changed.append(key)
 p.write_text(content)
-print('==> 凭据已注入')
-"@
+# 校验真改了(防止 silent skip):再读回来,确认占位符都不在了
+verify = p.read_text()
+for key in changed:
+    if f'"__{key}__"' in verify:
+        raise SystemExit(f"FATAL: {key} 占位符 replace 后仍残留")
+print("==> 凭据已注入 + 校验通过:", ",".join(changed))
+'@ | Out-File -Encoding utf8 build/inject_apc.py
+  uv run python build/inject_apc.py
 
   Write-Host "==> PyInstaller 打包"
   uv run pyinstaller `

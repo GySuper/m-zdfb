@@ -31,6 +31,8 @@ def _setup_required() -> bool:
 def create_app() -> FastAPI:
     app = FastAPI(title="wxsp Web UI", docs_url=None, redoc_url=None)
     log_stream.attach_to_loguru()
+    # 启动横幅:让 Web UI Logs 页面打开时至少能看到一行(防止"页面空白"误以为坏了)
+    log_stream.emit_for_test("Web UI 启动,日志流就绪。任务运行时会自动推送 logger 输出。")
 
     @app.middleware("http")
     async def setup_redirect(

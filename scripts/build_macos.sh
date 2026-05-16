@@ -52,7 +52,8 @@ trap 'git checkout -- wxsp/apc_config.py 2>/dev/null || true' EXIT
 uv run python - <<'PYEOF'
 import os, pathlib
 p = pathlib.Path("wxsp/apc_config.py")
-content = p.read_text()
+# 显式 UTF-8:mac 默认 UTF-8 这里冗余但与 Windows 对齐,防 CI 某天 locale 改了出 cp1252 类问题
+content = p.read_text(encoding="utf-8")
 changed = []
 for key in ("APC_ENDPOINT", "APC_APP_ID", "APC_APP_SECRET", "APC_PUBLIC_KEY", "APC_CERT_FP"):
     val = os.environ[key]
@@ -62,9 +63,9 @@ for key in ("APC_ENDPOINT", "APC_APP_ID", "APC_APP_SECRET", "APC_PUBLIC_KEY", "A
     # 用 repr 把字符串转成合法 Python 字面量,处理特殊字符 + 换行(PUBLIC_KEY 多行 PEM)
     content = content.replace(pattern, repr(val))
     changed.append(key)
-p.write_text(content)
+p.write_text(content, encoding="utf-8")
 # 校验真改了(防止 silent skip):再读回来确认占位符都不在了
-verify = p.read_text()
+verify = p.read_text(encoding="utf-8")
 for key in changed:
     if f'"__{key}__"' in verify:
         raise SystemExit(f"FATAL: {key} 占位符 replace 后仍残留")

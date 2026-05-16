@@ -49,7 +49,9 @@ try {
   @'
 import os, pathlib, sys
 p = pathlib.Path("wxsp/apc_config.py")
-content = p.read_text()
+# 必须显式 UTF-8:GitHub Actions Windows runner 默认 locale=cp1252,
+# 不指定 encoding 读 UTF-8 文件(apc_config.py 有中文 docstring)直接 UnicodeDecodeError。
+content = p.read_text(encoding="utf-8")
 changed = []
 for key in ("APC_ENDPOINT","APC_APP_ID","APC_APP_SECRET","APC_PUBLIC_KEY","APC_CERT_FP"):
     val = os.environ.get(key)
@@ -62,9 +64,9 @@ for key in ("APC_ENDPOINT","APC_APP_ID","APC_APP_SECRET","APC_PUBLIC_KEY","APC_C
         sys.exit(1)
     content = content.replace(pattern, repr(val))
     changed.append(key)
-p.write_text(content)
+p.write_text(content, encoding="utf-8")
 # 校验真改了(防止 silent skip):再读回来,确认占位符都不在了
-verify = p.read_text()
+verify = p.read_text(encoding="utf-8")
 for key in changed:
     if f'"__{key}__"' in verify:
         print(f"FATAL: {key} 占位符 replace 后仍残留", file=sys.stderr)

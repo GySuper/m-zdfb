@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,7 @@ from wxsp.api.deps import templates
 from wxsp.config import Settings, _expand_env_vars, get_config_path
 
 router = APIRouter()
+_config_lock = threading.Lock()
 
 
 def _config_path() -> Path:
@@ -279,82 +282,82 @@ def config_save(
     webui_port: int = Form(...),
     webui_open_browser: bool = Form(False),
 ) -> HTMLResponse:
-    old = _load_raw_yaml()
-    old_feishu = old.get("feishu", {})
-    old_wecom = old.get("monitoring", {}).get("notifiers", {}).get("wecom", {})
+    with _config_lock:
+        old = _load_raw_yaml()
+        old_feishu = old.get("feishu", {})
+        old_wecom = old.get("monitoring", {}).get("notifiers", {}).get("wecom", {})
 
-    new_data: dict[str, Any] = {
-        "app": {
-            "data_dir": app_data_dir,
-            "logs_dir": app_logs_dir,
-            "timezone": app_timezone,
-        },
-        "paths": {"nas_root": paths_nas_root},
-        # 账号通过单独的 add/edit/delete endpoints 改动,这里直接保留磁盘上现有的
-        "accounts": old.get("accounts", {}),
-        "scheduler": {
-            "enabled": sched_enabled,
-            "daily_cron_hour": sched_hour,
-            "daily_cron_minute": sched_minute,
-            "strategy": sched_strategy,
-        },
-        "publisher": {
-            "headless": pub_headless,
-            "upload_timeout_seconds": pub_upload_timeout,
-            "step_pause_seconds": [pub_step_pause_min, pub_step_pause_max],
-            "screenshot_on_error": pub_screenshot_on_error,
-            "max_concurrent_accounts": pub_max_concurrent,
-        },
-        "feishu": {
-            "enabled": feishu_enabled,
-            "app_id": feishu_app_id,
-            "app_secret": _merge_secret(feishu_app_secret, old_feishu.get("app_secret", "")),
-            "bitable": {
-                "app_token": feishu_bitable_app_token,
-                "table_id": feishu_bitable_table_id,
+        new_data: dict[str, Any] = {
+            "app": {
+                "data_dir": app_data_dir,
+                "logs_dir": app_logs_dir,
+                "timezone": app_timezone,
             },
-            "field_map": {
-                "video_file": feishu_fm_video_file,
-                "title": feishu_fm_title,
-                "description": feishu_fm_description,
-                "tags": feishu_fm_tags,
-                "cover": feishu_fm_cover,
-                "topic": feishu_fm_topic,
-                "original_claim": feishu_fm_original_claim,
-                "account": feishu_fm_account,
-                "execute_date": feishu_fm_execute_date,
-                "publish_at": feishu_fm_publish_at,
-                "status": feishu_fm_status,
-                "remote_url": feishu_fm_remote_url,
-                "error_message": feishu_fm_error_message,
+            "paths": {"nas_root": paths_nas_root},
+            "accounts": old.get("accounts", {}),
+            "scheduler": {
+                "enabled": sched_enabled,
+                "daily_cron_hour": sched_hour,
+                "daily_cron_minute": sched_minute,
+                "strategy": sched_strategy,
             },
-            "sync": {"write_back_enabled": feishu_sync_writeback},
-        },
-        "monitoring": {
-            "cookie_warn_days": mon_cookie_warn_days,
-            "notifiers": {
-                "wecom": {
-                    "enabled": mon_wecom_enabled,
-                    "webhook": _merge_secret(mon_wecom_webhook, old_wecom.get("webhook", "")),
+            "publisher": {
+                "headless": pub_headless,
+                "upload_timeout_seconds": pub_upload_timeout,
+                "step_pause_seconds": [pub_step_pause_min, pub_step_pause_max],
+                "screenshot_on_error": pub_screenshot_on_error,
+                "max_concurrent_accounts": pub_max_concurrent,
+            },
+            "feishu": {
+                "enabled": feishu_enabled,
+                "app_id": feishu_app_id,
+                "app_secret": _merge_secret(feishu_app_secret, old_feishu.get("app_secret", "")),
+                "bitable": {
+                    "app_token": feishu_bitable_app_token,
+                    "table_id": feishu_bitable_table_id,
                 },
+                "field_map": {
+                    "video_file": feishu_fm_video_file,
+                    "title": feishu_fm_title,
+                    "description": feishu_fm_description,
+                    "tags": feishu_fm_tags,
+                    "cover": feishu_fm_cover,
+                    "topic": feishu_fm_topic,
+                    "original_claim": feishu_fm_original_claim,
+                    "account": feishu_fm_account,
+                    "execute_date": feishu_fm_execute_date,
+                    "publish_at": feishu_fm_publish_at,
+                    "status": feishu_fm_status,
+                    "remote_url": feishu_fm_remote_url,
+                    "error_message": feishu_fm_error_message,
+                },
+                "sync": {"write_back_enabled": feishu_sync_writeback},
             },
-            "notify_on": notify_on,
-            "log_retention_days": mon_log_retention_days,
-            "screenshot_retention_days": mon_screenshot_retention_days,
-            "backlog_warn_threshold": mon_backlog_warn_threshold,
-        },
-        "webui": {
-            "host": webui_host,
-            "port": webui_port,
-            "open_browser_on_start": webui_open_browser,
-        },
-    }
+            "monitoring": {
+                "cookie_warn_days": mon_cookie_warn_days,
+                "notifiers": {
+                    "wecom": {
+                        "enabled": mon_wecom_enabled,
+                        "webhook": _merge_secret(mon_wecom_webhook, old_wecom.get("webhook", "")),
+                    },
+                },
+                "notify_on": notify_on,
+                "log_retention_days": mon_log_retention_days,
+                "screenshot_retention_days": mon_screenshot_retention_days,
+                "backlog_warn_threshold": mon_backlog_warn_threshold,
+            },
+            "webui": {
+                "host": webui_host,
+                "port": webui_port,
+                "open_browser_on_start": webui_open_browser,
+            },
+        }
 
-    errors = _validate_dict(new_data)
-    if errors:
-        return _render_config(request, data=new_data, errors=errors, status_code=400)
+        errors = _validate_dict(new_data)
+        if errors:
+            return _render_config(request, data=new_data, errors=errors, status_code=400)
 
-    _save_yaml(new_data)
+        _save_yaml(new_data)
     return _render_config(request, data=new_data, flash=f"已保存,旧版本备份在 {_backup_path()}")
 
 
@@ -392,23 +395,24 @@ def add_account(
     aid = account_id.strip()
     if not aid:
         return RedirectResponse("/config?flash=账号 ID 不能为空", status_code=303)
-    data = _load_raw_yaml()
-    accounts = data.setdefault("accounts", {}) or {}
-    if aid in accounts:
-        return RedirectResponse(f"/config?flash=账号 {aid} 已存在,未添加", status_code=303)
-    accounts[aid] = _build_account_entry(
-        display_name=display_name,
-        enabled=enabled,
-        daily_limit=daily_limit,
-        video_search_root=video_search_root,
-        cover_search_root=cover_search_root,
-        user_data_dir=_profile_dir_for(aid),
-    )
-    data["accounts"] = accounts
-    errors = _validate_dict(data)
-    if errors:
-        return RedirectResponse(f"/config?flash=新增失败: {errors[0]}", status_code=303)
-    _save_yaml(data)
+    with _config_lock:
+        data = _load_raw_yaml()
+        accounts = data.setdefault("accounts", {}) or {}
+        if aid in accounts:
+            return RedirectResponse(f"/config?flash=账号 {aid} 已存在,未添加", status_code=303)
+        accounts[aid] = _build_account_entry(
+            display_name=display_name,
+            enabled=enabled,
+            daily_limit=daily_limit,
+            video_search_root=video_search_root,
+            cover_search_root=cover_search_root,
+            user_data_dir=_profile_dir_for(aid),
+        )
+        data["accounts"] = accounts
+        errors = _validate_dict(data)
+        if errors:
+            return RedirectResponse(f"/config?flash=新增失败: {errors[0]}", status_code=303)
+        _save_yaml(data)
     return RedirectResponse(f"/config?flash=已添加账号 {aid}", status_code=303)
 
 
@@ -422,40 +426,222 @@ def update_account(
     enabled: bool = Form(False),
 ) -> RedirectResponse:
     """编辑账号(account_id 和 user_data_dir 不可改:它们与 chrome profile 强绑定)。"""
-    data = _load_raw_yaml()
-    accounts = data.get("accounts", {}) or {}
-    if account_id not in accounts:
-        return RedirectResponse(f"/config?flash=账号 {account_id} 不存在,无法编辑", status_code=303)
-    old_entry = accounts[account_id]
-    accounts[account_id] = _build_account_entry(
-        display_name=display_name,
-        enabled=enabled,
-        daily_limit=daily_limit,
-        video_search_root=video_search_root,
-        cover_search_root=cover_search_root,
-        # user_data_dir 保留原值(若旧文件里没有就按 ID 推算)
-        user_data_dir=old_entry.get("user_data_dir") or _profile_dir_for(account_id),
-    )
-    data["accounts"] = accounts
-    errors = _validate_dict(data)
-    if errors:
-        return RedirectResponse(
-            f"/config?flash=保存失败: {errors[0]}&edit={account_id}", status_code=303
+    with _config_lock:
+        data = _load_raw_yaml()
+        accounts = data.get("accounts", {}) or {}
+        if account_id not in accounts:
+            return RedirectResponse(
+                f"/config?flash=账号 {account_id} 不存在,无法编辑", status_code=303
+            )
+        old_entry = accounts[account_id]
+        accounts[account_id] = _build_account_entry(
+            display_name=display_name,
+            enabled=enabled,
+            daily_limit=daily_limit,
+            video_search_root=video_search_root,
+            cover_search_root=cover_search_root,
+            user_data_dir=old_entry.get("user_data_dir") or _profile_dir_for(account_id),
         )
-    _save_yaml(data)
+        data["accounts"] = accounts
+        errors = _validate_dict(data)
+        if errors:
+            return RedirectResponse(
+                f"/config?flash=保存失败: {errors[0]}&edit={account_id}", status_code=303
+            )
+        _save_yaml(data)
     return RedirectResponse(f"/config?flash=已更新账号 {account_id}", status_code=303)
 
 
 @router.post("/config/accounts/{account_id}/delete")
 def delete_account(account_id: str) -> RedirectResponse:
-    data = _load_raw_yaml()
-    accounts = data.get("accounts", {}) or {}
-    if account_id not in accounts:
-        return RedirectResponse(f"/config?flash=账号 {account_id} 不存在,未删除", status_code=303)
-    accounts.pop(account_id)
-    data["accounts"] = accounts
-    errors = _validate_dict(data)
-    if errors:
-        return RedirectResponse(f"/config?flash=删除失败: {errors[0]}", status_code=303)
-    _save_yaml(data)
+    with _config_lock:
+        data = _load_raw_yaml()
+        accounts = data.get("accounts", {}) or {}
+        if account_id not in accounts:
+            return RedirectResponse(
+                f"/config?flash=账号 {account_id} 不存在,未删除", status_code=303
+            )
+        accounts.pop(account_id)
+        data["accounts"] = accounts
+        errors = _validate_dict(data)
+        if errors:
+            return RedirectResponse(f"/config?flash=删除失败: {errors[0]}", status_code=303)
+        _save_yaml(data)
     return RedirectResponse(f"/config?flash=已删除账号 {account_id}", status_code=303)
+
+
+# ---------- 分区独立保存(2026-05-16 UI 重设计)----------
+#
+# 每个 section 一个独立 POST 端点,只更新该 section 涉及的 yaml 键。
+# 老的 POST /config 端点保留作兼容兜底,新 UI 不再使用。
+
+
+def _apply_and_save(flash_ok: str, apply_fn: Callable[[dict[str, Any]], None]) -> RedirectResponse:
+    """读 config.yaml → apply_fn(data) 改 → 校验 → 写盘,全程持锁,杜绝竞态条件。"""
+    with _config_lock:
+        data = _load_raw_yaml()
+        apply_fn(data)
+        errors = _validate_dict(data)
+        if errors:
+            msg = f"保存失败: {'; '.join(errors)}"
+            return RedirectResponse(f"/config?flash={msg}", status_code=303)
+        _save_yaml(data)
+    return RedirectResponse(f"/config?flash={flash_ok}", status_code=303)
+
+
+@router.post("/config/section/publisher")
+def save_publisher(
+    pub_headless: bool = Form(False),
+    pub_upload_timeout: int = Form(...),
+    pub_step_pause_min: float = Form(...),
+    pub_step_pause_max: float = Form(...),
+    pub_screenshot_on_error: bool = Form(False),
+    pub_max_concurrent: int = Form(...),
+) -> RedirectResponse:
+    def apply(data: dict[str, Any]) -> None:
+        data["publisher"] = {
+            "headless": pub_headless,
+            "upload_timeout_seconds": pub_upload_timeout,
+            "step_pause_seconds": [pub_step_pause_min, pub_step_pause_max],
+            "screenshot_on_error": pub_screenshot_on_error,
+            "max_concurrent_accounts": pub_max_concurrent,
+        }
+
+    return _apply_and_save("✓ 发布规则已保存", apply)
+
+
+@router.post("/config/section/scheduler")
+def save_scheduler(
+    sched_enabled: bool = Form(False),
+    sched_hour: int = Form(...),
+    sched_minute: int = Form(...),
+    sched_strategy: str = Form(...),
+) -> RedirectResponse:
+    def apply(data: dict[str, Any]) -> None:
+        data["scheduler"] = {
+            "enabled": sched_enabled,
+            "daily_cron_hour": sched_hour,
+            "daily_cron_minute": sched_minute,
+            "strategy": sched_strategy,
+        }
+
+    return _apply_and_save("✓ 调度时间已保存", apply)
+
+
+@router.post("/config/section/feishu")
+def save_feishu(
+    feishu_enabled: bool = Form(False),
+    feishu_app_id: str = Form(...),
+    feishu_app_secret: str = Form(""),
+    feishu_bitable_app_token: str = Form(...),
+    feishu_bitable_table_id: str = Form(...),
+    feishu_sync_writeback: bool = Form(False),
+    paths_nas_root: str = Form(...),
+) -> RedirectResponse:
+    def apply(data: dict[str, Any]) -> None:
+        old_feishu = data.get("feishu", {})
+        old_field_map = old_feishu.get("field_map", {})
+        data["paths"] = {"nas_root": paths_nas_root}
+        data["feishu"] = {
+            "enabled": feishu_enabled,
+            "app_id": feishu_app_id,
+            "app_secret": _merge_secret(feishu_app_secret, old_feishu.get("app_secret", "")),
+            "bitable": {
+                "app_token": feishu_bitable_app_token,
+                "table_id": feishu_bitable_table_id,
+            },
+            "field_map": old_field_map,
+            "sync": {"write_back_enabled": feishu_sync_writeback},
+        }
+
+    return _apply_and_save("✓ 连接服务已保存", apply)
+
+
+@router.post("/config/section/monitoring")
+def save_monitoring(
+    mon_cookie_warn_days: float = Form(...),
+    mon_wecom_enabled: bool = Form(False),
+    mon_wecom_webhook: str = Form(""),
+    notify_on: list[str] = Form(default_factory=list),
+    mon_log_retention_days: int = Form(30),
+    mon_screenshot_retention_days: int = Form(90),
+    mon_backlog_warn_threshold: int = Form(20),
+) -> RedirectResponse:
+    def apply(data: dict[str, Any]) -> None:
+        old_wecom = data.get("monitoring", {}).get("notifiers", {}).get("wecom", {})
+        data["monitoring"] = {
+            "cookie_warn_days": mon_cookie_warn_days,
+            "notifiers": {
+                "wecom": {
+                    "enabled": mon_wecom_enabled,
+                    "webhook": _merge_secret(mon_wecom_webhook, old_wecom.get("webhook", "")),
+                },
+            },
+            "notify_on": notify_on,
+            "log_retention_days": mon_log_retention_days,
+            "screenshot_retention_days": mon_screenshot_retention_days,
+            "backlog_warn_threshold": mon_backlog_warn_threshold,
+        }
+
+    return _apply_and_save("✓ 通知告警已保存", apply)
+
+
+@router.post("/config/section/system")
+def save_system(
+    app_data_dir: str = Form(...),
+    app_logs_dir: str = Form(...),
+    app_timezone: str = Form(...),
+    webui_host: str = Form(...),
+    webui_port: int = Form(...),
+    webui_open_browser: bool = Form(False),
+) -> RedirectResponse:
+    def apply(data: dict[str, Any]) -> None:
+        data["app"] = {
+            "data_dir": app_data_dir,
+            "logs_dir": app_logs_dir,
+            "timezone": app_timezone,
+        }
+        data["webui"] = {
+            "host": webui_host,
+            "port": webui_port,
+            "open_browser_on_start": webui_open_browser,
+        }
+
+    return _apply_and_save("✓ 系统设置已保存", apply)
+
+
+@router.post("/config/section/fieldmap")
+def save_fieldmap(
+    feishu_fm_video_file: str = Form(...),
+    feishu_fm_title: str = Form(...),
+    feishu_fm_description: str = Form(...),
+    feishu_fm_tags: str = Form(...),
+    feishu_fm_cover: str = Form(...),
+    feishu_fm_topic: str = Form(...),
+    feishu_fm_original_claim: str = Form(...),
+    feishu_fm_account: str = Form(...),
+    feishu_fm_execute_date: str = Form(...),
+    feishu_fm_publish_at: str = Form(...),
+    feishu_fm_status: str = Form(...),
+    feishu_fm_remote_url: str = Form(...),
+    feishu_fm_error_message: str = Form(...),
+) -> RedirectResponse:
+    def apply(data: dict[str, Any]) -> None:
+        feishu = data.setdefault("feishu", {})
+        feishu["field_map"] = {
+            "video_file": feishu_fm_video_file,
+            "title": feishu_fm_title,
+            "description": feishu_fm_description,
+            "tags": feishu_fm_tags,
+            "cover": feishu_fm_cover,
+            "topic": feishu_fm_topic,
+            "original_claim": feishu_fm_original_claim,
+            "account": feishu_fm_account,
+            "execute_date": feishu_fm_execute_date,
+            "publish_at": feishu_fm_publish_at,
+            "status": feishu_fm_status,
+            "remote_url": feishu_fm_remote_url,
+            "error_message": feishu_fm_error_message,
+        }
+
+    return _apply_and_save("✓ 字段映射已保存", apply)

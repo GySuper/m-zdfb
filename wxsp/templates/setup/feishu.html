@@ -11,7 +11,7 @@
   </div>
   <div class="form-row">
     <label>App Secret</label>
-    <input type="password" name="app_secret" required>
+    <input type="password" name="app_secret" required value="{{ data.feishu.app_secret if data and data.feishu else '' }}">
     <div class="hint">和 App ID 同一处</div>
   </div>
   <div class="form-row">

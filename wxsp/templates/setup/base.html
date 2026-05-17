@@ -3,40 +3,200 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}wxsp 首次设置{% endblock %}</title>
+  <title>{% block title %}九豆 · 首次设置{% endblock %}</title>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <style>
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #fafafa; color: #1a1a1a; }
-    .wizard { max-width: 720px; margin: 40px auto; padding: 0 24px; }
-    .progress { display: flex; gap: 4px; margin-bottom: 32px; }
-    .progress .dot { flex: 1; height: 6px; background: #e0e0e0; border-radius: 3px; }
-    .progress .dot.done { background: #16a34a; }
-    .progress .dot.active { background: #0066cc; }
-    .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 32px; }
-    h1 { margin: 0 0 8px 0; font-size: 22px; }
-    .step-label { color: #777; font-size: 13px; margin-bottom: 24px; }
-    .form-row { margin-bottom: 16px; }
-    .form-row label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
-    .form-row input[type=text], .form-row input[type=password], .form-row input[type=number] {
-      width: 100%; padding: 8px 12px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 14px;
+    :root {
+      --color-text: #111418;
+      --color-text-mute: #6b7280;
+      --color-text-faint: #9ca3af;
+      --color-bg: #f8f9fb;
+      --color-surface: #ffffff;
+      --color-border: #e5e7eb;
+      --color-border-soft: #f1f3f5;
+      --color-primary: #3b5bdb;
+      --color-primary-hover: #364fc7;
+      --color-primary-soft: #eef2ff;
+      --color-ok: #15803d; --color-ok-soft: #dcfce7;
+      --color-warn: #b45309; --color-warn-soft: #fef3c7;
+      --color-error: #b91c1c; --color-error-soft: #fee2e2;
     }
-    .form-row .hint { color: #999; font-size: 12px; margin-top: 4px; }
-    .actions { margin-top: 28px; display: flex; gap: 12px; justify-content: flex-end; }
-    button { padding: 8px 18px; border: 1px solid #d0d0d0; background: #fff; border-radius: 4px; cursor: pointer; font-size: 14px; }
-    button.primary { background: #0066cc; color: #fff; border-color: #0066cc; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--color-bg);
+      color: var(--color-text);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.65;
+    }
+    a { color: var(--color-primary); text-decoration: none; }
+    code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; background: var(--color-border-soft); padding: 1px 6px; border-radius: 4px; }
+
+    .wizard { max-width: 720px; margin: 48px auto; padding: 0 24px; }
+
+    .brand-row {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .brand-tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      color: var(--color-primary);
+      background: var(--color-primary-soft);
+      padding: 2px 10px;
+      border-radius: 4px;
+    }
+    .brand-title {
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--color-text);
+      margin-top: 8px;
+      letter-spacing: 0.2px;
+    }
+    .brand-subtitle {
+      font-size: 13px;
+      color: var(--color-text-mute);
+      margin-top: 4px;
+    }
+
+    /* 进度指示器 */
+    .progress {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 28px;
+    }
+    .progress .dot {
+      flex: 1;
+      height: 4px;
+      background: var(--color-border);
+      border-radius: 2px;
+      transition: background 0.3s;
+    }
+    .progress .dot.done { background: var(--color-ok); }
+    .progress .dot.active { background: var(--color-primary); }
+
+    .card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: 32px 36px;
+      box-shadow: 0 1px 3px rgba(17,20,24,0.04);
+    }
+    h1 { margin: 0 0 10px 0; font-size: 22px; font-weight: 600; color: var(--color-text); }
+    h2 { margin: 0; font-weight: 600; color: var(--color-text); }
+    p { margin: 0; color: var(--color-text); font-size: 14px; }
+
+    .step-label {
+      color: var(--color-text-mute);
+      font-size: 12px;
+      margin-bottom: 24px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 500;
+    }
+
+    /* 表单元素 */
+    .form-row { margin-bottom: 18px; }
+    .form-row label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 6px;
+      color: var(--color-text);
+    }
+    .form-row input[type=text],
+    .form-row input[type=password],
+    .form-row input[type=number] {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: inherit;
+      color: var(--color-text);
+      background: var(--color-surface);
+    }
+    .form-row input:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px var(--color-primary-soft);
+    }
+    .form-row .hint {
+      color: var(--color-text-mute);
+      font-size: 12px;
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+
+    .actions {
+      margin-top: 28px;
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      align-items: center;
+    }
+    button {
+      padding: 8px 18px;
+      height: 36px;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-text);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    button:hover { background: var(--color-primary-soft); border-color: #cdd5e0; }
+    button.primary {
+      background: var(--color-primary);
+      color: #fff;
+      border-color: var(--color-primary);
+    }
+    button.primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); color: #fff; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .error { background: #fee2e2; color: #dc2626; padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; font-size: 14px; }
-    .check-ok { color: #16a34a; }
-    .check-fail { color: #dc2626; }
+
+    .error {
+      background: var(--color-error-soft);
+      color: var(--color-error);
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin-bottom: 18px;
+      font-size: 13px;
+      border-left: 3px solid var(--color-error);
+    }
+    .check-ok { color: var(--color-ok); }
+    .check-fail { color: var(--color-error); }
+
     table { width: 100%; border-collapse: collapse; }
-    table th, table td { padding: 8px 12px; border-bottom: 1px solid #eee; font-size: 14px; text-align: left; }
-    .account-row { display: grid; grid-template-columns: 1fr 1fr 100px 40px; gap: 8px; margin-bottom: 8px; align-items: center; }
-    .summary-list { font-size: 14px; line-height: 1.8; }
-    .summary-list strong { display: inline-block; min-width: 100px; color: #555; }
+    table th, table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--color-border-soft);
+      font-size: 14px;
+      text-align: left;
+    }
+    table tr:last-child td { border-bottom: none; }
+
+    .account-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 100px 40px;
+      gap: 8px;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+    .summary-list { font-size: 14px; line-height: 1.9; }
+    .summary-list strong { display: inline-block; min-width: 110px; color: var(--color-text-mute); font-weight: 500; }
   </style>
 </head>
 <body>
   <div class="wizard">
+    <div class="brand-row">
+      <span class="brand-tag">九豆</span>
+      <div class="brand-title">自动发布平台</div>
+      <div class="brand-subtitle">首次设置向导</div>
+    </div>
     <div class="progress">
       {% for i in range(1, (total_steps or 6) + 1) %}
         <div class="dot {% if i < step %}done{% elif i == step %}active{% endif %}"></div>

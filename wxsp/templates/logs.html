@@ -1,33 +1,128 @@
 {% extends "base.html" %}
-{% block title %}日志 · wxsp{% endblock %}
+{% block title %}日志 · 九豆{% endblock %}
 {% block content %}
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">实时日志</div>
+      <div class="page-subtitle">服务运行时所有 logger 输出 · 通过 SSE 推送</div>
+    </div>
+    <div class="page-actions">
+      <span id="log-status" class="badge mute">连接中...</span>
+      <button id="log-clear">清屏</button>
+      <button id="log-pause">暂停</button>
+    </div>
+  </div>
+
   <div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-      <h2 style="margin: 0;">实时日志流</h2>
-      <div>
-        <span id="log-status" class="badge muted">连接中...</span>
-        <button id="log-clear">清屏</button>
-        <label style="margin-left: 12px;">
-          <input type="checkbox" id="log-autoscroll" checked> 自动滚动
+    <div class="card-header">
+      <div class="log-filters">
+        <span class="text-sm text-mute">显示级别:</span>
+        <label class="filter-chip"><input type="checkbox" data-level="info"  checked> <span>信息</span></label>
+        <label class="filter-chip"><input type="checkbox" data-level="warn"  checked> <span>警告</span></label>
+        <label class="filter-chip"><input type="checkbox" data-level="error" checked> <span>错误</span></label>
+        <label class="filter-chip"><input type="checkbox" data-level="debug"> <span>调试</span></label>
+        <span class="log-divider"></span>
+        <label class="filter-chip filter-toggle">
+          <input type="checkbox" id="log-autoscroll" checked>
+          <span>自动滚动到最新</span>
         </label>
       </div>
     </div>
-    <pre id="log-stream" class="log-stream"></pre>
+    <div class="card-body" style="padding: 0;">
+      <pre id="log-stream" class="log-stream"></pre>
+    </div>
   </div>
+
   <script>
     (function () {
       const pre = document.getElementById('log-stream');
       const status = document.getElementById('log-status');
       const autoscroll = document.getElementById('log-autoscroll');
       const clearBtn = document.getElementById('log-clear');
-      const es = new EventSource('/api/logs/stream');
-      es.onopen = () => { status.textContent = '已连接'; status.className = 'badge ok'; };
-      es.onerror = () => { status.textContent = '断开,重连中...'; status.className = 'badge error'; };
-      es.onmessage = (ev) => {
-        pre.textContent += ev.data + '\n';
+      const pauseBtn = document.getElementById('log-pause');
+      const filterInputs = document.querySelectorAll('[data-level]');
+
+      let paused = false;
+      const filters = { info: true, warn: true, error: true, debug: false };
+
+      filterInputs.forEach(inp => {
+        inp.addEventListener('change', () => { filters[inp.dataset.level] = inp.checked; });
+      });
+
+      function classifyLevel(line) {
+        // loguru 默认输出包含 "| INFO     |" / "| WARNING  |" / "| ERROR    |" 等
+        const upper = line.toUpperCase();
+        if (upper.includes(' ERROR ') || upper.includes('| ERROR')) return 'error';
+        if (upper.includes(' WARN')  || upper.includes('| WARN'))  return 'warn';
+        if (upper.includes(' DEBUG') || upper.includes('| DEBUG')) return 'debug';
+        return 'info';
+      }
+
+      function appendLine(text) {
+        if (paused) return;
+        const level = classifyLevel(text);
+        if (!filters[level]) return;
+        const span = document.createElement('span');
+        span.className = 'log-line log-' + level;
+        span.textContent = text + '\n';
+        pre.appendChild(span);
         if (autoscroll.checked) pre.scrollTop = pre.scrollHeight;
-      };
-      clearBtn.addEventListener('click', () => { pre.textContent = ''; });
+      }
+
+      const es = new EventSource('/api/logs/stream');
+      es.onopen = () => { status.textContent = '✓ 已连接'; status.className = 'badge ok'; };
+      es.onerror = () => { status.textContent = '⚠ 断开,重连中'; status.className = 'badge error'; };
+      es.onmessage = (ev) => appendLine(ev.data);
+
+      clearBtn.addEventListener('click', () => { pre.innerHTML = ''; });
+      pauseBtn.addEventListener('click', () => {
+        paused = !paused;
+        pauseBtn.textContent = paused ? '继续' : '暂停';
+      });
     })();
   </script>
+
+  <style>
+    .log-filters {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      flex-wrap: wrap;
+    }
+    .log-divider {
+      width: 1px;
+      height: 18px;
+      background: var(--color-border);
+      margin: 0 var(--space-1);
+    }
+    .filter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border: 1px solid var(--color-border);
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--color-text-mute);
+      cursor: pointer;
+      user-select: none;
+    }
+    .filter-chip:has(input:checked) {
+      border-color: var(--color-primary);
+      background: var(--color-primary-soft);
+      color: var(--color-primary);
+    }
+    .filter-chip input { display: none; }
+
+    pre.log-stream {
+      height: 540px;
+      border-radius: 0 0 var(--radius-md) var(--radius-md);
+    }
+    .log-line { display: inline; }
+    .log-info  { color: #d4d8de; }
+    .log-warn  { color: #fbbf24; }
+    .log-error { color: #f87171; }
+    .log-debug { color: #9ca3af; }
+  </style>
 {% endblock %}

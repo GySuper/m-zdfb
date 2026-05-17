@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from loguru import logger
 from patchright.sync_api import Page
@@ -342,9 +343,9 @@ def extract_remote_video_id_and_url(page: Page) -> tuple[str | None, str | None]
         href = link.get_attribute("href", timeout=2000)
         if not href:
             return None, None
-        # 视频号详情页 URL 形如 .../platform/post/finderNewLifeData?vid=xxx 或 ?id=xxx
-        # 不严格解析,直接拿 href 末段当 video_id
-        vid = href.rsplit("=", 1)[-1] if "=" in href else None
+        parsed = urlparse(href)
+        params = parse_qs(parsed.query)
+        vid = params.get("vid", params.get("id", [None]))[0]
         return vid, href
     except Exception as exc:
         logger.info(f"提取 remote_url 失败(对定时发布是常态): {exc}")
@@ -539,6 +540,11 @@ def publish(
         result.error_msg = f"step={last_step}: {exc}"
         logger.exception("publish 顶层未分类异常")
         return result
+    except KeyboardInterrupt:
+        result.error_type = "interrupted"
+        result.error_msg = f"step={last_step}: 用户中断(Ctrl-C)"
+        logger.warning(result.error_msg)
+        raise  # finally 写 DB 后,KeyboardInterrupt 继续向上传播
     finally:
         # cleanup tmp(本地文件系统操作,失败不影响后续 DB 写)
         try:
@@ -551,6 +557,8 @@ def publish(
             new_status = "success"
         elif result.dry_run and result.ok:
             new_status = "pending"  # dry_run 没真发 → 回到可执行
+        elif result.error_type == "interrupted":
+            new_status = "interrupted"
         else:
             new_status = "failed"
 

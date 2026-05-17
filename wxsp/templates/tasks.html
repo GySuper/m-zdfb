@@ -1,92 +1,296 @@
 {% extends "base.html" %}
-{% block title %}任务 · wxsp{% endblock %}
+{% block title %}任务 · 九豆{% endblock %}
 {% block content %}
-  {% if flash %}
-    <div class="card" style="border-left: 4px solid var(--primary);">
-      <p style="margin: 0;">{{ flash }}</p>
-    </div>
-  {% endif %}
 
-  <div class="card">
-    {% if backlog_mode %}
-      <p style="margin: 0 0 8px 0;">
-        <strong>历史积压视图</strong> · 仅显示执行日期早于今天且仍是待发布/已中断的任务
-        · <a class="btn" href="/tasks">返回今日</a>
-      </p>
-    {% endif %}
-    <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 12px;">
-      <form method="get" action="/tasks" style="display: flex; gap: 12px; align-items: flex-end;">
-        <label>执行日期 <input type="date" name="date" value="{{ filter_date or '' }}"></label>
-        <label>账号
-          <select name="account">
-            <option value="">全部</option>
-            {% for a in account_options %}
-              <option value="{{ a }}" {% if filter_account==a %}selected{% endif %}>{{ a }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>状态
-          <select name="status">
-            <option value="">全部</option>
-            {% for s in status_options %}
-              <option value="{{ s }}" {% if filter_status==s %}selected{% endif %}>{{ status_cn(s) }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button class="primary" type="submit">筛选</button>
-      </form>
-      <form method="post" action="/tasks/run-today">
-        <button class="primary" type="submit">立即跑今天待发布</button>
+  <div class="page-header">
+    <div>
+      <div class="page-title">任务</div>
+      <div class="page-subtitle">
+        {% if backlog_mode %}
+          历史积压视图 · 执行日期早于今天且仍待发布/已中断
+        {% elif filter_date %}
+          {{ filter_date }} 的任务{% if filter_account %} · {{ filter_account }}{% endif %}
+        {% else %}
+          全部任务
+        {% endif %}
+      </div>
+    </div>
+    <div class="page-actions">
+      <form method="post" action="/tasks/run-today" style="margin:0;">
+        <button class="primary" type="submit" title="先同步飞书,再跑今天 pending">立即跑今天</button>
       </form>
     </div>
   </div>
 
-  <div class="card">
-    <h2>任务({{ rows|length }})</h2>
-    {% if rows %}
-    <table>
-      <thead>
-        <tr>
-          <th>编号</th><th>标题</th><th>账号</th><th>执行日期</th><th>发布时间</th>
-          <th>状态</th><th>重试次数</th><th>操作</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-        <tr>
-          <td>#{{ r.id }}</td>
-          <td>{{ r.title }}</td>
-          <td><code>{{ r.account_id }}</code></td>
-          <td class="muted">{{ r.execute_date }}</td>
-          <td class="muted">{{ r.publish_at.strftime("%H:%M") }}</td>
-          <td>
-            {% if r.status == "success" %}<span class="badge ok">{{ status_cn(r.status) }}</span>
-            {% elif r.status == "running" %}<span class="badge warn">{{ status_cn(r.status) }}</span>
-            {% elif r.status == "failed" %}<span class="badge error">{{ status_cn(r.status) }}</span>
-            {% elif r.status == "interrupted" %}<span class="badge warn">{{ status_cn(r.status) }}</span>
-            {% else %}<span class="badge muted">{{ status_cn(r.status) }}</span>{% endif %}
-            {% if r.last_error_type %}<br><span class="muted">{{ error_type_cn(r.last_error_type) }}</span>{% endif %}
-          </td>
-          <td class="muted">{{ r.attempts }}</td>
-          <td style="white-space: nowrap;">
-            <a class="btn" href="/tasks/{{ r.id }}">详情</a>
+  {% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
+
+  {# ============ Tabs ============ #}
+  {% if not backlog_mode %}
+  <div class="tabs">
+    {% set base_q = '?' + ('date=' + filter_date.isoformat() + '&' if filter_date else '') + ('account=' + filter_account + '&' if filter_account else '') %}
+    <a class="tab {% if filter_bucket == 'attention' %}active{% endif %}" href="{{ base_q }}bucket=attention">
+      <span class="tab-label">待处理</span>
+      <span class="tab-count {% if bucket_counts.attention > 0 and filter_bucket != 'attention' %}highlight{% endif %}">{{ bucket_counts.attention }}</span>
+    </a>
+    <a class="tab {% if filter_bucket == 'running' %}active{% endif %}" href="{{ base_q }}bucket=running">
+      <span class="tab-label">进行中</span>
+      <span class="tab-count">{{ bucket_counts.running }}</span>
+    </a>
+    <a class="tab {% if filter_bucket == 'done' %}active{% endif %}" href="{{ base_q }}bucket=done">
+      <span class="tab-label">已完成</span>
+      <span class="tab-count">{{ bucket_counts.done }}</span>
+    </a>
+    <a class="tab {% if filter_bucket == 'all' %}active{% endif %}" href="{{ base_q }}bucket=all">
+      <span class="tab-label">全部</span>
+      <span class="tab-count">{{ bucket_counts.all }}</span>
+    </a>
+  </div>
+  {% else %}
+  <div class="flash warn">
+    <strong>历史积压视图</strong> · 仅显示执行日期早于今天且仍是待发布/已中断的任务
+    · <a href="/tasks">返回今日 →</a>
+  </div>
+  {% endif %}
+
+  {# ============ Filters ============ #}
+  <details class="filters" {% if filter_status or (filter_date and not backlog_mode) or filter_account %}open{% endif %}>
+    <summary><span>筛选</span><span class="filters-state">日期 {{ filter_date or '不限' }}{% if filter_account %} · 账号 {{ filter_account }}{% endif %}{% if filter_status %} · 状态 {{ status_cn(filter_status) }}{% endif %}</span></summary>
+    <form method="get" action="/tasks" class="filter-form">
+      <label>执行日期 <input type="date" name="date" value="{{ filter_date.isoformat() if filter_date else '' }}"></label>
+      <label>账号
+        <select name="account">
+          <option value="">全部</option>
+          {% for a in account_options %}
+            <option value="{{ a }}" {% if filter_account==a %}selected{% endif %}>{{ a }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>状态
+        <select name="status">
+          <option value="">全部</option>
+          {% for s in status_options %}
+            <option value="{{ s }}" {% if filter_status==s %}selected{% endif %}>{{ status_cn(s) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <input type="hidden" name="bucket" value="{{ filter_bucket }}">
+      <button class="primary" type="submit">应用筛选</button>
+      <a class="btn" href="/tasks">清空</a>
+    </form>
+  </details>
+
+  {# ============ Task list ============ #}
+  {% if rows %}
+    <div class="task-list">
+      {% for r in rows %}
+        {% set is_failed = r.status == "failed" %}
+        {% set is_interrupted = r.status == "interrupted" %}
+        {% set is_running = r.status == "running" %}
+        {% set is_success = r.status == "success" %}
+        <div class="task-card {% if is_failed %}failed{% elif is_interrupted %}interrupted{% elif is_running %}running{% elif is_success %}success{% endif %}">
+
+          <div class="tc-status-marker">
+            {% if is_success %}✓
+            {% elif is_running %}◐
+            {% elif is_failed %}✕
+            {% elif is_interrupted %}⏸
+            {% elif r.status == "skipped" %}↷
+            {% else %}⏱{% endif %}
+          </div>
+
+          <div class="tc-main">
+            <div class="tc-title">
+              <a href="/tasks/{{ r.id }}">{{ r.title }}</a>
+              <span class="tc-id">#{{ r.id }}</span>
+            </div>
+            <div class="tc-meta">
+              <span><code>{{ r.account_id }}</code></span>
+              <span class="text-mute">·</span>
+              <span>执行 {{ r.execute_date }}</span>
+              <span class="text-mute">·</span>
+              <span>计划 {{ r.publish_at.strftime("%H:%M") }} 发布</span>
+              {% if r.attempts > 0 %}
+                <span class="text-mute">·</span>
+                <span>已重试 {{ r.attempts }} 次</span>
+              {% endif %}
+            </div>
+
+            {% if r.last_error_type and (is_failed or is_interrupted) %}
+              <div class="tc-error">
+                <span class="badge error">{{ error_type_cn(r.last_error_type) }}</span>
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="tc-state">
+            {% if is_success %}<span class="badge ok">已发布</span>
+            {% elif is_running %}<span class="badge info">发布中</span>
+            {% elif is_failed %}<span class="badge error">失败</span>
+            {% elif is_interrupted %}<span class="badge warn">已中断</span>
+            {% elif r.status == "skipped" %}<span class="badge mute">已跳过</span>
+            {% else %}<span class="badge mute">待发布</span>{% endif %}
+          </div>
+
+          <div class="tc-actions">
+            <a class="btn btn-sm" href="/tasks/{{ r.id }}">详情</a>
             {% if r.retryable %}
-              <form method="post" action="/tasks/{{ r.id }}/retry" style="display:inline;">
-                <button class="primary" type="submit">重试</button>
+              <form method="post" action="/tasks/{{ r.id }}/retry" style="margin:0;">
+                <button type="submit" class="btn-sm primary">重试</button>
               </form>
             {% endif %}
             {% if r.requeueable %}
-              <form method="post" action="/tasks/{{ r.id }}/requeue" style="display:inline;">
-                <button type="submit" title="把执行日期改成今天,需再点'立即跑今天'才会真跑">重新入队到今天</button>
+              <form method="post" action="/tasks/{{ r.id }}/requeue" style="margin:0;">
+                <button type="submit" class="btn-sm" title="把执行日期改成今天,需再点'立即跑今天'才会真跑">入队到今天</button>
               </form>
             {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-      <p class="muted">该条件下没有任务。任务由飞书 Bitable 创建,点上方"立即同步飞书"或等 09:00 自动同步。</p>
-    {% endif %}
-  </div>
+            {% if r.remote_url %}
+              <a class="btn btn-sm" href="{{ r.remote_url }}" target="_blank">打开发布页 ↗</a>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card">
+      <div class="empty">
+        <div class="empty-title">
+          {% if filter_bucket == 'attention' %}没有需要处理的任务,一切正常 ✓
+          {% elif filter_bucket == 'running' %}当前没有任务在跑
+          {% elif filter_bucket == 'done' %}今天还没有完成的任务
+          {% else %}该条件下没有任务{% endif %}
+        </div>
+        <div class="text-sm">任务由飞书多维表格创建,可点上方"立即跑今天"或等每日定时任务触发时自动同步</div>
+      </div>
+    </div>
+  {% endif %}
+
+  <style>
+    /* ============ Tasks page-specific ============ */
+    .tabs {
+      display: flex;
+      gap: 2px;
+      margin-bottom: var(--space-3);
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface);
+      border-radius: var(--radius-md) var(--radius-md) 0 0;
+      padding: var(--space-1) var(--space-1) 0;
+      border: 1px solid var(--color-border);
+      border-bottom: none;
+    }
+    .tab {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      padding: 10px var(--space-4);
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+      color: var(--color-text-mute);
+      font-size: 14px;
+      text-decoration: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+    .tab:hover { color: var(--color-text); background: var(--color-primary-soft); }
+    .tab.active {
+      color: var(--color-primary);
+      font-weight: 500;
+      border-bottom-color: var(--color-primary);
+      background: var(--color-surface);
+    }
+    .tab-count {
+      font-size: 12px;
+      background: var(--color-border-soft);
+      color: var(--color-text-mute);
+      padding: 1px 8px;
+      border-radius: 10px;
+      font-weight: 500;
+    }
+    .tab.active .tab-count { background: var(--color-primary-soft); color: var(--color-primary); }
+    .tab-count.highlight { background: var(--color-error-soft); color: var(--color-error); }
+
+    .filters {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      margin-bottom: var(--space-3);
+      padding: 0;
+    }
+    .filters summary {
+      cursor: pointer;
+      padding: var(--space-3) var(--space-4);
+      font-size: 13px;
+      color: var(--color-text-mute);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      user-select: none;
+    }
+    .filters summary::-webkit-details-marker { display: none; }
+    .filters summary::before {
+      content: '▸';
+      margin-right: 8px;
+      color: var(--color-text-faint);
+      transition: transform 0.15s;
+      display: inline-block;
+    }
+    .filters[open] summary::before { transform: rotate(90deg); }
+    .filters-state { font-size: 12px; }
+    .filter-form {
+      padding: 0 var(--space-4) var(--space-4);
+      display: flex;
+      gap: var(--space-3);
+      align-items: flex-end;
+      flex-wrap: wrap;
+      border-top: 1px solid var(--color-border-soft);
+      padding-top: var(--space-3);
+    }
+    .filter-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--color-text-mute); }
+
+    .task-list { display: flex; flex-direction: column; gap: var(--space-2); }
+    .task-card {
+      display: grid;
+      grid-template-columns: 32px 1fr auto auto;
+      gap: var(--space-3);
+      align-items: center;
+      padding: var(--space-3) var(--space-4);
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      border-left: 3px solid var(--color-text-faint);
+    }
+    .task-card:hover { box-shadow: var(--shadow-sm); }
+    .task-card.success     { border-left-color: var(--color-ok); }
+    .task-card.running     { border-left-color: var(--color-info); }
+    .task-card.failed      { border-left-color: var(--color-error); background: #fffafa; }
+    .task-card.interrupted { border-left-color: var(--color-warn); background: #fffdf5; }
+
+    .tc-status-marker {
+      font-size: 18px;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: var(--color-border-soft);
+      color: var(--color-text-mute);
+    }
+    .task-card.success     .tc-status-marker { background: var(--color-ok-soft);    color: var(--color-ok); }
+    .task-card.running     .tc-status-marker { background: var(--color-info-soft);  color: var(--color-info); }
+    .task-card.failed      .tc-status-marker { background: var(--color-error-soft); color: var(--color-error); }
+    .task-card.interrupted .tc-status-marker { background: var(--color-warn-soft);  color: var(--color-warn); }
+
+    .tc-main { min-width: 0; }
+    .tc-title { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: var(--space-2); }
+    .tc-title a { color: var(--color-text); }
+    .tc-title a:hover { color: var(--color-primary); }
+    .tc-id { font-size: 11px; color: var(--color-text-faint); font-family: "SF Mono", Menlo, Consolas, monospace; }
+    .tc-meta { font-size: 12px; color: var(--color-text-mute); margin-top: 2px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .tc-error { margin-top: 6px; }
+
+    .tc-actions { display: flex; gap: var(--space-2); align-items: center; flex-shrink: 0; }
+    @media (max-width: 900px) {
+      .task-card { grid-template-columns: 32px 1fr; }
+      .tc-state, .tc-actions { grid-column: 2; }
+    }
+  </style>
 {% endblock %}

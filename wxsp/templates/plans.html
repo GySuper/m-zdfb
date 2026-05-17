@@ -1,43 +1,119 @@
 {% extends "base.html" %}
-{% block title %}计划 · wxsp{% endblock %}
+{% block title %}计划 · 九豆{% endblock %}
 {% block content %}
-  <div class="card">
-    <form method="get" action="/plans" style="display: flex; gap: 12px; align-items: flex-end;">
-      <label>选择日期 <input type="date" name="date" value="{{ filter_date }}"></label>
-      <button class="primary" type="submit">查询</button>
-    </form>
+
+  {# flatten groups → 单一时间线 #}
+  {% set ns = namespace(flat=[]) %}
+  {% for account_id, items in groups %}
+    {% for it in items %}
+      {% set _ = ns.flat.append({"account": account_id, "id": it.id, "title": it.title, "publish_at": it.publish_at, "status": it.status}) %}
+    {% endfor %}
+  {% endfor %}
+  {% set timeline = ns.flat | sort(attribute="publish_at") %}
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">发布计划</div>
+      <div class="page-subtitle">按发布时间排序的当日清单 · 只读视图</div>
+    </div>
+    <div class="page-actions">
+      <form method="get" action="/plans" class="date-picker">
+        <input type="date" name="date" value="{{ filter_date }}" onchange="this.form.submit()">
+      </form>
+    </div>
   </div>
 
   <div class="card">
-    <h2>{{ filter_date }} 的任务计划(共 {{ total }} 条)</h2>
-    {% if groups %}
-      {% for account_id, items in groups %}
-      <div style="margin-bottom: 16px;">
-        <h3 style="margin: 12px 0 8px 0; font-size: 14px;">
-          <code>{{ account_id }}</code> · {{ items|length }} 条
-        </h3>
-        <table>
-          <thead><tr><th>编号</th><th>标题</th><th>发布时间</th><th>状态</th></tr></thead>
-          <tbody>
-            {% for it in items %}
-            <tr>
-              <td><a href="/tasks/{{ it.id }}">#{{ it.id }}</a></td>
-              <td>{{ it.title }}</td>
-              <td class="muted">{{ it.publish_at.strftime("%H:%M") }}</td>
-              <td>
-                {% if it.status == "success" %}<span class="badge ok">{{ status_cn(it.status) }}</span>
-                {% elif it.status == "running" %}<span class="badge warn">{{ status_cn(it.status) }}</span>
-                {% elif it.status == "failed" %}<span class="badge error">{{ status_cn(it.status) }}</span>
-                {% else %}<span class="badge muted">{{ status_cn(it.status) }}</span>{% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% endfor %}
-    {% else %}
-      <p class="muted">该日期下没有任务。任务由飞书 Bitable 创建,执行日期由飞书"执行日期"字段控制。</p>
-    {% endif %}
+    <div class="card-header">
+      <h2>{{ filter_date }}</h2>
+      <span class="card-meta">共 {{ total }} 条计划</span>
+    </div>
+    <div class="card-body">
+      {% if timeline %}
+        <div class="timeline">
+          {% for it in timeline %}
+            {% set hh = it.publish_at.strftime("%H:%M") %}
+            <div class="tl-row tl-{{ it.status }}">
+              <div class="tl-time">{{ hh }}</div>
+              <div class="tl-bar"></div>
+              <div class="tl-content">
+                <a href="/tasks/{{ it.id }}" class="tl-title">{{ it.title }}</a>
+                <div class="tl-meta">
+                  <code>{{ it.account }}</code>
+                  <span class="text-faint">·</span>
+                  <span>#{{ it.id }}</span>
+                </div>
+              </div>
+              <div class="tl-state">
+                {% if it.status == "success" %}<span class="badge ok">已发布</span>
+                {% elif it.status == "running" %}<span class="badge info">发布中</span>
+                {% elif it.status == "failed" %}<span class="badge error">失败</span>
+                {% elif it.status == "interrupted" %}<span class="badge warn">已中断</span>
+                {% elif it.status == "skipped" %}<span class="badge mute">已跳过</span>
+                {% else %}<span class="badge mute">待发布</span>{% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty">
+          <div class="empty-title">{{ filter_date }} 没有发布计划</div>
+          <div>任务由飞书 Bitable 创建,执行日期由"执行日期"字段决定</div>
+        </div>
+      {% endif %}
+    </div>
   </div>
+
+  <style>
+    .date-picker input[type=date] {
+      cursor: pointer;
+    }
+
+    .timeline { display: flex; flex-direction: column; }
+
+    .tl-row {
+      display: grid;
+      grid-template-columns: 56px 16px 1fr auto;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3) 0;
+      position: relative;
+    }
+    .tl-row:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      left: 64px; top: 50%; height: calc(100% + 0px);
+      width: 2px;
+      background: var(--color-border-soft);
+    }
+
+    .tl-time {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--color-text);
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      text-align: right;
+    }
+
+    .tl-bar {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: var(--color-border);
+      border: 2px solid var(--color-surface);
+      box-shadow: 0 0 0 2px var(--color-border);
+      position: relative;
+      z-index: 1;
+    }
+    .tl-success     .tl-bar { background: var(--color-ok);    box-shadow: 0 0 0 2px var(--color-ok-soft); }
+    .tl-running     .tl-bar { background: var(--color-info);  box-shadow: 0 0 0 2px var(--color-info-soft); }
+    .tl-failed      .tl-bar { background: var(--color-error); box-shadow: 0 0 0 2px var(--color-error-soft); }
+    .tl-interrupted .tl-bar { background: var(--color-warn);  box-shadow: 0 0 0 2px var(--color-warn-soft); }
+
+    .tl-content { min-width: 0; }
+    .tl-title { font-size: 14px; font-weight: 500; color: var(--color-text); display: block; }
+    .tl-title:hover { color: var(--color-primary); }
+    .tl-meta { font-size: 12px; color: var(--color-text-mute); margin-top: 2px; display: flex; gap: 6px; align-items: center; }
+
+    .tl-state { flex-shrink: 0; }
+  </style>
 {% endblock %}

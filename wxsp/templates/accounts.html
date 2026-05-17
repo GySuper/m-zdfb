@@ -1,76 +1,180 @@
 {% extends "base.html" %}
-{% block title %}账号 · wxsp{% endblock %}
+{% block title %}账号 · 九豆{% endblock %}
 {% block content %}
+
+  <div class="page-header">
+    <div>
+      <div class="page-title">账号管理</div>
+      <div class="page-subtitle">共 {{ rows|length }} 个视频号账号</div>
+    </div>
+    <div class="page-actions">
+      <form method="post" action="/accounts/sync" style="margin:0;">
+        <button class="primary" type="submit">同步飞书</button>
+      </form>
+    </div>
+  </div>
+
   {% if flash %}
-    <div class="card" style="border-left: 4px solid var(--primary);">
-      <p style="margin: 0;">{{ flash }}</p>
+    <div class="flash">{{ flash }}</div>
+  {% endif %}
+
+  {% if rows %}
+    {# ============ 账号卡列表 ============ #}
+    <div class="account-list">
+      {% for r in rows %}
+        {% set cookie_warn = r.cookie_status == "warn" %}
+        {% set cookie_expired = r.cookie_status == "expired" %}
+        {% set needs_attention = cookie_warn or cookie_expired %}
+        <div class="account-row {% if cookie_expired %}row-error{% elif cookie_warn %}row-warn{% elif not r.enabled %}row-muted{% endif %}">
+
+          <div class="row-main">
+            <div class="row-id">
+              <div class="row-name">
+                {{ r.display_name }}
+                {% if not r.enabled %}<span class="badge mute">已禁用</span>{% endif %}
+              </div>
+              <div class="row-meta"><code>{{ r.id }}</code></div>
+            </div>
+
+            <div class="row-status">
+              {% if r.cookie_status == "ok" %}
+                <span class="badge ok">✓ 登录正常</span>
+                {% if r.cookie_last_active_at %}
+                  <span class="text-xs text-mute">最后活跃 {{ r.cookie_last_active_at.strftime("%Y-%m-%d %H:%M") }}</span>
+                {% endif %}
+              {% elif r.cookie_status == "warn" %}
+                <span class="badge warn">⚠ Cookie 即将过期</span>
+                <span class="text-xs text-mute">建议尽快扫码续期</span>
+              {% elif r.cookie_status == "expired" %}
+                <span class="badge error">✕ 登录已过期</span>
+                <span class="text-xs text-mute">需要重新扫码</span>
+              {% else %}
+                <span class="badge mute">未登录</span>
+                <span class="text-xs text-mute">首次使用,请先扫码登录</span>
+              {% endif %}
+            </div>
+
+            <div class="row-limit">
+              <div class="text-xs text-mute">日发上限</div>
+              <div class="row-limit-num">{{ r.daily_limit }}</div>
+            </div>
+
+            <div class="row-actions">
+              <form method="post" action="/accounts/{{ r.id }}/login" style="margin:0;">
+                <button type="submit" class="{% if needs_attention or r.cookie_status == 'unknown' %}primary{% endif %}">
+                  {% if cookie_expired or r.cookie_status == "unknown" %}扫码登录{% else %}扫码续期{% endif %}
+                </button>
+              </form>
+              {% if r.paused_until %}
+                <form method="post" action="/accounts/{{ r.id }}/resume" style="margin:0;">
+                  <button type="submit">恢复</button>
+                </form>
+              {% else %}
+                <form method="post" action="/accounts/{{ r.id }}/pause" style="margin:0;">
+                  <input type="hidden" name="hours" value="24">
+                  <button type="submit" title="暂停 24 小时,期间该账号的任务全部跳过">暂停 24h</button>
+                </form>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if r.paused_until %}
+            <div class="row-footnote">
+              <span class="badge warn">⏸ 已暂停</span>
+              <span class="text-sm text-mute">恢复时间:{{ r.paused_until.strftime("%Y-%m-%d %H:%M") }}</span>
+            </div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card">
+      <div class="empty">
+        <div class="empty-title">还没有配置账号</div>
+        <div>到 <a href="/config">配置</a> 页的"账号"分区添加你的第一个视频号账号</div>
+      </div>
     </div>
   {% endif %}
 
-  <div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-      <h2 style="margin: 0;">账号({{ rows|length }})</h2>
-      <form method="post" action="/accounts/sync" style="margin: 0;">
-        <button class="primary" type="submit">立即同步飞书</button>
-      </form>
-    </div>
-
-    {% if rows %}
-    <table>
-      <thead>
-        <tr>
-          <th>账号 ID</th><th>显示名</th><th>启用</th><th>登录状态</th>
-          <th>最后活跃</th><th>暂停至</th><th>操作</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-        <tr>
-          <td><code>{{ r.id }}</code></td>
-          <td>{{ r.display_name }}</td>
-          <td>
-            {% if r.enabled %}<span class="badge ok">启用</span>
-            {% else %}<span class="badge muted">禁用</span>{% endif %}
-          </td>
-          <td>
-            {% if r.cookie_status == "ok" %}<span class="badge ok">正常</span>
-            {% elif r.cookie_status == "warn" %}<span class="badge warn">即将过期</span>
-            {% elif r.cookie_status == "expired" %}<span class="badge error">已过期</span>
-            {% else %}<span class="badge muted">未知</span>{% endif %}
-          </td>
-          <td class="muted">{{ r.cookie_last_active_at.strftime("%Y-%m-%d %H:%M") if r.cookie_last_active_at else "-" }}</td>
-          <td class="muted">{{ r.paused_until.strftime("%Y-%m-%d %H:%M") if r.paused_until else "-" }}</td>
-          <td style="white-space: nowrap;">
-            <form method="post" action="/accounts/{{ r.id }}/login" style="display:inline;">
-              <button type="submit">扫码登录</button>
-            </form>
-            {% if r.paused_until %}
-              <form method="post" action="/accounts/{{ r.id }}/resume" style="display:inline;">
-                <button type="submit">恢复</button>
-              </form>
-            {% else %}
-              <form method="post" action="/accounts/{{ r.id }}/pause" style="display:inline;">
-                <input type="hidden" name="hours" value="24">
-                <button type="submit">暂停 24 小时</button>
-              </form>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-      <p class="muted">配置里还没有账号。请在"配置"页的 <code>accounts</code> 段添加。</p>
-    {% endif %}
-  </div>
-
-  <div class="card">
-    <h2>扫码登录说明</h2>
-    <ol style="margin: 0; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.7;">
-      <li>点"扫码登录"按钮后,后台会启动一个 Chrome 浏览器窗口,直接打开视频号主页</li>
-      <li>在那个窗口里用微信扫页面上的二维码,扫完即登录(本网页里不显示二维码)</li>
-      <li>扫码完成或 5 分钟超时后,Chrome 窗口自动关闭,登录状态会刷新到正常 / 已过期</li>
-      <li>视频号风控敏感,严禁后台静默模式,弹窗是必须的</li>
+  {# ============ 扫码登录说明(折叠)============ #}
+  <details class="info-block">
+    <summary>扫码登录是怎么工作的?</summary>
+    <ol class="info-list">
+      <li>点账号卡片上的"扫码登录"或"扫码续期"按钮</li>
+      <li>后台会启动一个 Chrome 浏览器窗口,直接打开视频号主页</li>
+      <li>在那个 Chrome 窗口里用微信扫页面上的二维码(<strong>本页面不会显示二维码</strong>)</li>
+      <li>扫码完成或 5 分钟超时后,Chrome 窗口自动关闭</li>
+      <li>刷新本页面,登录状态会更新为"正常"或"已过期"</li>
     </ol>
-  </div>
+    <p class="text-xs text-mute mt-3">
+      ※ 视频号风控敏感,工具严禁后台静默运行,弹窗是必须的。
+      首次扫码后 Cookie 有效期通常 3-7 天,过期前会自动告警提醒续期。
+    </p>
+  </details>
+
+  <style>
+    /* ============ Accounts page-specific ============ */
+    .account-list { display: flex; flex-direction: column; gap: var(--space-3); }
+
+    .account-row {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-4);
+      border-left: 4px solid var(--color-ok);
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .account-row:hover { box-shadow: var(--shadow-md); }
+    .account-row.row-warn  { border-left-color: var(--color-warn); }
+    .account-row.row-error { border-left-color: var(--color-error); }
+    .account-row.row-muted { border-left-color: var(--color-text-faint); background: var(--color-surface-alt); }
+
+    .row-main {
+      display: grid;
+      grid-template-columns: minmax(160px, 1.3fr) minmax(180px, 1.5fr) auto auto;
+      align-items: center;
+      gap: var(--space-4);
+    }
+    @media (max-width: 800px) {
+      .row-main { grid-template-columns: 1fr; gap: var(--space-3); }
+    }
+
+    .row-id .row-name { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: var(--space-2); }
+    .row-id .row-meta { font-size: 12px; color: var(--color-text-mute); margin-top: 4px; }
+
+    .row-status { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+
+    .row-limit { text-align: center; padding: 0 var(--space-3); }
+    .row-limit-num { font-size: 20px; font-weight: 600; color: var(--color-text); line-height: 1.2; margin-top: 2px; }
+
+    .row-actions { display: flex; gap: var(--space-2); align-items: center; }
+
+    .row-footnote {
+      margin-top: var(--space-3);
+      padding-top: var(--space-3);
+      border-top: 1px dashed var(--color-border-soft);
+      display: flex;
+      gap: var(--space-3);
+      align-items: center;
+    }
+
+    .info-block {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-4);
+      margin-top: var(--space-5);
+    }
+    .info-block summary {
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 14px;
+      color: var(--color-text);
+      user-select: none;
+    }
+    .info-block summary:hover { color: var(--color-primary); }
+    .info-block[open] summary { margin-bottom: var(--space-3); }
+    .info-list { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.8; color: var(--color-text); }
+    .info-list li { margin-bottom: 2px; }
+  </style>
 {% endblock %}

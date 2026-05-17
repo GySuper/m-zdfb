@@ -51,7 +51,7 @@ def client_empty(tmp_path: Path) -> Iterator[TestClient]:
 def test_plans_empty_day_renders_friendly_msg(client_empty: TestClient) -> None:
     r = client_empty.get("/plans?date=2026-01-01")
     assert r.status_code == 200
-    assert "没有任务" in r.text
+    assert "没有发布计划" in r.text
 
 
 def test_plans_groups_by_account(tmp_path: Path) -> None:
@@ -247,16 +247,18 @@ def test_config_get_renders_form_fields(
     _setup(tmp_path, monkeypatch)
     r = client_empty.get("/config")
     assert r.status_code == 200
-    # 表单存在
-    assert 'action="/config"' in r.text and 'method="post"' in r.text
-    # 各 section 标题(调度文案改为 "定时触发")
+    # 2026-05-16 重设计后,每个分区一个独立 form,action 是 /config/section/<name>
+    for section_slug in ["publisher", "scheduler", "feishu", "monitoring", "system"]:
+        assert f'action="/config/section/{section_slug}"' in r.text
+    assert 'method="post"' in r.text
+    # 各 section 标题(2026-05-16 UI 重设计后改为场景化分区文案)
     for section in [
-        "应用",
-        "NAS 路径",
-        "定时触发",
-        "发布器",
-        "飞书集成",
-        "通知 / 告警",
+        "系统",
+        "NAS / 文件路径",
+        "调度时间",
+        "发布规则",
+        "飞书 Bitable",
+        "通知告警",
         "Web UI",
     ]:
         assert section in r.text
@@ -528,16 +530,19 @@ def test_accounts_update_unknown_no_op(
     assert cfg.read_text("utf-8") == snap
 
 
-def test_accounts_edit_query_shows_inline_form(
+def test_accounts_edit_modal_data_available(
     client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """?edit=<id> 让该账号行展开编辑表单。"""
+    """2026-05-16 重设计后,账号编辑改用 modal,onclick 里的 JSON 包含账号 ID 和字段。"""
     _setup(tmp_path, monkeypatch)
-    r = client_empty.get("/config?edit=account_a")
+    r = client_empty.get("/config")
     assert r.status_code == 200
-    # 表单 action 是 update 端点
-    assert 'action="/config/accounts/account_a/update"' in r.text
-    # 字段都在
+    # modal dialog 存在
+    assert "<dialog" in r.text and 'id="account-modal"' in r.text
+    # 点击"编辑"会调用 openAccountModal(data),data 里包含账号 id 和字段
+    assert "openAccountModal(" in r.text
+    assert "&#34;id&#34;: &#34;account_a&#34;" in r.text or '"id": "account_a"' in r.text
+    # modal form 里包含所有字段 name(由 JS 动态填充值)
     for name in [
         "display_name",
         "enabled",

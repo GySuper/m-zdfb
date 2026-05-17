@@ -71,10 +71,10 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
 def test_dashboard_renders_empty_db(client: TestClient) -> None:
     r = client.get("/")
     assert r.status_code == 200
-    assert "今日总览" in r.text
+    assert "今日进度" in r.text
     assert "美食号" in r.text
     assert "健身号" in r.text
-    assert "暂无事件" in r.text
+    assert "还没有任何事件" in r.text
 
 
 def test_dashboard_shows_today_task_counts_and_recent_event(
@@ -129,7 +129,8 @@ def test_dashboard_shows_today_task_counts_and_recent_event(
 
     r = client.get("/")
     assert r.status_code == 200
-    assert "已发布 1" in r.text
+    # 新 UI 在 stat-chip 里把数字和标签分别放进子 span,所以用单独断言
+    assert "已发布" in r.text
     assert "风控触发" in r.text  # i18n 映射 risk_control → 风控触发
 
 

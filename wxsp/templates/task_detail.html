@@ -1,104 +1,303 @@
 {% extends "base.html" %}
-{% block title %}任务 #{{ task.id }} · wxsp{% endblock %}
+{% block title %}任务 #{{ task.id }} · 九豆{% endblock %}
 {% block content %}
-  <div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-      <h2 style="margin:0;">任务 #{{ task.id }} · {{ video.title if video else "(视频信息缺失)" }}</h2>
-      <div>
-        <a class="btn" href="/tasks">← 返回列表</a>
-        {% if retryable %}
-          <form method="post" action="/tasks/{{ task.id }}/retry" style="display:inline;">
-            <button class="primary" type="submit">重试</button>
-          </form>
-        {% endif %}
-        {% if requeueable %}
-          <form method="post" action="/tasks/{{ task.id }}/requeue" style="display:inline;">
-            <button type="submit" title="把执行日期改成今天,需再点'立即跑今天'才会真跑">重新入队到今天</button>
-          </form>
-        {% endif %}
+
+  <div class="page-header">
+    <div>
+      <div class="text-sm text-mute" style="margin-bottom: 4px;">
+        <a href="/tasks">← 返回任务列表</a>
+      </div>
+      <div class="page-title">
+        {% if task.status == "success" %}<span class="td-icon ok">✓</span>
+        {% elif task.status == "running" %}<span class="td-icon info">◐</span>
+        {% elif task.status == "failed" %}<span class="td-icon error">✕</span>
+        {% elif task.status == "interrupted" %}<span class="td-icon warn">⏸</span>
+        {% else %}<span class="td-icon">⏱</span>{% endif %}
+        {{ video.title if video else "(视频信息缺失)" }}
+      </div>
+      <div class="page-subtitle">
+        任务 #{{ task.id }} ·
+        {% if task.status == "success" %}<span class="badge ok">已发布</span>
+        {% elif task.status == "running" %}<span class="badge info">发布中</span>
+        {% elif task.status == "failed" %}<span class="badge error">失败</span>
+        {% elif task.status == "interrupted" %}<span class="badge warn">已中断</span>
+        {% elif task.status == "skipped" %}<span class="badge mute">已跳过</span>
+        {% else %}<span class="badge mute">待发布</span>{% endif %}
+        · 账号 <code>{{ task.account_id }}</code>{% if account %} · {{ account.display_name }}{% endif %}
+      </div>
+    </div>
+    <div class="page-actions">
+      {% if retryable %}
+        <form method="post" action="/tasks/{{ task.id }}/retry" style="margin:0;">
+          <button class="primary" type="submit">立即重试</button>
+        </form>
+      {% endif %}
+      {% if requeueable %}
+        <form method="post" action="/tasks/{{ task.id }}/requeue" style="margin:0;">
+          <button type="submit" title="把执行日期改成今天,需再点'立即跑今天'才会真跑">入队到今天</button>
+        </form>
+      {% endif %}
+      {% if task.remote_url %}
+        <a class="btn primary" href="{{ task.remote_url }}" target="_blank">打开发布页 ↗</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ============ 错误提示卡 ============ #}
+  {% if task.last_error_type %}
+    <div class="error-box">
+      <div class="error-head">
+        <span class="error-icon">⚠</span>
+        <div>
+          <div class="error-title">{{ error_type_cn(task.last_error_type) }}</div>
+          <div class="error-hint">
+            {% if task.last_error_type == "cookie_expired" %}
+              账号登录已失效。请到 <a href="/accounts">账号</a> 页面重新扫码登录后再重试。
+            {% elif task.last_error_type == "risk_control" %}
+              触发了视频号风控,该账号已自动暂停 24 小时。期间不要再尝试发布。
+            {% elif task.last_error_type == "nas_unreachable" %}
+              NAS 不可达。检查网络/挂载,然后点"立即重试"。
+            {% elif task.last_error_type == "video_invalid" %}
+              视频文件损坏或格式不支持。需要在飞书表里换一个文件,无法重试。
+            {% elif task.last_error_type == "element_not_found" %}
+              页面元素找不到,可能视频号改版了。看截图确认,需要时修改 selectors.py 后重试。
+            {% elif task.last_error_type == "upload_failed" %}
+              视频上传中断。点"立即重试"再试一次,持续失败可能是网络或视频问题。
+            {% elif task.last_error_type == "network" %}
+              网络异常。检查网络后点"立即重试"。
+            {% else %}
+              点"立即重试"再试一次;持续失败请看下方事件日志。
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% if task.last_error_msg %}
+        <details class="error-detail">
+          <summary>查看错误详情</summary>
+          <pre>{{ task.last_error_msg }}</pre>
+        </details>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="td-grid">
+    {# ============ 左:任务 + 视频 ============ #}
+    <div>
+      <div class="card">
+        <div class="card-header"><h2>任务信息</h2></div>
+        <div class="card-body">
+          <dl class="kv">
+            <dt>执行日期</dt><dd>{{ task.execute_date }}</dd>
+            <dt>计划发布</dt><dd>{{ task.publish_at.strftime("%Y-%m-%d %H:%M") }}</dd>
+            <dt>开始时间</dt><dd class="text-mute">{{ task.started_at.strftime("%Y-%m-%d %H:%M:%S") if task.started_at else "—" }}</dd>
+            <dt>完成时间</dt><dd class="text-mute">{{ task.finished_at.strftime("%Y-%m-%d %H:%M:%S") if task.finished_at else "—" }}</dd>
+            <dt>重试次数</dt><dd>{{ task.attempts }}</dd>
+            {% if task.remote_url %}
+              <dt>已发布链接</dt><dd><a href="{{ task.remote_url }}" target="_blank">{{ task.remote_url }}</a></dd>
+            {% endif %}
+            {% if task.remote_video_id %}
+              <dt>视频 ID</dt><dd><code>{{ task.remote_video_id }}</code></dd>
+            {% endif %}
+          </dl>
+        </div>
+      </div>
+
+      {% if video %}
+      <div class="card">
+        <div class="card-header"><h2>视频内容</h2></div>
+        <div class="card-body">
+          <dl class="kv">
+            <dt>文件</dt><dd><code class="path">{{ video.file_path }}</code></dd>
+            <dt>封面</dt><dd>{% if video.cover_path %}<code class="path">{{ video.cover_path }}</code>{% else %}<span class="text-mute">未设置</span>{% endif %}</dd>
+            <dt>合集</dt><dd>{{ video.topic or "—" }}</dd>
+            <dt>原创声明</dt><dd>{{ "是" if video.original_claim else "否" }}</dd>
+            {% if video.description %}
+              <dt>描述</dt><dd class="desc">{{ video.description }}</dd>
+            {% endif %}
+          </dl>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if screenshots %}
+      <div class="card">
+        <div class="card-header">
+          <h2>失败截图</h2>
+          <span class="text-xs text-mute">共 {{ screenshots|length }} 张</span>
+        </div>
+        <div class="card-body">
+          <div class="screenshot-grid">
+            {% for s in screenshots %}
+              <div class="screenshot-item">
+                <div class="screenshot-thumb">📷</div>
+                <div class="screenshot-name" title="{{ s }}">{{ s.split('/')[-1] }}</div>
+                <code class="screenshot-path">{{ s }}</code>
+              </div>
+            {% endfor %}
+          </div>
+          <p class="text-xs text-mute mt-3">截图在本地文件系统,需要时在 Finder/资源管理器中打开</p>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    {# ============ 右:事件流 ============ #}
+    <div>
+      <div class="card">
+        <div class="card-header">
+          <h2>事件流</h2>
+          <span class="text-xs text-mute">共 {{ events|length }} 条</span>
+        </div>
+        <div class="card-body tight">
+          {% if events %}
+            <ul class="event-stream">
+              {% for e in events %}
+              <li class="event-item event-{{ e.level }}">
+                <div class="event-marker">
+                  {% if e.level == "info" %}●{% elif e.level == "warn" %}▲{% else %}■{% endif %}
+                </div>
+                <div class="event-body">
+                  <div class="event-head">
+                    <span class="event-type">{{ error_type_cn(e.type) }}</span>
+                    <span class="event-time">{{ e.ts.strftime("%m-%d %H:%M:%S") }}</span>
+                  </div>
+                  <pre class="event-msg">{{ e.message }}</pre>
+                </div>
+              </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="empty">
+              <div>暂无事件,任务还没开始执行</div>
+            </div>
+          {% endif %}
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="card">
-    <h2>任务信息</h2>
-    <table>
-      <tbody>
-        <tr><th style="width:160px;">状态</th><td>
-          {% if task.status == "success" %}<span class="badge ok">{{ status_cn(task.status) }}</span>
-          {% elif task.status == "running" %}<span class="badge warn">{{ status_cn(task.status) }}</span>
-          {% elif task.status == "failed" %}<span class="badge error">{{ status_cn(task.status) }}</span>
-          {% else %}<span class="badge muted">{{ status_cn(task.status) }}</span>{% endif %}
-        </td></tr>
-        <tr><th>账号</th><td><code>{{ task.account_id }}</code>{% if account %} · {{ account.display_name }}{% endif %}</td></tr>
-        <tr><th>执行日期</th><td>{{ task.execute_date }}</td></tr>
-        <tr><th>发布时间</th><td>{{ task.publish_at.strftime("%Y-%m-%d %H:%M") }}</td></tr>
-        <tr><th>开始 / 完成</th><td class="muted">
-          {{ task.started_at.strftime("%Y-%m-%d %H:%M:%S") if task.started_at else "-" }}
-          → {{ task.finished_at.strftime("%Y-%m-%d %H:%M:%S") if task.finished_at else "-" }}
-        </td></tr>
-        <tr><th>重试次数</th><td>{{ task.attempts }}</td></tr>
-        {% if task.remote_url %}
-        <tr><th>已发布链接</th><td><a href="{{ task.remote_url }}" target="_blank">{{ task.remote_url }}</a></td></tr>
-        {% endif %}
-        {% if task.last_error_type %}
-        <tr><th>错误</th><td>
-          <span class="badge error">{{ error_type_cn(task.last_error_type) }}</span><br>
-          <pre style="white-space: pre-wrap; margin: 8px 0 0 0;">{{ task.last_error_msg or "" }}</pre>
-        </td></tr>
-        {% endif %}
-      </tbody>
-    </table>
-  </div>
+  <style>
+    /* ============ TaskDetail page-specific ============ */
+    .td-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      font-size: 14px;
+      margin-right: 8px;
+      vertical-align: -4px;
+      background: var(--color-border-soft);
+      color: var(--color-text-mute);
+    }
+    .td-icon.ok    { background: var(--color-ok-soft);    color: var(--color-ok); }
+    .td-icon.info  { background: var(--color-info-soft);  color: var(--color-info); }
+    .td-icon.error { background: var(--color-error-soft); color: var(--color-error); }
+    .td-icon.warn  { background: var(--color-warn-soft);  color: var(--color-warn); }
 
-  {% if video %}
-  <div class="card">
-    <h2>视频</h2>
-    <table>
-      <tbody>
-        <tr><th style="width:160px;">文件</th><td><code>{{ video.file_path }}</code></td></tr>
-        <tr><th>封面</th><td><code>{{ video.cover_path or "-" }}</code></td></tr>
-        <tr><th>描述</th><td>{{ video.description or "-" }}</td></tr>
-        <tr><th>合集</th><td>{{ video.topic or "-" }}</td></tr>
-        <tr><th>原创</th><td>{{ "是" if video.original_claim else "否" }}</td></tr>
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
+    .td-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+      gap: var(--space-4);
+    }
+    @media (max-width: 900px) { .td-grid { grid-template-columns: 1fr; } }
 
-  <div class="card">
-    <h2>事件({{ events|length }})</h2>
-    {% if events %}
-    <table>
-      <thead><tr><th>时间</th><th>级别</th><th>类型</th><th>信息</th></tr></thead>
-      <tbody>
-        {% for e in events %}
-        <tr>
-          <td class="muted">{{ e.ts.strftime("%m-%d %H:%M:%S") }}</td>
-          <td>
-            {% if e.level == "info" %}<span class="badge ok">{{ level_cn(e.level) }}</span>
-            {% elif e.level == "warn" %}<span class="badge warn">{{ level_cn(e.level) }}</span>
-            {% else %}<span class="badge error">{{ level_cn(e.level) }}</span>{% endif %}
-          </td>
-          <td>{{ error_type_cn(e.type) }}</td>
-          <td><pre style="white-space: pre-wrap; margin: 0;">{{ e.message }}</pre></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-      <p class="muted">暂无事件</p>
-    {% endif %}
-  </div>
+    /* Error box */
+    .error-box {
+      background: #fffafa;
+      border: 1px solid var(--color-error-soft);
+      border-left: 4px solid var(--color-error);
+      border-radius: var(--radius-md);
+      padding: var(--space-4);
+      margin-bottom: var(--space-4);
+    }
+    .error-head { display: flex; gap: var(--space-3); align-items: flex-start; }
+    .error-icon { font-size: 20px; color: var(--color-error); flex-shrink: 0; }
+    .error-title { font-size: 15px; font-weight: 600; color: var(--color-error); }
+    .error-hint { margin-top: 4px; font-size: 13px; color: var(--color-text); line-height: 1.6; }
+    .error-detail { margin-top: var(--space-3); }
+    .error-detail summary { cursor: pointer; font-size: 12px; color: var(--color-text-mute); user-select: none; }
+    .error-detail summary:hover { color: var(--color-primary); }
+    .error-detail pre {
+      margin-top: var(--space-2);
+      padding: var(--space-3);
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      color: var(--color-text-mute);
+    }
 
-  {% if screenshots %}
-  <div class="card">
-    <h2>截图({{ screenshots|length }})</h2>
-    <ul style="font-family: monospace; font-size: 13px;">
-      {% for s in screenshots %}
-        <li>{{ s }}</li>
-      {% endfor %}
-    </ul>
-  </div>
-  {% endif %}
+    /* Key-value list */
+    .kv { display: grid; grid-template-columns: 110px 1fr; gap: 10px 16px; margin: 0; font-size: 13px; }
+    .kv dt { color: var(--color-text-mute); margin: 0; }
+    .kv dd { margin: 0; color: var(--color-text); word-break: break-word; }
+    .kv dd.desc { white-space: pre-wrap; }
+    .kv dd.path, .kv dd code.path { font-size: 12px; word-break: break-all; }
+
+    /* Event stream */
+    .event-stream { list-style: none; margin: 0; padding: var(--space-3) var(--space-4); }
+    .event-item {
+      display: grid;
+      grid-template-columns: 24px 1fr;
+      gap: var(--space-3);
+      padding: var(--space-2) 0;
+      position: relative;
+    }
+    .event-item:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      left: 11px; top: 28px; bottom: -8px;
+      width: 2px;
+      background: var(--color-border-soft);
+    }
+    .event-marker {
+      width: 24px; height: 24px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px;
+      border-radius: 50%;
+      background: var(--color-info-soft);
+      color: var(--color-info);
+      position: relative;
+      z-index: 1;
+    }
+    .event-warn .event-marker { background: var(--color-warn-soft); color: var(--color-warn); }
+    .event-error .event-marker { background: var(--color-error-soft); color: var(--color-error); }
+    .event-head { display: flex; justify-content: space-between; gap: var(--space-3); font-size: 13px; }
+    .event-type { font-weight: 500; }
+    .event-time { color: var(--color-text-faint); font-size: 12px; font-family: "SF Mono", Menlo, Consolas, monospace; white-space: nowrap; }
+    .event-msg {
+      margin: 4px 0 0 0;
+      font-size: 12px;
+      color: var(--color-text-mute);
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: inherit;
+    }
+
+    /* Screenshots */
+    .screenshot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-3); }
+    .screenshot-item {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: var(--space-3);
+      background: var(--color-surface-alt);
+    }
+    .screenshot-thumb {
+      height: 60px;
+      background: var(--color-border-soft);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      color: var(--color-text-faint);
+      margin-bottom: 8px;
+    }
+    .screenshot-name { font-size: 12px; font-weight: 500; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .screenshot-path { font-size: 11px; color: var(--color-text-faint); display: block; margin-top: 4px; word-break: break-all; background: transparent; padding: 0; }
+  </style>
 {% endblock %}

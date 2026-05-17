@@ -1,302 +1,771 @@
 {% extends "base.html" %}
-{% block title %}配置 · wxsp{% endblock %}
+{% block title %}配置 · 九豆{% endblock %}
 {% block content %}
-  {% if flash %}
-    <div class="card" style="border-left: 4px solid var(--ok);">
-      <p style="margin: 0;">{{ flash }}</p>
-    </div>
-  {% endif %}
 
-  {% if errors %}
-    <div class="card" style="border-left: 4px solid var(--error);">
-      <h2 style="margin: 0 0 8px 0; color: var(--error);">保存失败,以下问题需要修正</h2>
-      <ul style="margin: 0; padding-left: 20px;">
-        {% for e in errors %}<li><code>{{ e }}</code></li>{% endfor %}
-      </ul>
+  <div class="page-header">
+    <div>
+      <div class="page-title">配置</div>
+      <div class="page-subtitle">
+        文件 <code>{{ abs_path }}</code>
+        {% if not exists %} <span class="badge error">未找到</span>{% endif %}
+        · 每个分区可单独保存 · 保存前自动备份到 <code>config.yaml.bak</code>
+      </div>
     </div>
-  {% endif %}
-
-  <div class="card">
-    <p class="muted" style="margin: 0;">
-      文件:<code>{{ abs_path }}</code>{% if not exists %} <span class="badge error">未找到</span>{% endif %}
-      · 保存前会自动备份到 <code>config.yaml.bak</code> · 改完立即生效,无需重启服务
-    </p>
   </div>
 
-  <form method="post" action="/config">
+  {% if flash %}<div class="flash ok" id="flash-banner">{{ flash }}</div>{% endif %}
 
-    <!-- ============== 应用 ============== -->
-    <div class="card">
-      <h2>应用</h2>
-      <div class="row"><label>数据目录</label>
-        <input type="text" name="app_data_dir" value="{{ vm.app_data_dir }}" style="flex:1;">
-      </div>
-      <div class="row"><label>日志目录</label>
-        <input type="text" name="app_logs_dir" value="{{ vm.app_logs_dir }}" style="flex:1;">
-      </div>
-      <div class="row"><label>时区</label>
-        <input type="text" name="app_timezone" value="{{ vm.app_timezone }}" style="flex:1;">
-        <span class="muted" style="font-size: 12px;">如 Asia/Shanghai</span>
-      </div>
-    </div>
+  <div class="cfg-layout">
+    {# ============ 左侧锚点导航 ============ #}
+    <aside class="cfg-nav">
+      <div class="cfg-nav-title">配置分区</div>
+      <a href="#sec-accounts">账号管理</a>
+      <a href="#sec-publisher">发布规则</a>
+      <a href="#sec-scheduler">调度时间</a>
+      <a href="#sec-feishu">连接服务</a>
+      <a href="#sec-monitoring">通知告警</a>
+      <a href="#sec-system">系统</a>
+      <div class="cfg-nav-divider"></div>
+      <div class="cfg-nav-title">进阶</div>
+      <a href="#sec-fieldmap">飞书字段映射</a>
+    </aside>
 
-    <!-- ============== 路径(只剩 NAS 根)============== -->
-    <div class="card">
-      <h2>NAS 路径</h2>
-      <div class="row"><label>NAS 挂载根目录</label>
-        <input type="text" name="paths_nas_root" value="{{ vm.paths_nas_root }}" style="flex:1;">
-      </div>
-      <p class="muted" style="margin: 4px 0 0 0; font-size: 12px;">
-        视频 / 封面的检索路径在下方"账号"section 各自配置(每个账号可不同),允许在路径里写 <code>{nas_root}</code> 占位
-      </p>
-    </div>
+    {# ============ 右侧主区 ============ #}
+    <div class="cfg-main">
 
-    <!-- ============== 定时触发 ============== -->
-    <div class="card">
-      <h2>定时触发</h2>
-      <p class="muted" style="margin-top: 0;">
-        每天到点,自动同步飞书表 + 跑当日待发布任务(本机没开机就跳过这次,下次开机后手动点"立即跑今天"补)
-      </p>
-      <div class="row"><label>启用定时任务</label>
-        <input type="checkbox" name="sched_enabled" {% if vm.sched_enabled %}checked{% endif %}>
-        <span class="muted" style="font-size: 12px;">关闭后每天到点不再自动触发,只能手动点"立即跑今天"</span>
-      </div>
-      <div class="row"><label>每天触发时间</label>
-        <input type="number" name="sched_hour" value="{{ vm.sched_hour }}" min="0" max="23" style="width: 70px;">
-        <span>时</span>
-        <input type="number" name="sched_minute" value="{{ vm.sched_minute }}" min="0" max="59" style="width: 70px;">
-        <span>分</span>
-        <span class="muted" style="margin-left: 12px; font-size: 12px;">推荐 09:00(运营在飞书表写完任务后)</span>
-      </div>
-      <div class="row"><label>账号分配策略</label>
-        <select name="sched_strategy">
-          <option value="round-robin" {% if vm.sched_strategy=="round-robin" %}selected{% endif %}>round-robin(轮询)</option>
-        </select>
-        <span class="muted" style="font-size: 12px;">飞书行里没写账号时,按此策略分配</span>
-      </div>
-    </div>
-
-    <!-- ============== 发布器 ============== -->
-    <div class="card">
-      <h2>发布器</h2>
-      <div class="row"><label>启用后台静默模式</label>
-        <input type="checkbox" name="pub_headless" {% if vm.pub_headless %}checked{% endif %}>
-        <span class="muted" style="font-size: 12px;">视频号风控敏感,建议保持关闭</span>
-      </div>
-      <div class="row"><label>上传超时(秒)</label>
-        <input type="number" name="pub_upload_timeout" value="{{ vm.pub_upload_timeout }}" min="30" max="3600" style="width: 120px;">
-      </div>
-      <div class="row"><label>步骤间随机停顿</label>
-        <input type="number" name="pub_step_pause_min" value="{{ vm.pub_step_pause_min }}" step="0.1" min="0" style="width: 80px;">
-        <span>~</span>
-        <input type="number" name="pub_step_pause_max" value="{{ vm.pub_step_pause_max }}" step="0.1" min="0" style="width: 80px;">
-        <span class="muted" style="font-size: 12px;">秒,模拟人工节奏</span>
-      </div>
-      <div class="row"><label>失败时截图</label>
-        <input type="checkbox" name="pub_screenshot_on_error" {% if vm.pub_screenshot_on_error %}checked{% endif %}>
-      </div>
-      <div class="row"><label>并发账号上限</label>
-        <input type="number" name="pub_max_concurrent" value="{{ vm.pub_max_concurrent }}" min="1" max="4" style="width: 80px;">
-        <span class="muted" style="font-size: 12px;">同 IP 多账号并发是风控特征,建议 1</span>
-      </div>
-    </div>
-
-    <!-- ============== 飞书 ============== -->
-    <div class="card">
-      <h2>飞书集成</h2>
-      <div class="row"><label>启用</label>
-        <input type="checkbox" name="feishu_enabled" {% if vm.feishu_enabled %}checked{% endif %}>
-      </div>
-      <div class="row"><label>App ID</label>
-        <input type="text" name="feishu_app_id" value="{{ vm.feishu_app_id }}" style="flex:1;">
-      </div>
-      <div class="row"><label>App Secret</label>
-        <input type="password" name="feishu_app_secret" value="{{ vm.feishu_app_secret_display }}" placeholder="留空 = 保持原值;${ENV_VAR} 形式也可" style="flex:1;">
-      </div>
-      <div class="row"><label>Bitable app_token</label>
-        <input type="text" name="feishu_bitable_app_token" value="{{ vm.feishu_bitable_app_token }}" style="flex:1;">
-      </div>
-      <div class="row"><label>Bitable table_id</label>
-        <input type="text" name="feishu_bitable_table_id" value="{{ vm.feishu_bitable_table_id }}" style="flex:1;">
-      </div>
-      <div class="row"><label>同步后回写飞书</label>
-        <input type="checkbox" name="feishu_sync_writeback" {% if vm.feishu_sync_writeback %}checked{% endif %}>
-        <span class="muted" style="font-size: 12px;">发布完成 / 失败时回写"状态 / 链接 / 错误信息"列</span>
-      </div>
-
-      <details style="margin-top: 12px;">
-        <summary style="cursor: pointer; font-weight: 500;">字段名映射(飞书表里的列名 → 工具内部字段)</summary>
-        <div style="margin-top: 12px;">
-          {% for key, default_label in field_map_keys %}
-          <div class="row">
-            <label><code>{{ key }}</code></label>
-            <input type="text" name="feishu_fm_{{ key }}" value="{{ vm.feishu_fm[key] }}" style="flex:1;">
-          </div>
-          {% endfor %}
+      {# ============================================== #}
+      {# 账号管理(独立 CRUD + 弹窗加/改)               #}
+      {# ============================================== #}
+      <section id="sec-accounts" class="cfg-section">
+        <div class="cfg-section-head">
+          <h2>账号管理</h2>
+          <p class="cfg-section-desc">每个视频号账号单独配置。Chrome 浏览器档案目录由系统按 ID 自动管理。</p>
         </div>
-      </details>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>账号列表 ({{ vm.accounts|length }})</h2>
+            <button type="button" class="primary btn-sm" onclick="openAccountModal()">+ 添加账号</button>
+          </div>
+          <div class="card-body">
+            {% if vm.accounts %}
+              <table class="account-cfg-table">
+                <thead>
+                  <tr><th>账号 ID</th><th>显示名</th><th>状态</th><th>日上限</th><th>视频检索根</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                  {% for aid, a in vm.accounts.items() %}
+                    <tr>
+                      <td><code>{{ aid }}</code></td>
+                      <td>{{ a.display_name }}</td>
+                      <td>{% if a.enabled %}<span class="badge ok">启用</span>{% else %}<span class="badge mute">禁用</span>{% endif %}</td>
+                      <td class="muted">{{ a.daily_limit }}</td>
+                      <td class="text-xs muted" style="max-width: 240px; overflow: hidden; text-overflow: ellipsis;"><code>{{ a.video_search_root }}</code></td>
+                      <td class="nowrap">
+                        <button type="button" class="btn-sm" onclick='openAccountModal({{ {"id": aid, "display_name": a.display_name, "enabled": a.enabled, "daily_limit": a.daily_limit, "video_search_root": a.video_search_root, "cover_search_root": a.cover_search_root} | tojson }})'>编辑</button>
+                        <form method="post" action="/config/accounts/{{ aid }}/delete" style="display:inline;"
+                              onsubmit="return confirm('确认删除账号 {{ aid }}?(配置中的条目会被移除,Chrome profile 目录不会自动删除)');">
+                          <button class="btn-sm danger" type="submit">删除</button>
+                        </form>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <div class="empty">
+                <div class="empty-title">还没有账号</div>
+                <div>点右上角 + 添加你的第一个账号</div>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </section>
+
+      {# ============================================== #}
+      {# 发布规则                                       #}
+      {# ============================================== #}
+      <section id="sec-publisher" class="cfg-section">
+        <div class="cfg-section-head">
+          <h2>发布规则</h2>
+          <p class="cfg-section-desc">浏览器自动化的行为参数。除非了解视频号风控,否则保持默认。</p>
+        </div>
+        <form method="post" action="/config/section/publisher" class="cfg-form" data-section="publisher">
+          <div class="card">
+            <div class="card-body">
+              <div class="cfg-row">
+                <label>后台静默模式</label>
+                <div class="cfg-control">
+                  <label class="switch"><input type="checkbox" name="pub_headless" {% if vm.pub_headless %}checked{% endif %}><span class="slider"></span></label>
+                </div>
+                <span class="cfg-hint"><strong style="color: var(--color-error);">不要勾选</strong>。视频号风控敏感,headless 几乎一定被识别为机器人</span>
+              </div>
+              <div class="cfg-row">
+                <label>上传超时</label>
+                <div class="cfg-control">
+                  <input type="number" name="pub_upload_timeout" value="{{ vm.pub_upload_timeout }}" min="30" max="3600" style="width: 120px;"> 秒
+                </div>
+                <span class="cfg-hint">视频上传 + 转码总等待时间。大视频建议 ≥600 秒</span>
+              </div>
+              <div class="cfg-row">
+                <label>步骤间停顿</label>
+                <div class="cfg-control">
+                  <input type="number" name="pub_step_pause_min" value="{{ vm.pub_step_pause_min }}" step="0.1" min="0" style="width: 80px;">
+                  <span>~</span>
+                  <input type="number" name="pub_step_pause_max" value="{{ vm.pub_step_pause_max }}" step="0.1" min="0" style="width: 80px;"> 秒
+                </div>
+                <span class="cfg-hint">每两步操作之间随机停顿,模拟人工节奏</span>
+              </div>
+              <div class="cfg-row">
+                <label>失败时截图</label>
+                <div class="cfg-control">
+                  <label class="switch"><input type="checkbox" name="pub_screenshot_on_error" {% if vm.pub_screenshot_on_error %}checked{% endif %}><span class="slider"></span></label>
+                </div>
+                <span class="cfg-hint">出错时把页面截到 <code>logs/screenshots/</code>,排查改版强烈建议勾选</span>
+              </div>
+              <div class="cfg-row">
+                <label>并发账号上限</label>
+                <div class="cfg-control">
+                  <input type="number" name="pub_max_concurrent" value="{{ vm.pub_max_concurrent }}" min="1" max="4" style="width: 80px;">
+                </div>
+                <span class="cfg-hint"><strong style="color: var(--color-error);">建议 1</strong>。同 IP 多账号并发是明显的风控特征</span>
+              </div>
+            </div>
+            <div class="cfg-foot">
+              <span class="cfg-foot-status" data-role="status"></span>
+              <button type="submit" class="primary">保存发布规则</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      {# ============================================== #}
+      {# 调度时间                                       #}
+      {# ============================================== #}
+      <section id="sec-scheduler" class="cfg-section">
+        <div class="cfg-section-head">
+          <h2>调度时间</h2>
+          <p class="cfg-section-desc">每天到点自动同步飞书 + 跑当日任务。机器没开会自动跳过这次。</p>
+        </div>
+        <form method="post" action="/config/section/scheduler" class="cfg-form" data-section="scheduler">
+          <div class="card">
+            <div class="card-body">
+              <div class="cfg-row">
+                <label>启用定时任务</label>
+                <div class="cfg-control">
+                  <label class="switch"><input type="checkbox" name="sched_enabled" {% if vm.sched_enabled %}checked{% endif %}><span class="slider"></span></label>
+                </div>
+                <span class="cfg-hint">关闭后每天到点不会自动触发,只能 Web UI / CLI 手动跑</span>
+              </div>
+              <div class="cfg-row">
+                <label>每天触发时间</label>
+                <div class="cfg-control">
+                  <input type="number" name="sched_hour" value="{{ vm.sched_hour }}" min="0" max="23" style="width: 70px;"> 时
+                  <input type="number" name="sched_minute" value="{{ vm.sched_minute }}" min="0" max="59" style="width: 70px;"> 分
+                </div>
+                <span class="cfg-hint">推荐 09:00 — 运营在飞书表写完任务后</span>
+              </div>
+              <div class="cfg-row">
+                <label>账号分配策略</label>
+                <div class="cfg-control">
+                  <select name="sched_strategy">
+                    <option value="round-robin" {% if vm.sched_strategy=="round-robin" %}selected{% endif %}>round-robin (轮询)</option>
+                  </select>
+                </div>
+                <span class="cfg-hint">飞书行没指定账号时,按此策略分配</span>
+              </div>
+            </div>
+            <div class="cfg-foot">
+              <span class="cfg-foot-status" data-role="status"></span>
+              <button type="submit" class="primary">保存调度时间</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      {# ============================================== #}
+      {# 连接服务(飞书 + NAS)                          #}
+      {# ============================================== #}
+      <section id="sec-feishu" class="cfg-section">
+        <div class="cfg-section-head">
+          <h2>连接服务</h2>
+          <p class="cfg-section-desc">飞书 Bitable 提供任务来源,NAS 存放视频。这两个不通,工具就跑不起来。</p>
+        </div>
+        <form method="post" action="/config/section/feishu" class="cfg-form" data-section="feishu">
+          <div class="card">
+            <div class="card-header"><h2>飞书 Bitable</h2></div>
+            <div class="card-body">
+              <div class="cfg-row">
+                <label>启用飞书</label>
+                <div class="cfg-control">
+                  <label class="switch"><input type="checkbox" name="feishu_enabled" {% if vm.feishu_enabled %}checked{% endif %}><span class="slider"></span></label>
+                </div>
+                <span class="cfg-hint">关闭后所有同步操作跳过,适合离线测试</span>
+              </div>
+              <div class="cfg-row">
+                <label>App ID</label>
+                <div class="cfg-control">
+                  <input type="text" name="feishu_app_id" value="{{ vm.feishu_app_id }}" required>
+                </div>
+                <span class="cfg-hint">飞书开放平台 → 你的应用 → "凭证与基础信息" → App ID</span>
+              </div>
+              <div class="cfg-row">
+                <label>App Secret</label>
+                <div class="cfg-control secret-input">
+                  <input type="password" name="feishu_app_secret" value="{{ vm.feishu_app_secret_display }}" placeholder="留空 = 保持原值;或填 ${ENV_VAR}">
+                  <button type="button" class="eye-toggle" onclick="toggleSecret(this)" tabindex="-1">👁</button>
+                </div>
+                <span class="cfg-hint">敏感信息。建议 <code>.env</code> 写 <code>FEISHU_APP_SECRET=xxx</code>,这里填 <code>${FEISHU_APP_SECRET}</code></span>
+              </div>
+              <div class="cfg-row">
+                <label>Bitable app_token</label>
+                <div class="cfg-control">
+                  <input type="text" name="feishu_bitable_app_token" value="{{ vm.feishu_bitable_app_token }}" required>
+                </div>
+                <span class="cfg-hint">Bitable URL 里 <code>/base/<strong>这一段</strong>?table=</code></span>
+              </div>
+              <div class="cfg-row">
+                <label>Bitable table_id</label>
+                <div class="cfg-control">
+                  <input type="text" name="feishu_bitable_table_id" value="{{ vm.feishu_bitable_table_id }}" required>
+                </div>
+                <span class="cfg-hint">URL 里 <code>?table=<strong>这一段</strong></code></span>
+              </div>
+              <div class="cfg-row">
+                <label>发布后回写飞书</label>
+                <div class="cfg-control">
+                  <label class="switch"><input type="checkbox" name="feishu_sync_writeback" {% if vm.feishu_sync_writeback %}checked{% endif %}><span class="slider"></span></label>
+                </div>
+                <span class="cfg-hint">发布完成/失败时回写"状态/链接/错误信息"列,运营在飞书侧能看到结果</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><h2>NAS / 文件路径</h2></div>
+            <div class="card-body">
+              <div class="cfg-row">
+                <label>NAS 挂载根目录</label>
+                <div class="cfg-control">
+                  <input type="text" name="paths_nas_root" value="{{ vm.paths_nas_root }}" required>
+                </div>
+                <span class="cfg-hint">macOS 例 <code>/Volumes/NAS/wxsp</code>;Windows 例 <code>Z:/wxsp</code>。账号下可用 <code>{nas_root}</code> 占位</span>
+              </div>
+            </div>
+            <div class="cfg-foot">
+              <span class="cfg-foot-status" data-role="status"></span>
+              <button type="submit" class="primary">保存连接服务</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      {# ============================================== #}
+      {# 通知告警                                       #}
+      {# ============================================== #}
+      <section id="sec-monitoring" class="cfg-section">
+        <div class="cfg-section-head">
+          <h2>通知告警</h2>
+          <p class="cfg-section-desc">出错时往企微推消息。任务成功不通知(80 条/天会刷屏)。</p>
+        </div>
+        <form method="post" action="/config/section/monitoring" class="cfg-form" data-section="monitoring">
+          <div class="card">
+            <div class="card-body">
+              <div class="cfg-row">
+                <label>Cookie 警告阈值</label>
+                <div class="cfg-control">
+                  <input type="number" name="mon_cookie_warn_days" value="{{ vm.mon_cookie_warn_days }}" step="0.1" min="0" style="width: 100px;"> 天
+                </div>
+                <span class="cfg-hint">Cookie idle 超过此天数仍能登录 → 标"即将过期"并推一条告警</span>
+              </div>
+              <div class="cfg-row">
+                <label>启用企微机器人</label>
+                <div class="cfg-control">
+                  <label class="switch"><input type="checkbox" name="mon_wecom_enabled" {% if vm.mon_wecom_enabled %}checked{% endif %}><span class="slider"></span></label>
+                </div>
+                <span class="cfg-hint">关闭后所有告警事件只在 Web UI 看,不推送外部</span>
+              </div>
+              <div class="cfg-row">
+                <label>企微 Webhook</label>
+                <div class="cfg-control secret-input">
+                  <input type="password" name="mon_wecom_webhook" value="{{ vm.mon_wecom_webhook_display }}" placeholder="留空 = 保持原值;或填 ${ENV_VAR}">
+                  <button type="button" class="eye-toggle" onclick="toggleSecret(this)" tabindex="-1">👁</button>
+                </div>
+                <span class="cfg-hint">企微群机器人 webhook URL,建议 <code>${WECOM_BOT_WEBHOOK}</code> 引用 env</span>
+              </div>
+              <div class="cfg-row cfg-row-block">
+                <label>发送告警的事件</label>
+                <div class="cfg-control" style="display: block;">
+                  <div class="checkbox-grid">
+                    {% for value, label in notify_on_options %}
+                      <label class="check-item">
+                        <input type="checkbox" name="notify_on" value="{{ value }}" {% if value in vm.notify_on %}checked{% endif %}>
+                        <span>{{ label }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                </div>
+                <span class="cfg-hint">勾选哪些事件类型推送企微告警。任务"成功"默认不在这里(避免刷屏)</span>
+              </div>
+            </div>
+
+            <div class="card-header" style="border-top: 1px solid var(--color-border-soft);"><h2 style="font-size: 14px;">归档与积压</h2></div>
+            <div class="card-body">
+              <div class="cfg-row">
+                <label>日志保留</label>
+                <div class="cfg-control">
+                  <input type="number" name="mon_log_retention_days" value="{{ vm.mon_log_retention_days }}" min="1" style="width: 100px;"> 天
+                </div>
+                <span class="cfg-hint">超过 N 天的 <code>wxsp.*.log</code> 在 daemon 启动时清理</span>
+              </div>
+              <div class="cfg-row">
+                <label>失败截图保留</label>
+                <div class="cfg-control">
+                  <input type="number" name="mon_screenshot_retention_days" value="{{ vm.mon_screenshot_retention_days }}" min="1" style="width: 100px;"> 天
+                </div>
+                <span class="cfg-hint">超过 N 天的 <code>logs/screenshots/*</code> 被清理</span>
+              </div>
+              <div class="cfg-row">
+                <label>积压告警阈值</label>
+                <div class="cfg-control">
+                  <input type="number" name="mon_backlog_warn_threshold" value="{{ vm.mon_backlog_warn_threshold }}" min="0" style="width: 100px;"> 条
+                </div>
+                <span class="cfg-hint">历史积压超过此数触发 <code>backlog_high</code> 告警(还要在上方勾选该事件)</span>
+              </div>
+            </div>
+            <div class="cfg-foot">
+              <span class="cfg-foot-status" data-role="status"></span>
+              <button type="submit" class="primary">保存通知告警</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      {# ============================================== #}
+      {# 系统                                           #}
+      {# ============================================== #}
+      <section id="sec-system" class="cfg-section">
+        <div class="cfg-section-head">
+          <h2>系统</h2>
+          <p class="cfg-section-desc">数据/日志目录、时区、Web UI 端口等基础设置,日常不需要改。</p>
+        </div>
+        <form method="post" action="/config/section/system" class="cfg-form" data-section="system">
+          <div class="card">
+            <div class="card-header"><h2>路径 / 时区</h2></div>
+            <div class="card-body">
+              <div class="cfg-row">
+                <label>数据目录</label>
+                <div class="cfg-control">
+                  <input type="text" name="app_data_dir" value="{{ vm.app_data_dir }}" required>
+                </div>
+                <span class="cfg-hint">SQLite + Chrome profiles + 临时文件位置。改了要重启</span>
+              </div>
+              <div class="cfg-row">
+                <label>日志目录</label>
+                <div class="cfg-control">
+                  <input type="text" name="app_logs_dir" value="{{ vm.app_logs_dir }}" required>
+                </div>
+                <span class="cfg-hint">loguru 日志 + 错误截图位置</span>
+              </div>
+              <div class="cfg-row">
+                <label>时区</label>
+                <div class="cfg-control">
+                  <input type="text" name="app_timezone" value="{{ vm.app_timezone }}" required>
+                </div>
+                <span class="cfg-hint">如 <code>Asia/Shanghai</code>。影响调度时间和飞书"执行日期"的解释</span>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h2>Web UI</h2></div>
+            <div class="card-body">
+              <div class="cfg-row">
+                <label>监听 host</label>
+                <div class="cfg-control">
+                  <input type="text" name="webui_host" value="{{ vm.webui_host }}" required>
+                </div>
+                <span class="cfg-hint"><code>127.0.0.1</code> = 只本机;<code>0.0.0.0</code> = 局域网可访问(慎用)</span>
+              </div>
+              <div class="cfg-row">
+                <label>监听端口</label>
+                <div class="cfg-control">
+                  <input type="number" name="webui_port" value="{{ vm.webui_port }}" min="1024" max="65535" style="width: 120px;">
+                </div>
+                <span class="cfg-hint">改了要重启 daemon 才生效</span>
+              </div>
+              <div class="cfg-row">
+                <label>启动自动开浏览器</label>
+                <div class="cfg-control">
+                  <label class="switch"><input type="checkbox" name="webui_open_browser" {% if vm.webui_open_browser %}checked{% endif %}><span class="slider"></span></label>
+                </div>
+                <span class="cfg-hint">daemon 启动后自动打开浏览器到 Web UI</span>
+              </div>
+            </div>
+            <div class="cfg-foot">
+              <span class="cfg-foot-status" data-role="status"></span>
+              <button type="submit" class="primary">保存系统设置</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      {# ============================================== #}
+      {# 进阶:飞书字段映射                             #}
+      {# ============================================== #}
+      <section id="sec-fieldmap" class="cfg-section">
+        <div class="cfg-section-head">
+          <h2>飞书字段映射 <span class="badge mute">进阶</span></h2>
+          <p class="cfg-section-desc">飞书表里的中文字段名 → 工具内部英文标识。99% 用户不需要改。</p>
+        </div>
+        <form method="post" action="/config/section/fieldmap" class="cfg-form" data-section="fieldmap">
+          <details class="card">
+            <summary class="card-header" style="cursor: pointer; user-select: none;">
+              <h2>展开 {{ field_map_keys|length }} 个字段</h2>
+              <span class="text-xs text-mute">默认隐藏</span>
+            </summary>
+            <div class="card-body">
+              {% for key, default_label in field_map_keys %}
+                <div class="cfg-row">
+                  <label><code>{{ key }}</code></label>
+                  <div class="cfg-control">
+                    <input type="text" name="feishu_fm_{{ key }}" value="{{ vm.feishu_fm[key] }}" required>
+                  </div>
+                  <span class="cfg-hint">默认 <code>{{ default_label }}</code></span>
+                </div>
+              {% endfor %}
+            </div>
+            <div class="cfg-foot">
+              <span class="cfg-foot-status" data-role="status"></span>
+              <button type="submit" class="primary">保存字段映射</button>
+            </div>
+          </details>
+        </form>
+      </section>
+
     </div>
+  </div>
 
-    <!-- ============== 通知 / 告警 ============== -->
-    <div class="card">
-      <h2>通知 / 告警</h2>
-      <div class="row"><label>Cookie 警告阈值(天)</label>
-        <input type="number" name="mon_cookie_warn_days" value="{{ vm.mon_cookie_warn_days }}" step="0.1" min="0" style="width: 100px;">
-        <span class="muted" style="font-size: 12px;">距离过期不足 N 天就告警</span>
+  {# ============================================== #}
+  {# Modal:添加/编辑账号                            #}
+  {# ============================================== #}
+  <dialog id="account-modal" class="modal">
+    <form method="post" class="modal-form" id="account-form" onsubmit="return submitAccountForm(event)">
+      <div class="modal-head">
+        <h2 id="account-modal-title">添加账号</h2>
+        <button type="button" class="btn-ghost btn-sm" onclick="closeAccountModal()" aria-label="关闭">✕</button>
       </div>
-      <div class="row"><label>企微机器人启用</label>
-        <input type="checkbox" name="mon_wecom_enabled" {% if vm.mon_wecom_enabled %}checked{% endif %}>
+      <div class="modal-body">
+        <div class="cfg-row" id="row-account-id">
+          <label>账号 ID</label>
+          <div class="cfg-control">
+            <input type="text" name="account_id" required placeholder="例:account_a" pattern="[a-z0-9_]+">
+          </div>
+          <span class="cfg-hint">小写字母 + 数字 + 下划线,唯一标识。<strong>添加后不可改</strong>。Chrome profile 目录按此自动生成</span>
+        </div>
+        <div class="cfg-row">
+          <label>显示名</label>
+          <div class="cfg-control">
+            <input type="text" name="display_name" required placeholder="例:美食号">
+          </div>
+          <span class="cfg-hint">中文友好名,飞书表"账号"字段用这个</span>
+        </div>
+        <div class="cfg-row">
+          <label>启用</label>
+          <div class="cfg-control">
+            <label class="switch"><input type="checkbox" name="enabled" checked><span class="slider"></span></label>
+          </div>
+          <span class="cfg-hint">禁用后,该账号的任务被 worker 跳过</span>
+        </div>
+        <div class="cfg-row">
+          <label>日发布上限</label>
+          <div class="cfg-control">
+            <input type="number" name="daily_limit" value="20" min="1" max="200" style="width: 120px;">
+          </div>
+          <span class="cfg-hint">视频号建议 ≤ 20 条,过多易触发风控</span>
+        </div>
+        <div class="cfg-row">
+          <label>视频检索根</label>
+          <div class="cfg-control">
+            <input type="text" name="video_search_root" required placeholder="例:{nas_root}/videos/account_a">
+          </div>
+          <span class="cfg-hint">飞书表只写文件名,系统在此目录递归找。可用 <code>{nas_root}</code></span>
+        </div>
+        <div class="cfg-row">
+          <label>封面检索根</label>
+          <div class="cfg-control">
+            <input type="text" name="cover_search_root" required placeholder="例:{nas_root}/covers/account_a">
+          </div>
+          <span class="cfg-hint">同上,但用于封面文件</span>
+        </div>
       </div>
-      <div class="row"><label>企微 Webhook</label>
-        <input type="password" name="mon_wecom_webhook" value="{{ vm.mon_wecom_webhook_display }}" placeholder="留空 = 保持原值;${ENV_VAR} 形式也可" style="flex:1;">
-      </div>
-
-      <div style="margin-top: 12px;">
-        <label style="display: block; margin-bottom: 8px;">发送告警的事件类型</label>
-        {% for value, label in notify_on_options %}
-          <label style="display: inline-flex; align-items: center; margin-right: 16px; min-width: auto;">
-            <input type="checkbox" name="notify_on" value="{{ value }}"
-                   {% if value in vm.notify_on %}checked{% endif %}>
-            <span style="margin-left: 4px;">{{ label }}</span>
-          </label>
-        {% endfor %}
-      </div>
-    </div>
-
-    <!-- ============== 归档 + 积压(M9) ============== -->
-    <div class="card">
-      <h2>归档 + 积压</h2>
-      <div class="row"><label>日志保留天数</label>
-        <input type="number" name="mon_log_retention_days" value="{{ vm.mon_log_retention_days }}" min="1" style="width: 100px;">
-        <span class="muted" style="font-size: 12px;">超过 N 天的 wxsp.*.log(含 zip)会被启动时清掉</span>
-      </div>
-      <div class="row"><label>失败截图保留天数</label>
-        <input type="number" name="mon_screenshot_retention_days" value="{{ vm.mon_screenshot_retention_days }}" min="1" style="width: 100px;">
-        <span class="muted" style="font-size: 12px;">超过 N 天的 logs/screenshots/* 会被清掉</span>
-      </div>
-      <div class="row"><label>积压告警阈值</label>
-        <input type="number" name="mon_backlog_warn_threshold" value="{{ vm.mon_backlog_warn_threshold }}" min="0" style="width: 100px;">
-        <span class="muted" style="font-size: 12px;">历史积压(早于今天的 pending/interrupted)超过此数 → 企微告警(需把 backlog_high 加进上方"发送告警的事件类型")</span>
-      </div>
-    </div>
-
-    <!-- ============== Web UI ============== -->
-    <div class="card">
-      <h2>Web UI</h2>
-      <div class="row"><label>监听 host</label>
-        <input type="text" name="webui_host" value="{{ vm.webui_host }}" style="flex:1;">
-      </div>
-      <div class="row"><label>监听端口</label>
-        <input type="number" name="webui_port" value="{{ vm.webui_port }}" min="1024" max="65535" style="width: 120px;">
-      </div>
-      <div class="row"><label>启动时自动开浏览器</label>
-        <input type="checkbox" name="webui_open_browser" {% if vm.webui_open_browser %}checked{% endif %}>
-      </div>
-    </div>
-
-    <div class="card" style="position: sticky; bottom: 0; background: var(--card); box-shadow: 0 -4px 8px rgba(0,0,0,0.04);">
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <button type="submit" class="primary" {% if not exists %}disabled{% endif %}>保存配置</button>
-        <a class="btn" href="/config">放弃修改</a>
-        <span class="muted" style="margin-left: auto; font-size: 12px;">
-          保存会触发 Pydantic 校验,任一字段非法都不会写盘
-        </span>
-      </div>
-    </div>
-  </form>
-
-  <!-- ============== 账号(独立 CRUD)============== -->
-  <div class="card">
-    <h2>账号({{ vm.accounts|length }})</h2>
-    <p class="muted" style="margin-top: 0;">
-      Chrome profile 目录由系统按账号 ID 自动管理(<code>./data/chrome-profiles/&lt;id&gt;</code>),不展示在表单里。
-      每个账号自己的视频 / 封面检索根可以独立配,支持 <code>{nas_root}</code> 占位。
-    </p>
-
-    {% if vm.accounts %}
-    <table>
-      <thead>
-        <tr><th>账号 ID</th><th>显示名</th><th>启用</th><th>日发上限</th>
-            <th>视频检索根</th><th>封面检索根</th><th>操作</th></tr>
-      </thead>
-      <tbody>
-        {% for aid, a in vm.accounts.items() %}
-        <tr>
-          <td><code>{{ aid }}</code></td>
-          <td>{{ a.display_name }}</td>
-          <td>{% if a.enabled %}<span class="badge ok">启用</span>{% else %}<span class="badge muted">禁用</span>{% endif %}</td>
-          <td class="muted">{{ a.daily_limit }}</td>
-          <td class="muted" style="font-size: 12px;"><code>{{ a.video_search_root }}</code></td>
-          <td class="muted" style="font-size: 12px;"><code>{{ a.cover_search_root }}</code></td>
-          <td style="white-space: nowrap;">
-            <a class="btn" href="/config?edit={{ aid }}#acc-{{ aid }}">编辑</a>
-            <form method="post" action="/config/accounts/{{ aid }}/delete"
-                  onsubmit="return confirm('确认删除账号 {{ aid }}?(配置文件里的条目会被移除,Chrome profile 目录不会删)');"
-                  style="display:inline;">
-              <button class="danger" type="submit">删除</button>
-            </form>
-          </td>
-        </tr>
-        {% if edit_account_id == aid %}
-        <tr id="acc-{{ aid }}" style="background: #fafbff;">
-          <td colspan="7" style="padding: 16px;">
-            <form method="post" action="/config/accounts/{{ aid }}/update">
-              <h3 style="margin: 0 0 12px 0; font-size: 14px;">编辑 <code>{{ aid }}</code></h3>
-              <div class="row"><label>显示名</label>
-                <input type="text" name="display_name" value="{{ a.display_name }}" required style="flex:1;">
-              </div>
-              <div class="row"><label>启用</label>
-                <input type="checkbox" name="enabled" {% if a.enabled %}checked{% endif %}>
-              </div>
-              <div class="row"><label>日发布上限</label>
-                <input type="number" name="daily_limit" value="{{ a.daily_limit }}" min="1" max="200" style="width: 100px;">
-              </div>
-              <div class="row"><label>视频检索根</label>
-                <input type="text" name="video_search_root" value="{{ a.video_search_root }}" required style="flex:1;">
-              </div>
-              <div class="row"><label>封面检索根</label>
-                <input type="text" name="cover_search_root" value="{{ a.cover_search_root }}" required style="flex:1;">
-              </div>
-              <div style="margin-top: 8px;">
-                <button type="submit" class="primary">保存</button>
-                <a class="btn" href="/config">取消</a>
-              </div>
-            </form>
-          </td>
-        </tr>
-        {% endif %}
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-      <p class="muted">还没有账号,在下方添加一个。</p>
-    {% endif %}
-
-    <h3 style="margin-top: 24px; font-size: 14px;">添加新账号</h3>
-    <form method="post" action="/config/accounts/add">
-      <div class="row"><label>账号 ID</label>
-        <input type="text" name="account_id" required placeholder="如 account_a" style="flex:1;">
-        <span class="muted" style="font-size: 12px;">小写字母 + 下划线;Chrome profile 目录会按它自动生成</span>
-      </div>
-      <div class="row"><label>显示名</label>
-        <input type="text" name="display_name" required placeholder="如 美食号" style="flex:1;">
-      </div>
-      <div class="row"><label>启用</label>
-        <input type="checkbox" name="enabled" checked>
-      </div>
-      <div class="row"><label>日发布上限</label>
-        <input type="number" name="daily_limit" value="20" min="1" max="200" style="width: 100px;">
-      </div>
-      <div class="row"><label>视频检索根</label>
-        <input type="text" name="video_search_root" required placeholder="如 {nas_root}/videos/account_a" style="flex:1;">
-      </div>
-      <div class="row"><label>封面检索根</label>
-        <input type="text" name="cover_search_root" required placeholder="如 {nas_root}/covers/account_a" style="flex:1;">
-      </div>
-      <div style="margin-top: 8px;">
-        <button type="submit" class="primary">添加账号</button>
+      <div class="modal-foot">
+        <button type="button" class="btn" onclick="closeAccountModal()">取消</button>
+        <button type="submit" class="primary" id="account-submit-btn">保存账号</button>
       </div>
     </form>
-  </div>
+  </dialog>
 
+  <style>
+    /* ============ Config layout ============ */
+    .cfg-layout { display: grid; grid-template-columns: 180px 1fr; gap: var(--space-5); }
+    @media (max-width: 900px) { .cfg-layout { grid-template-columns: 1fr; } .cfg-nav { display: none; } }
+    .cfg-nav {
+      position: sticky; top: var(--space-5); align-self: start;
+      max-height: calc(100vh - var(--space-8)); overflow-y: auto;
+    }
+    .cfg-nav-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-text-faint); margin-bottom: 6px; padding: 0 8px; }
+    .cfg-nav a {
+      display: block; padding: 6px 10px; font-size: 13px;
+      color: var(--color-text-mute); border-radius: var(--radius-sm);
+      border-left: 2px solid transparent; margin-bottom: 1px;
+    }
+    .cfg-nav a:hover { background: var(--color-primary-soft); color: var(--color-primary); border-left-color: var(--color-primary); }
+    .cfg-nav-divider { height: 1px; background: var(--color-border-soft); margin: var(--space-3) 0; }
+
+    .cfg-main { min-width: 0; }
+
+    .cfg-section { margin-bottom: var(--space-6); scroll-margin-top: var(--space-4); }
+    .cfg-section-head { margin-bottom: var(--space-3); }
+    .cfg-section-head h2 { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: var(--space-2); }
+    .cfg-section-desc { color: var(--color-text-mute); font-size: 13px; margin-top: 4px; }
+
+    /* ============ Cfg row (label / control / hint) ============ */
+    .cfg-row {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 8px var(--space-3);
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px dashed var(--color-border-soft);
+    }
+    .cfg-row:last-child { border-bottom: none; }
+    .cfg-row > label { color: var(--color-text); font-size: 13px; font-weight: 400; }
+    .cfg-control { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--color-text-mute); font-size: 12px; }
+    .cfg-control > input[type=text],
+    .cfg-control > input[type=password] { flex: 1; min-width: 200px; }
+    .cfg-control select { min-width: 200px; }
+    .cfg-hint {
+      grid-column: 2;
+      grid-row: 2;
+      font-size: 12px;
+      color: var(--color-text-mute);
+      line-height: 1.5;
+    }
+    .cfg-row.cfg-row-block { grid-template-columns: 140px 1fr; align-items: start; }
+
+    .checkbox-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 6px var(--space-3);
+    }
+    .check-item { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+
+    /* ============ Switch toggle (better than checkbox visually) ============ */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 36px;
+      height: 20px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: var(--color-border);
+      transition: 0.2s;
+      border-radius: 10px;
+    }
+    .slider::before {
+      position: absolute;
+      content: '';
+      height: 14px; width: 14px;
+      left: 3px; bottom: 3px;
+      background: white;
+      transition: 0.2s;
+      border-radius: 50%;
+      box-shadow: var(--shadow-sm);
+    }
+    .switch input:checked + .slider { background: var(--color-primary); }
+    .switch input:checked + .slider::before { transform: translateX(16px); }
+    .switch input:focus + .slider { box-shadow: 0 0 0 3px var(--color-primary-soft); }
+
+    /* ============ Secret input with eye toggle ============ */
+    .secret-input {
+      position: relative;
+      width: 100%;
+      flex: 1;
+    }
+    .secret-input > input { width: 100%; padding-right: 36px; }
+    .eye-toggle {
+      position: absolute;
+      right: 4px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: var(--color-text-mute);
+      cursor: pointer;
+      font-size: 14px;
+      opacity: 0.6;
+    }
+    .eye-toggle:hover { opacity: 1; background: var(--color-border-soft); border-radius: 4px; }
+
+    /* ============ Card footer (save button + status) ============ */
+    .cfg-foot {
+      display: flex;
+      gap: var(--space-3);
+      align-items: center;
+      padding: var(--space-3) var(--space-4);
+      border-top: 1px solid var(--color-border-soft);
+      background: var(--color-surface-alt);
+      border-radius: 0 0 var(--radius-md) var(--radius-md);
+    }
+    .cfg-foot-status {
+      flex: 1;
+      font-size: 12px;
+      color: var(--color-text-mute);
+    }
+    .cfg-foot-status.dirty { color: var(--color-warn); font-weight: 500; }
+    .cfg-foot-status.dirty::before { content: '● '; }
+    .cfg-form.dirty button[type=submit] {
+      box-shadow: 0 0 0 3px var(--color-primary-soft);
+    }
+
+    /* ============ Account table ============ */
+    .account-cfg-table th, .account-cfg-table td { padding: 10px 12px; }
+
+    /* ============ Modal ============ */
+    .modal {
+      width: min(560px, calc(100vw - 32px));
+      max-height: calc(100vh - 64px);
+      padding: 0;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 20px 40px rgba(17, 20, 24, 0.15);
+      background: var(--color-surface);
+      color: var(--color-text);
+      overflow: hidden;
+    }
+    .modal::backdrop { background: rgba(17, 20, 24, 0.4); backdrop-filter: blur(2px); }
+    .modal-form { display: flex; flex-direction: column; max-height: calc(100vh - 64px); }
+    .modal-head {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: var(--space-4) var(--space-5);
+      border-bottom: 1px solid var(--color-border-soft);
+    }
+    .modal-head h2 { font-size: 17px; font-weight: 600; }
+    .modal-body {
+      padding: var(--space-3) var(--space-5);
+      overflow-y: auto;
+      flex: 1;
+    }
+    .modal-foot {
+      display: flex; justify-content: flex-end; gap: var(--space-2);
+      padding: var(--space-3) var(--space-5);
+      border-top: 1px solid var(--color-border-soft);
+      background: var(--color-surface-alt);
+    }
+  </style>
+
+  <script>
+    // ============ 账号 Modal ============
+    const modal = document.getElementById('account-modal');
+    const modalForm = document.getElementById('account-form');
+    const modalTitle = document.getElementById('account-modal-title');
+    const idRow = document.getElementById('row-account-id');
+    const submitBtn = document.getElementById('account-submit-btn');
+
+    function openAccountModal(data) {
+      // data = undefined → 添加;data = {id, ...} → 编辑
+      modalForm.reset();
+      if (data) {
+        modalTitle.textContent = '编辑账号 · ' + data.id;
+        modalForm.action = '/config/accounts/' + encodeURIComponent(data.id) + '/update';
+        idRow.style.display = 'none'; // 编辑时不显示 ID(不可改)
+        modalForm.elements['display_name'].value = data.display_name || '';
+        modalForm.elements['enabled'].checked = !!data.enabled;
+        modalForm.elements['daily_limit'].value = data.daily_limit ?? 20;
+        modalForm.elements['video_search_root'].value = data.video_search_root || '';
+        modalForm.elements['cover_search_root'].value = data.cover_search_root || '';
+        submitBtn.textContent = '保存修改';
+      } else {
+        modalTitle.textContent = '添加账号';
+        modalForm.action = '/config/accounts/add';
+        idRow.style.display = 'grid';
+        submitBtn.textContent = '添加账号';
+      }
+      modal.showModal();
+    }
+    function closeAccountModal() { modal.close(); }
+    function submitAccountForm(e) {
+      // 让浏览器走原生 form 提交 → 服务端 redirect
+      return true;
+    }
+
+    // ============ 敏感字段眼睛切换 ============
+    function toggleSecret(btn) {
+      const input = btn.parentElement.querySelector('input');
+      input.type = input.type === 'password' ? 'text' : 'password';
+      btn.textContent = input.type === 'password' ? '👁' : '🙈';
+    }
+
+    // ============ 未保存检测 ============
+    document.querySelectorAll('form.cfg-form').forEach(form => {
+      const status = form.querySelector('[data-role=status]');
+      const original = new FormData(form);
+      const snapshot = {};
+      for (const [k, v] of original.entries()) {
+        snapshot[k] = (snapshot[k] || []).concat([v]);
+      }
+
+      function isDirty() {
+        const cur = new FormData(form);
+        const curSnap = {};
+        for (const [k, v] of cur.entries()) {
+          curSnap[k] = (curSnap[k] || []).concat([v]);
+        }
+        const allKeys = new Set([...Object.keys(snapshot), ...Object.keys(curSnap)]);
+        for (const k of allKeys) {
+          const a = (snapshot[k] || []).sort().join('|');
+          const b = (curSnap[k] || []).sort().join('|');
+          if (a !== b) return true;
+        }
+        return false;
+      }
+      function updateStatus() {
+        const dirty = isDirty();
+        form.classList.toggle('dirty', dirty);
+        if (status) {
+          if (dirty) {
+            status.textContent = '未保存的修改';
+            status.classList.add('dirty');
+          } else {
+            status.textContent = '';
+            status.classList.remove('dirty');
+          }
+        }
+      }
+      form.addEventListener('input', updateStatus);
+      form.addEventListener('change', updateStatus);
+    });
+
+    // ============ flash banner 几秒后渐隐 ============
+    (function () {
+      const banner = document.getElementById('flash-banner');
+      if (!banner) return;
+      setTimeout(() => {
+        banner.style.transition = 'opacity 0.4s';
+        banner.style.opacity = '0';
+        setTimeout(() => banner.remove(), 500);
+      }, 4000);
+    })();
+  </script>
 {% endblock %}

@@ -33,11 +33,22 @@ from wxsp.models import (
 
 router = APIRouter()
 
+_run_today_lock = threading.Lock()
+_run_today_running = False
+
 RETRYABLE_STATUSES = {"failed", "interrupted"}
 # 重新入队适用于"积压"的两类:还没跑(pending)+ 跑了一半挂了(interrupted)。
 # 失败任务(failed)走"重试"按钮——重试会重新认领 + 后台 spawn 跑;
 # 重新入队只改 execute_date,等下次手动 run-today / 09:00 cron 才跑。
 REQUEUE_STATUSES = {TASK_STATUS_PENDING, TASK_STATUS_INTERRUPTED}
+
+# UI 上按"场景"分组,默认进入"待处理"——出问题的任务一眼看到。
+# 与单 status 过滤(?status=xxx)互斥;bucket 优先。
+BUCKETS = {
+    "attention": ["failed", "interrupted", "pending"],
+    "running": ["running"],
+    "done": ["success", "skipped"],
+}
 
 
 def _spawn(name: str, fn: Any, *args: Any, **kwargs: Any) -> None:
@@ -56,6 +67,7 @@ def tasks_page(
     date: str | None = None,
     account: str | None = None,
     status: str | None = None,
+    bucket: str | None = None,
     backlog: int | None = None,
     flash: str | None = None,
     session: Session = Depends(get_session),
@@ -64,6 +76,33 @@ def tasks_page(
     today = _date.today()
     backlog_mode = bool(backlog)
     parsed_date = None if backlog_mode else (_parse_date(date) if date else today)
+
+    # bucket 默认:无 bucket 也无 status 时进"待处理";单独传 status 时不走 bucket
+    if bucket is None and status is None and not backlog_mode:
+        bucket = "attention"
+    if bucket and bucket not in BUCKETS and bucket != "all":
+        bucket = "all"
+
+    # 先算每个 tab 的计数(同日期 + 账号过滤,不受 status/bucket 限制)
+    count_stmt = select(Task.status).where(
+        Task.execute_date == parsed_date if parsed_date is not None else Task.id.isnot(None)  # type: ignore[union-attr]
+    )
+    if backlog_mode:
+        count_stmt = select(Task.status).where(
+            Task.execute_date < today,
+            col(Task.status).in_([TASK_STATUS_PENDING, TASK_STATUS_INTERRUPTED]),
+        )
+    if account:
+        count_stmt = count_stmt.where(Task.account_id == account)
+    status_counter: dict[str, int] = {}
+    for s in session.exec(count_stmt).all():
+        status_counter[s] = status_counter.get(s, 0) + 1
+    bucket_counts = {
+        "attention": sum(status_counter.get(s, 0) for s in BUCKETS["attention"]),
+        "running": sum(status_counter.get(s, 0) for s in BUCKETS["running"]),
+        "done": sum(status_counter.get(s, 0) for s in BUCKETS["done"]),
+        "all": sum(status_counter.values()),
+    }
 
     stmt = select(Task, Video).join(Video, Task.video_id == Video.id)  # type: ignore[arg-type]
     if backlog_mode:
@@ -78,6 +117,8 @@ def tasks_page(
         stmt = stmt.where(Task.account_id == account)
     if status:
         stmt = stmt.where(Task.status == status)
+    elif bucket and bucket in BUCKETS:
+        stmt = stmt.where(col(Task.status).in_(BUCKETS[bucket]))
     stmt = stmt.order_by(Task.execute_date.asc(), Task.publish_at.asc())  # type: ignore[attr-defined]
 
     pairs = list(session.exec(stmt).all())
@@ -110,6 +151,8 @@ def tasks_page(
             "filter_date": parsed_date,
             "filter_account": account or "",
             "filter_status": status or "",
+            "filter_bucket": bucket or "",
+            "bucket_counts": bucket_counts,
             "backlog_mode": backlog_mode,
             "account_options": account_options,
             "status_options": ["pending", "running", "success", "failed", "skipped", "interrupted"],
@@ -228,7 +271,24 @@ def requeue_task(
 
 @router.post("/tasks/run-today")
 def run_today(settings: Settings = Depends(get_settings)) -> RedirectResponse:
-    _spawn("run-today", _run_today_pending, settings)
+    global _run_today_running
+    with _run_today_lock:
+        if _run_today_running:
+            today = _date.today().isoformat()
+            return RedirectResponse(
+                url=f"/tasks?date={today}&flash=正在跑今天,请等待完成后再试", status_code=303
+            )
+        _run_today_running = True
+
+    def _run_and_release() -> None:
+        global _run_today_running
+        try:
+            _run_today_pending(settings)
+        finally:
+            with _run_today_lock:
+                _run_today_running = False
+
+    _spawn("run-today", _run_and_release)
     today = _date.today().isoformat()
     return RedirectResponse(
         url=f"/tasks?date={today}&flash=已触发跑今天,完成后刷新", status_code=303

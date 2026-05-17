@@ -70,6 +70,10 @@ def render_step(step: int, request: Request) -> HTMLResponse:
         6: "setup/complete.html",
     }[step]
 
+    # 预填:若向导尚未填飞书但本地已有 config.yaml,用其 feishu 配置做初始值
+    if step == 2 and "feishu" not in data:
+        _prefill_from_existing_config(data)
+
     ctx: dict[str, Any] = {
         "step": step,
         "total_steps": _TOTAL_STEPS,
@@ -106,6 +110,27 @@ def _run_self_check() -> list[dict[str, Any]]:
     else:
         checks.append({"name": "Chromium", "ok": False, "detail": f"未找到: {chromium}"})
     return checks
+
+
+def _prefill_from_existing_config(data: dict[str, Any]) -> None:
+    """若本地已有 config.yaml,将其飞书配置预填到向导,降低重复输入。"""
+    config_path = wxsp_config.get_config_path()
+    if not config_path.exists():
+        return
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        feishu = raw.get("feishu", {})
+        if not isinstance(feishu, dict):
+            return
+        bitable = feishu.get("bitable", {})
+        data["feishu"] = {
+            "app_id": feishu.get("app_id", ""),
+            "app_secret": feishu.get("app_secret", ""),
+            "app_token": bitable.get("app_token", "") if isinstance(bitable, dict) else "",
+            "table_id": bitable.get("table_id", "") if isinstance(bitable, dict) else "",
+        }
+    except Exception:
+        pass  # config.yaml 损坏/不可读时静默跳过,不影响向导
 
 
 def _build_summary(data: dict[str, Any]) -> dict[str, Any]:

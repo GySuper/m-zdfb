@@ -1,6 +1,6 @@
 [project]
 name = "wxsp"
-version = "0.0.1"
+dynamic = ["version"]
 description = "微信视频号自动发布工具"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -44,6 +44,9 @@ apc-sdk-python = { path = "./apc_sdk", editable = true }
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "wxsp/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["wxsp"]

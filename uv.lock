@@ -1826,7 +1826,6 @@ wheels = [
 
 [[package]]
 name = "wxsp"
-version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "apc-sdk-python" },

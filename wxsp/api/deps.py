@@ -14,6 +14,7 @@ from pathlib import Path
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session
 
+from wxsp import __version__ as wxsp_version
 from wxsp.api.i18n import cookie_cn, enabled_cn, error_type_cn, level_cn, status_cn
 from wxsp.config import Settings, load_settings
 from wxsp.db import get_engine, init_db, session_scope
@@ -27,6 +28,7 @@ templates.env.globals.update(
     level_cn=level_cn,
     enabled_cn=enabled_cn,
     error_type_cn=error_type_cn,
+    wxsp_version=wxsp_version,
 )
 
 _db_initialized = False

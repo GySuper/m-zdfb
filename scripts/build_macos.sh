@@ -88,11 +88,22 @@ uv run pyinstaller \
   --noconfirm \
   build/launcher.py
 
-APP_PATH="dist/wxsp.app"
-if [ ! -d "$APP_PATH" ]; then
-  echo "PyInstaller 未生成 $APP_PATH" >&2
+RAW_APP_PATH="dist/wxsp.app"
+if [ ! -d "$RAW_APP_PATH" ]; then
+  echo "PyInstaller 未生成 $RAW_APP_PATH" >&2
   exit 1
 fi
+
+# 安装后用户在 Finder/Dock 看到的产品名 = "自动发布平台"。
+# 可执行文件保持 wxsp(CFBundleExecutable 必须与 Contents/MacOS/ 里的二进制名一致)。
+DISPLAY_NAME="自动发布平台"
+APP_PATH="dist/${DISPLAY_NAME}.app"
+rm -rf "$APP_PATH"
+mv "$RAW_APP_PATH" "$APP_PATH"
+PLIST="$APP_PATH/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleName ${DISPLAY_NAME}" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string ${DISPLAY_NAME}" "$PLIST" 2>/dev/null \
+  || /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${DISPLAY_NAME}" "$PLIST"
 
 echo "==> 内嵌 patchright chromium 到 _internal/chromium/"
 # patchright 跑 launch 时按 <PLAYWRIGHT_BROWSERS_PATH>/chromium-<版本>/chrome-mac-arm64/...
@@ -127,11 +138,11 @@ fi
 
 rm -f "dist/wxsp-${VERSION}.dmg"
 create-dmg \
-  --volname "wxsp Installer" \
+  --volname "${DISPLAY_NAME} 安装器" \
   --window-size 600 400 \
   --app-drop-link 450 200 \
-  --icon "wxsp.app" 150 200 \
-  --hide-extension "wxsp.app" \
+  --icon "${DISPLAY_NAME}.app" 150 200 \
+  --hide-extension "${DISPLAY_NAME}.app" \
   "dist/wxsp-${VERSION}.dmg" \
   "$APP_PATH"
 

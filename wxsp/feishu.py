@@ -14,13 +14,22 @@ from typing import Any
 
 import lark_oapi as lark  # type: ignore[import-untyped]
 from lark_oapi.api.bitable.v1 import (  # type: ignore[import-untyped]
+    AppTableField,
+    AppTableFieldProperty,
+    AppTableFieldPropertyOption,
     AppTableRecord,
     Condition,
     FilterInfo,
+    ListAppTableFieldRequest,
     SearchAppTableRecordRequest,
     SearchAppTableRecordRequestBody,
+    UpdateAppTableFieldRequest,
     UpdateAppTableRecordRequest,
 )
+
+# 飞书 Bitable 字段类型码:3 = 单选(SingleSelect)。Bitable 文档:
+# https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-field/guide
+_FEISHU_FIELD_TYPE_SINGLE_SELECT = 3
 
 # 指数退避序列:第 1 次失败等 1s,第 2 次失败等 2s,第 3 次失败直接抛
 _RETRY_DELAYS = (1.0, 2.0)
@@ -197,3 +206,169 @@ def _build_update_request(
         .request_body(body)
         .build()
     )
+
+
+# ---------- 账号字段:单选选项追加 ----------
+
+
+def add_account_option(
+    client: lark.Client,
+    *,
+    app_token: str,
+    table_id: str,
+    account_field_name: str,
+    option_name: str,
+) -> str:
+    """把 option_name 追加到飞书 'account_field_name' 单选字段的选项列表。
+
+    返回:
+      "added"  - 选项不存在,已新增
+      "exists" - 选项已存在,无操作(幂等)
+
+    抛 FeishuApiError:
+      - 找不到该字段 / 字段不是单选
+      - API 三次重试仍失败
+
+    设计:
+      - 飞书 update field 是"property 整体替换",所以要先 list 拿到完整 options
+        (含 id),append 新项后整体回写,保留旧选项的 id(否则历史记录引用的
+        option 会被当成"已删除"清空)。
+      - 字段类型校验防呆:防止用户把 field_map.account 配到一个文本字段把它误
+        改成单选。
+    """
+    field = _find_field_by_name(
+        client, app_token=app_token, table_id=table_id, field_name=account_field_name
+    )
+    if field is None:
+        raise FeishuApiError(f"找不到字段 {account_field_name!r}(检查 feishu.field_map.account)")
+    if field.type != _FEISHU_FIELD_TYPE_SINGLE_SELECT:
+        raise FeishuApiError(
+            f"字段 {account_field_name!r} 类型不是单选(type={field.type}),拒绝改 options"
+        )
+
+    existing_options = _parse_options(field.property)
+    if any(opt_name == option_name for opt_name, _ in existing_options):
+        return "exists"
+    new_options = [*existing_options, (option_name, None)]
+    _update_field_options(
+        client,
+        app_token=app_token,
+        table_id=table_id,
+        field_id=field.field_id,
+        field_name=account_field_name,
+        options=new_options,
+    )
+    return "added"
+
+
+def _find_field_by_name(
+    client: lark.Client,
+    *,
+    app_token: str,
+    table_id: str,
+    field_name: str,
+) -> AppTableField | None:
+    """list 全表字段,按 field_name 找;翻页拉完。"""
+    page_token: str | None = None
+    while True:
+        response = _list_fields_with_retry(
+            client, app_token=app_token, table_id=table_id, page_token=page_token
+        )
+        for item in response.data.items or []:
+            if item.field_name == field_name:
+                return item
+        if not response.data.has_more:
+            return None
+        page_token = response.data.page_token
+
+
+def _list_fields_with_retry(
+    client: lark.Client,
+    *,
+    app_token: str,
+    table_id: str,
+    page_token: str | None,
+) -> Any:
+    builder = (
+        ListAppTableFieldRequest.builder().app_token(app_token).table_id(table_id).page_size(100)
+    )
+    if page_token is not None:
+        builder = builder.page_token(page_token)
+    req = builder.build()
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            response = client.bitable.v1.app_table_field.list(req)
+            if not response.success():
+                raise FeishuApiError(
+                    f"飞书 list field 错误 code={response.code} msg={response.msg}"
+                )
+            return response
+        except Exception as exc:
+            last_err = exc
+            if attempt < 2:
+                time.sleep(_RETRY_DELAYS[attempt])
+    assert last_err is not None
+    raise FeishuApiError(f"飞书 list field 重试 3 次仍失败: {last_err}") from last_err
+
+
+def _parse_options(prop: AppTableFieldProperty | None) -> list[tuple[str, str | None]]:
+    """从字段 property 里抽 [(name, id_or_None), ...]。"""
+    if prop is None or not getattr(prop, "options", None):
+        return []
+    out: list[tuple[str, str | None]] = []
+    for opt in prop.options:
+        name = getattr(opt, "name", None)
+        if not isinstance(name, str):
+            continue
+        oid = getattr(opt, "id", None)
+        out.append((name, oid if isinstance(oid, str) else None))
+    return out
+
+
+def _update_field_options(
+    client: lark.Client,
+    *,
+    app_token: str,
+    table_id: str,
+    field_id: str,
+    field_name: str,
+    options: list[tuple[str, str | None]],
+) -> None:
+    option_objs = []
+    for name, oid in options:
+        b = AppTableFieldPropertyOption.builder().name(name)
+        if oid is not None:
+            b = b.id(oid)
+        option_objs.append(b.build())
+    prop = AppTableFieldProperty.builder().options(option_objs).build()
+    body = (
+        AppTableField.builder()
+        .field_name(field_name)
+        .type(_FEISHU_FIELD_TYPE_SINGLE_SELECT)
+        .property(prop)
+        .build()
+    )
+    req = (
+        UpdateAppTableFieldRequest.builder()
+        .app_token(app_token)
+        .table_id(table_id)
+        .field_id(field_id)
+        .request_body(body)
+        .build()
+    )
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            response = client.bitable.v1.app_table_field.update(req)
+            if not response.success():
+                raise FeishuApiError(
+                    f"飞书 update field 错误 code={response.code} msg={response.msg}"
+                )
+            return
+        except Exception as exc:
+            last_err = exc
+            if attempt < 2:
+                time.sleep(_RETRY_DELAYS[attempt])
+    assert last_err is not None
+    raise FeishuApiError(f"飞书 update field 重试 3 次仍失败: {last_err}") from last_err

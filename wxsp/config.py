@@ -184,6 +184,22 @@ class Settings(BaseModel):
                     setattr(ac, field, Path(expanded))
         return self
 
+    @model_validator(mode="after")
+    def _check_display_name_uniqueness(self) -> Settings:
+        """display_name 必须全局唯一。
+        飞书 '账号' 单选用 display_name 作选项,validator 按 display_name 反查
+        account_id —— 重名会让反查走错位置(spec: 平台账号 → 飞书选项同步)。
+        """
+        seen: dict[str, str] = {}
+        for aid, ac in self.accounts.items():
+            if ac.display_name in seen:
+                raise ValueError(
+                    f"accounts: display_name {ac.display_name!r} "
+                    f"被 {seen[ac.display_name]!r} 和 {aid!r} 重复使用,必须唯一"
+                )
+            seen[ac.display_name] = aid
+        return self
+
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
 

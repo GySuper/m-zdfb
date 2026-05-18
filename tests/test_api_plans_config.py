@@ -412,15 +412,15 @@ def test_config_post_no_notify_on_writes_empty_list(
 # ============== 账号 CRUD ==============
 
 
-def test_accounts_add_writes_new_entry_and_auto_user_data_dir(
+def test_accounts_add_generates_id_and_writes_entry(
     client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """add 不接 user_data_dir,后端按 account_id 自动生成。"""
+    """add 不接 account_id / user_data_dir,后端自动生成 account_<8 hex> + 对应 profile 目录。"""
     cfg = _setup(tmp_path, monkeypatch)
+    before = set(yaml.safe_load(cfg.read_text("utf-8"))["accounts"].keys())
     r = client_empty.post(
         "/config/accounts/add",
         data={
-            "account_id": "account_z",
             "display_name": "搞笑号",
             "daily_limit": "15",
             "video_search_root": "/tmp/nas/videos/z",
@@ -430,56 +430,22 @@ def test_accounts_add_writes_new_entry_and_auto_user_data_dir(
         follow_redirects=False,
     )
     assert r.status_code == 303
-    assert "已添加账号 account_z" in unquote(r.headers["location"])
     disk = yaml.safe_load(cfg.read_text("utf-8"))
-    new = disk["accounts"]["account_z"]
+    after = set(disk["accounts"].keys())
+    added = after - before
+    assert len(added) == 1
+    aid = added.pop()
+    # 生成格式:account_<8 lowercase hex>
+    assert aid.startswith("account_") and len(aid) == len("account_") + 8
+    assert all(c in "0123456789abcdef" for c in aid.removeprefix("account_"))
+    # flash 里包含生成的 ID(让运营知道新账号叫啥)
+    assert f"已添加账号 {aid}" in unquote(r.headers["location"])
+    new = disk["accounts"][aid]
     assert new["display_name"] == "搞笑号"
     assert new["daily_limit"] == 15
     assert new["video_search_root"] == "/tmp/nas/videos/z"
     assert new["cover_search_root"] == "/tmp/nas/covers/z"
-    # user_data_dir 自动按 account_id 生成,用户没传过
-    assert new["user_data_dir"] == "./data/chrome-profiles/account_z"
-
-
-def test_accounts_add_rejects_duplicate(
-    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    cfg = _setup(tmp_path, monkeypatch)
-    snap = cfg.read_text("utf-8")
-    r = client_empty.post(
-        "/config/accounts/add",
-        data={
-            "account_id": "account_a",  # 已存在
-            "display_name": "x",
-            "daily_limit": "10",
-            "video_search_root": "/tmp/nas/videos/x",
-            "cover_search_root": "/tmp/nas/covers/x",
-            "enabled": "on",
-        },
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert "已存在" in unquote(r.headers["location"])
-    assert cfg.read_text("utf-8") == snap
-
-
-def test_accounts_add_rejects_empty_id(
-    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _setup(tmp_path, monkeypatch)
-    r = client_empty.post(
-        "/config/accounts/add",
-        data={
-            "account_id": "   ",
-            "display_name": "x",
-            "daily_limit": "10",
-            "video_search_root": "/tmp/v",
-            "cover_search_root": "/tmp/c",
-        },
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert "不能为空" in unquote(r.headers["location"])
+    assert new["user_data_dir"] == f"./data/chrome-profiles/{aid}"
 
 
 def test_accounts_update_writes_changes(

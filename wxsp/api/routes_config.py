@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import shutil
 import threading
 from collections.abc import Callable
@@ -71,6 +72,18 @@ FIELD_MAP_KEYS: list[tuple[str, str]] = [
 def _profile_dir_for(account_id: str) -> str:
     """自动生成的 Chrome profile 目录;用户不可改。"""
     return f"./data/chrome-profiles/{account_id}"
+
+
+def _generate_account_id(existing: dict[str, Any]) -> str:
+    """生成 account_<8 hex> 形式的 ID,与 existing 不冲突。
+
+    8 hex = 32-bit,在百级账号规模下碰撞概率 ~0;循环兜底防御未来扩展。
+    """
+    for _ in range(100):
+        candidate = f"account_{secrets.token_hex(4)}"
+        if candidate not in existing:
+            return candidate
+    raise RuntimeError("account_id 生成 100 次都碰撞,几乎不可能;检查 secrets/RNG 是否异常")
 
 
 def _load_raw_yaml() -> dict[str, Any]:
@@ -384,22 +397,21 @@ def _build_account_entry(
 
 @router.post("/config/accounts/add")
 def add_account(
-    account_id: str = Form(...),
     display_name: str = Form(...),
     daily_limit: int = Form(20),
     video_search_root: str = Form(...),
     cover_search_root: str = Form(...),
     enabled: bool = Form(True),
 ) -> RedirectResponse:
-    """user_data_dir 自动生成为 ./data/chrome-profiles/<account_id>,不暴露给用户。"""
-    aid = account_id.strip()
-    if not aid:
-        return RedirectResponse("/config?flash=账号 ID 不能为空", status_code=303)
+    """account_id / user_data_dir 均由系统自动生成(account_<8-hex> + 对应 profile 目录)。
+
+    本地新增成功后,会尝试把 display_name 追加到飞书 Bitable "账号" 单选字段的选项里
+    (前提 feishu.enabled=true);失败不阻断本地新增,只在 flash 里追加提示。
+    """
     with _config_lock:
         data = _load_raw_yaml()
         accounts = data.setdefault("accounts", {}) or {}
-        if aid in accounts:
-            return RedirectResponse(f"/config?flash=账号 {aid} 已存在,未添加", status_code=303)
+        aid = _generate_account_id(accounts)
         accounts[aid] = _build_account_entry(
             display_name=display_name,
             enabled=enabled,
@@ -413,7 +425,51 @@ def add_account(
         if errors:
             return RedirectResponse(f"/config?flash=新增失败: {errors[0]}", status_code=303)
         _save_yaml(data)
-    return RedirectResponse(f"/config?flash=已添加账号 {aid}", status_code=303)
+    suffix = _sync_account_to_feishu(data, display_name)
+    return RedirectResponse(f"/config?flash=已添加账号 {aid}{suffix}", status_code=303)
+
+
+def _sync_account_to_feishu(data: dict[str, Any], display_name: str) -> str:
+    """把 display_name 追加到飞书"账号"单选字段;返回拼到 flash 后面的中文提示。
+
+    flash 后缀(成功 / 已存在 / 跳过 / 失败)由调用方拼到主提示后,让运营一眼看到
+    本地保存 + 飞书同步两段结果。
+    """
+    feishu = data.get("feishu", {}) or {}
+    if not feishu.get("enabled"):
+        return "(飞书未启用,未同步选项)"
+    try:
+        from wxsp.config import _expand_env_vars
+        from wxsp.feishu import add_account_option, make_client
+    except Exception as exc:
+        return f"(飞书同步失败: import {exc})"
+    bitable = feishu.get("bitable", {}) or {}
+    field_map = feishu.get("field_map", {}) or {}
+    app_id = (feishu.get("app_id") or "").strip()
+    app_secret_raw = (feishu.get("app_secret") or "").strip()
+    app_token = (bitable.get("app_token") or "").strip()
+    table_id = (bitable.get("table_id") or "").strip()
+    account_field_name = (field_map.get("account") or "账号").strip()
+    if not (app_id and app_secret_raw and app_token and table_id):
+        return "(飞书配置不全,未同步选项)"
+    try:
+        app_secret = _expand_env_vars(app_secret_raw)
+    except ValueError as exc:
+        return f"(飞书 app_secret 展开失败: {exc})"
+    try:
+        client = make_client(app_id, app_secret)
+        result = add_account_option(
+            client,
+            app_token=app_token,
+            table_id=table_id,
+            account_field_name=account_field_name,
+            option_name=display_name,
+        )
+    except Exception as exc:
+        return f"(飞书同步失败: {exc})"
+    if result == "exists":
+        return f"(飞书 {account_field_name!r} 已含选项 {display_name!r},未重复)"
+    return f"(已同步到飞书 {account_field_name!r} 字段)"
 
 
 @router.post("/config/accounts/{account_id}/update")

@@ -75,6 +75,13 @@ def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
             a.id
             for a in session.exec(select(Account).where(Account.is_active == True))  # noqa: E712
         }
+        # 给 validator 反查用:account_id → display_name。运营在飞书侧可能选了
+        # display_name(平台同步过去的中文标签)或留旧的 account_id 都得能识别。
+        active_accounts: dict[str, str] = {
+            aid: settings.accounts[aid].display_name
+            for aid in active_account_ids
+            if aid in settings.accounts
+        }
         for row in rows:
             if session.get(Video, row.record_id) is not None:
                 skipped.append(row.record_id)
@@ -84,7 +91,7 @@ def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
                 config=settings,
                 now=now,
                 nas_finder=nas_finder,
-                active_account_ids=active_account_ids,
+                active_accounts=active_accounts,
             )
             if not v_result.ok:
                 rejected.append((row.record_id, v_result.errors))

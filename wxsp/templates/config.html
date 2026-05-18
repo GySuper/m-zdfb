@@ -455,13 +455,6 @@
         <button type="button" class="btn-ghost btn-sm" onclick="closeAccountModal()" aria-label="关闭">✕</button>
       </div>
       <div class="modal-body">
-        <div class="cfg-row" id="row-account-id">
-          <label>账号 ID</label>
-          <div class="cfg-control">
-            <input type="text" name="account_id" required placeholder="例:account_a" pattern="[a-z0-9_]+">
-          </div>
-          <span class="cfg-hint">小写字母 + 数字 + 下划线,唯一标识。<strong>添加后不可改</strong>。Chrome profile 目录按此自动生成</span>
-        </div>
         <div class="cfg-row">
           <label>显示名</label>
           <div class="cfg-control">
@@ -680,16 +673,14 @@
     const modal = document.getElementById('account-modal');
     const modalForm = document.getElementById('account-form');
     const modalTitle = document.getElementById('account-modal-title');
-    const idRow = document.getElementById('row-account-id');
     const submitBtn = document.getElementById('account-submit-btn');
 
     function openAccountModal(data) {
-      // data = undefined → 添加;data = {id, ...} → 编辑
+      // data = undefined → 添加(ID 由服务端生成);data = {id, ...} → 编辑
       modalForm.reset();
       if (data) {
         modalTitle.textContent = '编辑账号 · ' + data.id;
         modalForm.action = '/config/accounts/' + encodeURIComponent(data.id) + '/update';
-        idRow.style.display = 'none'; // 编辑时不显示 ID(不可改)
         modalForm.elements['display_name'].value = data.display_name || '';
         modalForm.elements['enabled'].checked = !!data.enabled;
         modalForm.elements['daily_limit'].value = data.daily_limit ?? 20;
@@ -699,7 +690,6 @@
       } else {
         modalTitle.textContent = '添加账号';
         modalForm.action = '/config/accounts/add';
-        idRow.style.display = 'grid';
         submitBtn.textContent = '添加账号';
       }
       modal.showModal();

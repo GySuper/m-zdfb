@@ -80,9 +80,13 @@ def validate(
     config: Settings,
     now: datetime,
     nas_finder: NasFinder,
-    active_account_ids: set[str],
+    active_accounts: dict[str, str],
 ) -> ValidationResult:
-    """逐字段校验,错误全部收集。所有规则独立运行,不在第一个错就 return。"""
+    """逐字段校验,错误全部收集。所有规则独立运行,不在第一个错就 return。
+
+    active_accounts: {account_id: display_name},只含 DB 中 is_active 的账号。
+    飞书"账号"字段允许写 account_id 或 display_name 任一形式,validator 反查。
+    """
     fm = config.feishu.field_map
     errors: list[FieldError] = []
 
@@ -91,7 +95,7 @@ def validate(
     description = _get_str(row.fields.get(fm.description))
     topic = _get_str(row.fields.get(fm.topic))
     original_claim = bool(row.fields.get(fm.original_claim) or False)
-    account_id = _check_account(row.fields, fm.account, active_account_ids, errors)
+    account_id = _check_account(row.fields, fm.account, active_accounts, errors)
     account_cfg = config.accounts.get(account_id) if account_id else None
     video_path = _check_video(row.fields, fm.video_file, nas_finder, account_cfg, errors)
     cover_path = _check_cover(row.fields, fm.cover, nas_finder, account_cfg, errors)
@@ -152,18 +156,22 @@ def _check_tags(fields: dict[str, Any], field_name: str, errors: list[FieldError
 def _check_account(
     fields: dict[str, Any],
     field_name: str,
-    active_account_ids: set[str],
+    active_accounts: dict[str, str],
     errors: list[FieldError],
 ) -> str | None:
+    """先按 account_id 精确匹配,再按 display_name 反查;display_name 唯一由 Settings 保证。"""
     raw = fields.get(field_name)
-    account_id = _coerce_select(raw)
-    if not account_id:
+    selected = _coerce_select(raw)
+    if not selected:
         errors.append(FieldError(field=field_name, message="未指定"))
         return None
-    if account_id not in active_account_ids:
-        errors.append(FieldError(field=field_name, message=f"{account_id!r} 不存在或已停用"))
-        return None
-    return account_id
+    if selected in active_accounts:
+        return selected
+    for aid, display_name in active_accounts.items():
+        if display_name == selected:
+            return aid
+    errors.append(FieldError(field=field_name, message=f"{selected!r} 不存在或已停用"))
+    return None
 
 
 def _coerce_select(raw: Any) -> str | None:

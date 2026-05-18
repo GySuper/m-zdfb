@@ -186,7 +186,7 @@ def test_validate_title_too_short(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "标题" and "16" in e.message for e in result.errors)
@@ -200,7 +200,7 @@ def test_validate_title_too_long(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "标题" and "30" in e.message for e in result.errors)
@@ -214,7 +214,7 @@ def test_validate_title_boundary_16_passes(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert all(e.field != "标题" for e in result.errors), result.errors
 
@@ -227,7 +227,7 @@ def test_validate_tags_too_many(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "标签" and "5" in e.message for e in result.errors)
@@ -241,7 +241,7 @@ def test_validate_account_empty(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "账号" and "未指定" in e.message for e in result.errors)
@@ -255,10 +255,25 @@ def test_validate_account_not_in_active_set(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "账号" and "account_unknown" in e.message for e in result.errors)
+
+
+def test_validate_account_resolves_display_name(tmp_path: Path) -> None:
+    """飞书 '账号' 字段填 display_name 也能反查到 account_id(平台 → 飞书选项同步链路)。"""
+    row = _row_with(tmp_path, 标题="字" * 16, 账号="测试号")
+    nas = _stub_nas_with_video(tmp_path)
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+    )
+    assert result.ok is True, result.errors
+    assert result.account_id == "account_a"
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +289,7 @@ def test_validate_video_file_not_found(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "视频文件" and "未在" in e.message for e in result.errors)
@@ -291,7 +306,7 @@ def test_validate_video_file_wrong_extension(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "视频文件" and ".avi" in e.message for e in result.errors)
@@ -308,7 +323,7 @@ def test_validate_video_extension_case_insensitive(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     # 不关心整体 ok(时间 rules 还没做);只关心视频文件这一项不报错
     assert all(e.field != "视频文件" for e in result.errors), result.errors
@@ -332,7 +347,7 @@ def test_validate_video_too_large(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "视频文件" and "GiB" in e.message for e in result.errors)
@@ -349,7 +364,7 @@ def test_validate_cover_missing(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "封面文件" and "missing.jpg" in e.message for e in result.errors)
@@ -366,7 +381,7 @@ def test_validate_cover_empty_is_ok(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     # 封面字段不应该报错
     assert all(e.field != "封面文件" for e in result.errors), result.errors
@@ -390,7 +405,7 @@ def test_validate_execute_date_missing(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "执行日期" for e in result.errors)
@@ -410,7 +425,7 @@ def test_validate_publish_at_too_close(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "定时发布时间" and "30min" in e.message for e in result.errors)
@@ -430,7 +445,7 @@ def test_validate_publish_at_too_far(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "定时发布时间" and "14d" in e.message for e in result.errors)
@@ -451,7 +466,7 @@ def test_validate_publish_at_boundary_30min_passes(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert all(e.field != "定时发布时间" for e in result.errors), result.errors
 
@@ -473,7 +488,7 @@ def test_validate_publish_date_earlier_than_execute_date(tmp_path: Path) -> None
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     assert any(e.field == "定时发布时间" and "早于执行日期" in e.message for e in result.errors)
@@ -492,7 +507,7 @@ def test_validate_multi_error_collection(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert result.ok is False
     error_fields = {e.field for e in result.errors}
@@ -516,7 +531,7 @@ def test_validate_happy_path(tmp_path: Path) -> None:
         config=settings,
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a", "account_b"},
+        active_accounts={"account_a": "测试号", "account_b": "备用号"},
     )
     assert result.ok is True, result.errors
     assert result.title == "这是一个测试标题视频内容十八字符"
@@ -543,7 +558,7 @@ def test_validate_video_file_auto_appends_mp4(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     # 不关心整体 ok(时间 rules 与 happy_row 默认值的交互),只关心视频字段不报错
     assert all(e.field != "视频文件" for e in result.errors), result.errors
@@ -563,7 +578,7 @@ def test_validate_title_rich_text_array_format(tmp_path: Path) -> None:
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     # 标题和视频文件都不应报错
     error_fields = {e.field for e in result.errors}
@@ -587,6 +602,6 @@ def test_validate_text_array_concatenated_when_multipart(tmp_path: Path) -> None
         config=_make_settings(tmp_path),
         now=datetime(2026, 5, 12, 9, 0),
         nas_finder=nas,
-        active_account_ids={"account_a"},
+        active_accounts={"account_a": "测试号"},
     )
     assert "标题" not in {e.field for e in result.errors}, result.errors

@@ -104,6 +104,8 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 
 ### 5. NAS 访问的特殊性
 - 视频/封面路径完全可配置,支持 NAS 挂载路径(如 `/Volumes/NAS/videos/`);**每账号独立** `video_search_root` / `cover_search_root`,可用 `{nas_root}` 占位
+- 飞书 `视频文件` / `封面文件` 字段**两种填法并行**:**裸文件名**(在账号 `video_search_root` 下递归搜)或**完整 NAS 路径**(UNC `\\host\share\...` / 盘符 `X:\...` / POSIX `/Volumes/...`)。判定走 `nas._is_absolute_path_input`
+- 跨 OS 部署时由 `paths.path_aliases: {UNC前缀: POSIX前缀, ...}` 翻译 —— macOS 上把 key→value,Windows 上把 value→key;默认 `{}` = 禁用(老配置兼容)。doctor 顺带核对当前 OS 那侧的 alias 目标盘是否挂上
 - 启动时 `doctor` 必须检查每个账号配置的路径是否可访问
 - 读 NAS 文件时要捕获网络错误,作为 `nas_unreachable` 错误类型
 - `stage_to_tmp` 优先 symlink(零拷贝);Windows 默认账户没 `SeCreateSymbolicLinkPrivilege` 时 fallback 到 `shutil.copy2`(M10 修)
@@ -219,6 +221,14 @@ app:
 # Windows 示例: nas_root: "Z:/wxsp" 或 "\\\\server\\share\\wxsp"
 paths:
   nas_root: /Volumes/NAS/wxsp
+  # 跨 OS 路径前缀映射(可选)。运营常从 Windows 复制完整 UNC 路径粘进飞书"视频文件",
+  # daemon 跑在 macOS 时需要把 UNC 前缀翻成本地 mount 才能读到。
+  # macOS 上 key→value,Windows 上 value→key;同 OS 部署可留空 {} 等于禁用。
+  path_aliases: {}
+  # 示例:
+  # path_aliases:
+  #   "\\\\172.31.15.11\\dianshang": "/Volumes/dianshang"
+  #   "\\\\nas.local\\wxsp":         "/Volumes/wxsp"
 
 # ============== 账号 ==============
 # 每账号都要配 video_search_root / cover_search_root,可用 {nas_root} 占位。
@@ -336,11 +346,11 @@ SQLite 是唯一的运行时事实来源,所有任务从飞书拉取。Web UI **
 
 | 飞书字段名 | 类型 | 必填 | 工具读写 | 说明 |
 |----------|------|-----|---------|------|
-| 视频文件 | 单行文本 | **是** | 读 | **仅文件名**(如 `国庆短片01.mp4`),系统在**该任务所属账号的** `video_search_root` 下递归搜;同名取 **mtime 最新** |
+| 视频文件 | 单行文本 | **是** | 读 | 两种填法:**裸文件名**(如 `国庆短片01.mp4`) → 在**该任务所属账号的** `video_search_root` 下递归搜,同名取 mtime 最新;**完整 NAS 路径**(UNC `\\host\share\...` / 盘符 `X:\...` / POSIX `/Volumes/...`) → 过 `paths.path_aliases` 翻译后 `Path.exists()` 直接命中。详见 [核心约束 §5](#5-nas-访问的特殊性) |
 | 标题 | 单行文本 | **是** | 读 | 16-30 字 |
 | 描述 | 多行文本 | 否 | 读 | |
 | 标签 | 多选 | 否 | 读 | ≤ 5 个 |
-| 封面文件 | 单行文本 | 否 | 读 | **仅文件名**,在**账号的** `cover_search_root` 递归搜,同名取 mtime 最新 |
+| 封面文件 | 单行文本 | 否 | 读 | 同"视频文件":裸文件名(在账号 `cover_search_root` 递归搜)或完整路径(过 `paths.path_aliases` 翻译) |
 | 合集 | 单选 | 否 | 读 | 视频号合集名(需提前在平台建好) |
 | 原创 | 复选框 | 否 | 读 | |
 | 账号 | 单选 | 否 | 读 | 空 → round-robin 分配;非空可填 **display_name(中文名)或 account_id**(validator 双向反查)。账号 ID 工具侧 `secrets.token_hex(4)` 自动生成,运营无需关心;平台新增账号时会自动把 display_name 追加到本字段的飞书单选项 |
@@ -369,12 +379,12 @@ wxsp run --daemon
 
 `sync_now()` 做的事:
 1. `lark-oapi` 拉飞书"状态=待入库"的所有行(分页)
-2. 每行 → `validator.validate()`(含 `nas.find_video/find_cover()` 按文件名递归搜)
+2. 每行 → `validator.validate()`(含 `nas.find_video/find_cover()`:裸文件名走 rglob,完整路径走 alias 翻译 + exists)
 3. 4 核心字段(执行日期 / 定时发布时间 / 标题 / 视频文件)任一为空 → **跳过且不回写**(`SyncResult.skipped_incomplete`)。视为"业务还没填完的草稿",留到下次拉
 4. 通过 → 写本地 `Video` + 创建 `Task(status=pending, execute_date, publish_at)`
 5. 不通过(非草稿、确实校验失败) → 飞书回写"失败 + 错因"(具体到哪个字段)
 
-注意:**视频文件不在飞书附件里**,飞书只存文件名;实际文件由 `nas.find_video()` 在**目标账号的** `video_search_root` 下递归 `rglob` 搜索得到绝对路径。
+注意:**视频文件不在飞书附件里**,飞书只存"文件名或完整路径";实际文件由 `nas.find_video()` 解析:裸文件名 → 在**目标账号的** `video_search_root` 下递归 `rglob`;完整路径 → 过 `paths.path_aliases` 翻译 + `Path.exists()`(不读 search_root)。
 
 ---
 
@@ -629,7 +639,7 @@ window.navigator.permissions.query = (parameters) => (
 | 类型 | 含义 | 重试策略 |
 |------|------|----------|
 | `network` | 网络/超时 | 指数退避,最多 3 次 |
-| `cookie_expired` | 登录失效 | 不重试,告警,等 `wxsp login`(**账号级 halt**) |
+| `cookie_expired` | 登录失效 | 不重试,告警,**软失败:task 回退 pending + 不回写飞书"失败"** —— 运营扫码登录后下轮 queue_today 自动重跑(该账号其余 5 个 task 也不会被错误标 failed)。`cookie_status` 仍写 `expired`,scheduler pre-flight 下一轮跳过(**账号级 halt**) |
 | `risk_control` | 平台风控 | 不重试,账号暂停 24 小时(**账号级 halt**) |
 | `video_invalid` | 文件损坏/格式不支持 | 不重试 |
 | `element_not_found` | 元素找不到(可能改版) | 1 次重试,截图,告警(**全局 halt**) |
@@ -637,6 +647,8 @@ window.navigator.permissions.query = (parameters) => (
 | `nas_unreachable` | NAS 不可达 | 5 次指数退避(NAS 可能短暂掉线)(**全局 halt**) |
 | `feishu_api_error` | 飞书 API 错误 | 3 次重试 |
 | `unknown` | 兜底 | 1 次重试,然后 failed |
+
+> 飞书回写本身(`feishu.writeback_row`)有独立退避序列 `(1s/3s/10s,共 4 次)` —— 历史 `(1s/2s/3 次)` 在飞书抖动时被实测打穿,最后一条 task 跑完 status="已计划" 不更新。退避总时长 ~14s 远小于一次 publish 的 1-5min,不会拖慢主流程。
 
 ### Halt 机制(防告警刷屏)
 

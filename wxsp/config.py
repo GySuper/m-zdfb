@@ -72,9 +72,16 @@ class AppConfig(BaseModel):
 
 
 class PathsConfig(BaseModel):
-    """全局只配 NAS 挂载根目录;每个账号自己配 video/cover 检索路径(在 AccountConfig)。"""
+    """全局只配 NAS 挂载根目录;每个账号自己配 video/cover 检索路径(在 AccountConfig)。
+
+    `path_aliases`:Windows UNC ↔ POSIX mount 前缀互译表(可选)。运营常从 Windows
+    复制完整 UNC 路径粘进飞书 `\\\\172.31.15.11\\dianshang\\...`,daemon 跑在 macOS
+    时需翻译成 `/Volumes/dianshang/...` 才能读到文件。在 macOS/Linux 上把 key 前缀替换为
+    value,在 Windows 上做反向替换。默认 `{}` 等于禁用,仅"按文件名搜索"模式可用。
+    """
 
     nas_root: Path
+    path_aliases: dict[str, str] = Field(default_factory=dict)
 
 
 class AccountConfig(BaseModel):

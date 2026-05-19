@@ -9,6 +9,17 @@ app:
 # Windows 示例: nas_root: "Z:/wxsp" 或 "\\\\server\\share\\wxsp"
 paths:
   nas_root: /Volumes/NAS/wxsp
+  # 飞书"视频文件/封面文件"字段支持两种填法:
+  #   1) 裸文件名 → 在账号 video_search_root / cover_search_root 下递归搜
+  #   2) 完整 NAS 路径(UNC / POSIX) → 直接 Path.exists() 校验
+  # 跨平台时,运营在 Windows 复制的 UNC 路径在 macOS 下需翻译成本地 mount 路径。
+  # path_aliases 登记前缀对应关系;daemon 在 macOS 上把 key→value,在 Windows 上把 value→key。
+  # 没有跨 OS 部署需求可留空 {} 或不填(等同禁用)。
+  path_aliases: {}
+  # 示例:
+  # path_aliases:
+  #   "\\\\172.31.15.11\\dianshang": "/Volumes/dianshang"
+  #   "\\\\nas.local\\wxsp":         "/Volumes/wxsp"
 
 # ============== 账号 ==============
 # 每账号都要配 video_search_root / cover_search_root,可用 {nas_root} 占位

@@ -34,13 +34,26 @@ class SyncResult:
 
 
 class _NasFinderImpl:
-    """生产用的 NAS 检索:search_root 由 validator 按账号传入。"""
+    """生产用的 NAS 检索:search_root 由 validator 按账号传入,
+    path_aliases 透传给底层用于 UNC ↔ POSIX 前缀互译(路径模式)。"""
 
-    def find_video(self, filename: str, *, search_root: Path) -> Path:
-        return find_video(filename, search_root=search_root)
+    def find_video(
+        self,
+        filename: str,
+        *,
+        search_root: Path,
+        path_aliases: dict[str, str] | None = None,
+    ) -> Path:
+        return find_video(filename, search_root=search_root, path_aliases=path_aliases)
 
-    def find_cover(self, filename: str, *, search_root: Path) -> Path:
-        return find_cover(filename, search_root=search_root)
+    def find_cover(
+        self,
+        filename: str,
+        *,
+        search_root: Path,
+        path_aliases: dict[str, str] | None = None,
+    ) -> Path:
+        return find_cover(filename, search_root=search_root, path_aliases=path_aliases)
 
 
 def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:

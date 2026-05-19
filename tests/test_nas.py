@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from wxsp.nas import find_cover, find_video
+from wxsp.nas import (
+    _apply_path_aliases,
+    _is_absolute_path_input,
+    find_cover,
+    find_video,
+)
 
 
 def test_find_video_single_match(tmp_path: Path) -> None:
@@ -58,6 +63,109 @@ def test_find_video_empty_root_raises(tmp_path: Path) -> None:
     root = tmp_path / "nonexistent"
     with pytest.raises(FileNotFoundError):
         find_video("any.mp4", search_root=root)
+
+
+# ============== 路径模式 + path_aliases ==============
+
+
+def test_is_absolute_path_input_recognizes_common_forms() -> None:
+    """覆盖三类绝对路径 + 裸文件名应判 False。"""
+    assert _is_absolute_path_input("\\\\172.31.15.11\\share\\x.mp4") is True
+    assert _is_absolute_path_input("//host/share/x.mp4") is True
+    assert _is_absolute_path_input("/Volumes/nas/x.mp4") is True
+    assert _is_absolute_path_input("C:\\videos\\x.mp4") is True
+    assert _is_absolute_path_input("Z:/videos/x.mp4") is True
+    assert _is_absolute_path_input("x.mp4") is False
+    assert _is_absolute_path_input("子目录/x.mp4") is False
+    assert _is_absolute_path_input("") is False
+
+
+def test_apply_path_aliases_empty_dict_returns_unchanged() -> None:
+    """aliases={} 等于禁用,不做任何替换。"""
+    assert _apply_path_aliases("\\\\host\\share\\x.mp4", {}) == "\\\\host\\share\\x.mp4"
+    assert _apply_path_aliases("/Volumes/nas/x.mp4", {}) == "/Volumes/nas/x.mp4"
+
+
+def test_apply_path_aliases_no_prefix_match_returns_unchanged() -> None:
+    """配了 alias 但前缀不匹配 → 原样返回(daemon 在同 OS 上跑就是这种情况)。"""
+    aliases = {"\\\\host1\\share": "/Volumes/share"}
+    assert _apply_path_aliases("/some/other/path.mp4", aliases) == "/some/other/path.mp4"
+
+
+def test_apply_path_aliases_unc_to_posix_on_non_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """macOS/Linux 下:UNC 前缀 → POSIX 前缀,残留反斜杠转正斜杠。"""
+    monkeypatch.setattr("wxsp.nas.sys.platform", "darwin")
+    aliases = {"\\\\172.31.15.11\\dianshang": "/Volumes/dianshang"}
+    result = _apply_path_aliases("\\\\172.31.15.11\\dianshang\\sub\\zjn-0511.mp4", aliases)
+    assert result == "/Volumes/dianshang/sub/zjn-0511.mp4"
+
+
+def test_apply_path_aliases_posix_to_unc_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows 下:POSIX 前缀 → UNC 前缀,残留正斜杠转反斜杠。"""
+    monkeypatch.setattr("wxsp.nas.sys.platform", "win32")
+    aliases = {"\\\\172.31.15.11\\dianshang": "/Volumes/dianshang"}
+    result = _apply_path_aliases("/Volumes/dianshang/sub/zjn-0511.mp4", aliases)
+    assert result == "\\\\172.31.15.11\\dianshang\\sub\\zjn-0511.mp4"
+
+
+def test_find_video_with_absolute_posix_path_returns_when_exists(tmp_path: Path) -> None:
+    """飞书填完整 POSIX 路径,daemon 跑在 macOS 上 → 直接 Path.exists() 校验。"""
+    target = tmp_path / "videos" / "absolute.mp4"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"x")
+    # search_root 故意指向不存在的目录 —— 路径模式根本不会读它
+    result = find_video(str(target), search_root=tmp_path / "nonexistent")
+    assert result == target
+
+
+def test_find_video_with_absolute_path_missing_raises(tmp_path: Path) -> None:
+    """路径模式下,目标文件不存在 → FileNotFoundError(与按名搜的"未找到"语义对齐)。"""
+    with pytest.raises(FileNotFoundError):
+        find_video(str(tmp_path / "ghost.mp4"), search_root=tmp_path)
+
+
+def test_find_video_with_unc_path_translated_via_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """运营在飞书填 Windows UNC 路径,daemon 跑在 macOS 上 →
+    path_aliases 把 UNC 前缀翻成本地 mount,定位到真文件。
+    """
+    monkeypatch.setattr("wxsp.nas.sys.platform", "darwin")
+    real_dir = tmp_path / "mount" / "sub"
+    real_dir.mkdir(parents=True)
+    real_file = real_dir / "zjn-0511.mp4"
+    real_file.write_bytes(b"x")
+
+    aliases = {"\\\\172.31.15.11\\dianshang": str(tmp_path / "mount")}
+    input_path = "\\\\172.31.15.11\\dianshang\\sub\\zjn-0511.mp4"
+
+    result = find_video(input_path, search_root=tmp_path / "ignored", path_aliases=aliases)
+    assert result == real_file
+
+
+def test_find_video_filename_mode_unaffected_when_aliases_set(tmp_path: Path) -> None:
+    """裸文件名走老逻辑,即便配了 path_aliases 也不应受影响。"""
+    root = tmp_path / "videos"
+    root.mkdir()
+    target = root / "国庆01.mp4"
+    target.write_bytes(b"x")
+    aliases = {"\\\\host\\share": "/Volumes/share"}
+
+    result = find_video("国庆01.mp4", search_root=root, path_aliases=aliases)
+    assert result == target
+
+
+def test_find_cover_with_absolute_path_works_same_as_video(tmp_path: Path) -> None:
+    """find_cover 路径模式语义同 find_video。"""
+    target = tmp_path / "covers" / "absolute_cover.jpg"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"x")
+    result = find_cover(str(target), search_root=tmp_path / "nonexistent")
+    assert result == target
 
 
 # ============== stage_to_tmp happy path + 覆盖式 ==============

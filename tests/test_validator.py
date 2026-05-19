@@ -54,10 +54,22 @@ def test_nas_finder_is_protocol() -> None:
     """NasFinder 是 Protocol,任何提供 find_video/find_cover 的对象都满足。"""
 
     class _Stub:
-        def find_video(self, name: str, *, search_root: Path) -> Path:
+        def find_video(
+            self,
+            name: str,
+            *,
+            search_root: Path,
+            path_aliases: dict[str, str] | None = None,
+        ) -> Path:
             return Path("/dev/null")
 
-        def find_cover(self, name: str, *, search_root: Path) -> Path:
+        def find_cover(
+            self,
+            name: str,
+            *,
+            search_root: Path,
+            path_aliases: dict[str, str] | None = None,
+        ) -> Path:
             return Path("/dev/null")
 
     finder: NasFinder = _Stub()
@@ -106,19 +118,36 @@ def _make_settings(tmp_path: Path) -> Settings:
 class _StubNas:
     """默认 stub:find_video / find_cover 都抛 FileNotFoundError;按需填 *_returns。
 
-    search_root 在 stub 里被忽略(测试不关心是哪个 root,只关心 filename→path 的映射)。
+    search_root / path_aliases 在 stub 里被忽略(测试不关心实现细节,只关心
+    filename → path 的映射)。stub 同时记录最近一次 path_aliases 入参,供需要
+    验证 wiring 的测试断言。
     """
 
     def __init__(self) -> None:
         self.video_returns: dict[str, Path] = {}
         self.cover_returns: dict[str, Path] = {}
+        self.last_path_aliases: dict[str, str] | None = None
 
-    def find_video(self, filename: str, *, search_root: Path) -> Path:
+    def find_video(
+        self,
+        filename: str,
+        *,
+        search_root: Path,
+        path_aliases: dict[str, str] | None = None,
+    ) -> Path:
+        self.last_path_aliases = path_aliases
         if filename in self.video_returns:
             return self.video_returns[filename]
         raise FileNotFoundError(filename)
 
-    def find_cover(self, filename: str, *, search_root: Path) -> Path:
+    def find_cover(
+        self,
+        filename: str,
+        *,
+        search_root: Path,
+        path_aliases: dict[str, str] | None = None,
+    ) -> Path:
+        self.last_path_aliases = path_aliases
         if filename in self.cover_returns:
             return self.cover_returns[filename]
         raise FileNotFoundError(filename)
@@ -572,6 +601,83 @@ def test_validate_happy_path(tmp_path: Path) -> None:
     assert result.cover_path is None
     assert result.execute_date == date(2026, 5, 13)
     assert result.publish_at == datetime(2026, 5, 13, 14, 0)  # naive 上海时间
+
+
+def test_validate_video_file_absolute_path_passes_aliases_to_finder(tmp_path: Path) -> None:
+    """飞书填完整 UNC 路径 + config 配 path_aliases → validator 把 aliases 透传给 NasFinder。
+
+    验证 wiring(不依赖 nas.py 真实行为):stub 检查 last_path_aliases 是否等于配置值。
+    """
+    settings = _make_settings(tmp_path)
+    settings.paths.path_aliases = {"\\\\172.31.15.11\\dianshang": "/Volumes/dianshang"}
+
+    unc_path = "\\\\172.31.15.11\\dianshang\\sub\\zjn-0511.mp4"
+    fake_resolved = tmp_path / "fake.mp4"
+    fake_resolved.write_bytes(b"x")
+    row = _row_with(tmp_path, 标题="字" * 16, **{"视频文件": unc_path})
+    nas = _StubNas()
+    nas.video_returns[unc_path] = fake_resolved  # 完整路径已带 .mp4,validator 不会补
+
+    result = validate(
+        row,
+        config=settings,
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+    )
+    assert all(e.field != "视频文件" for e in result.errors), result.errors
+    assert result.video_path == fake_resolved
+    assert nas.last_path_aliases == settings.paths.path_aliases
+
+
+def test_validate_video_file_end_to_end_with_real_nas_finder(tmp_path: Path) -> None:
+    """端到端:用 wxsp.nas 的真实函数 + path_aliases → validator 应能定位到本地文件。"""
+    from wxsp.nas import find_cover as real_find_cover
+    from wxsp.nas import find_video as real_find_video
+
+    real_dir = tmp_path / "mount_target" / "sub"
+    real_dir.mkdir(parents=True)
+    real_file = real_dir / "zjn-0511.mp4"
+    real_file.write_bytes(b"x")
+
+    settings = _make_settings(tmp_path)
+    settings.paths.path_aliases = {
+        "\\\\172.31.15.11\\dianshang": str(tmp_path / "mount_target"),
+    }
+
+    class _RealFinder:
+        def find_video(
+            self,
+            filename: str,
+            *,
+            search_root: Path,
+            path_aliases: dict[str, str] | None = None,
+        ) -> Path:
+            return real_find_video(filename, search_root=search_root, path_aliases=path_aliases)
+
+        def find_cover(
+            self,
+            filename: str,
+            *,
+            search_root: Path,
+            path_aliases: dict[str, str] | None = None,
+        ) -> Path:
+            return real_find_cover(filename, search_root=search_root, path_aliases=path_aliases)
+
+    row = _row_with(
+        tmp_path,
+        标题="字" * 16,
+        **{"视频文件": "\\\\172.31.15.11\\dianshang\\sub\\zjn-0511.mp4"},
+    )
+    result = validate(
+        row,
+        config=settings,
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=_RealFinder(),
+        active_accounts={"account_a": "测试号"},
+    )
+    assert all(e.field != "视频文件" for e in result.errors), result.errors
+    assert result.video_path == real_file
 
 
 def test_validate_video_file_auto_appends_mp4(tmp_path: Path) -> None:

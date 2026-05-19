@@ -58,10 +58,23 @@ class NasFinder(Protocol):
     """validator 依赖的 NAS 检索接口。生产实现走 wxsp.nas;测试可直接造 stub。
 
     search_root 由 validator 根据 row 上的账号 ID 决定后传入(每账号路径可不同)。
+    `path_aliases` 走"完整路径"分支(UNC ↔ POSIX 前缀互译);裸文件名时被 ignored。
     """
 
-    def find_video(self, filename: str, *, search_root: Path) -> Path: ...
-    def find_cover(self, filename: str, *, search_root: Path) -> Path: ...
+    def find_video(
+        self,
+        filename: str,
+        *,
+        search_root: Path,
+        path_aliases: dict[str, str] | None = ...,
+    ) -> Path: ...
+    def find_cover(
+        self,
+        filename: str,
+        *,
+        search_root: Path,
+        path_aliases: dict[str, str] | None = ...,
+    ) -> Path: ...
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +126,11 @@ def validate(
     original_claim = bool(row.fields.get(fm.original_claim) or False)
     account_id = _check_account(row.fields, fm.account, active_accounts, errors)
     account_cfg = config.accounts.get(account_id) if account_id else None
-    video_path = _check_video(row.fields, fm.video_file, nas_finder, account_cfg, errors)
-    cover_path = _check_cover(row.fields, fm.cover, nas_finder, account_cfg, errors)
+    path_aliases = config.paths.path_aliases
+    video_path = _check_video(
+        row.fields, fm.video_file, nas_finder, account_cfg, errors, path_aliases
+    )
+    cover_path = _check_cover(row.fields, fm.cover, nas_finder, account_cfg, errors, path_aliases)
     execute_date = _check_execute_date(row.fields, fm.execute_date, errors)
     publish_at = _check_publish_at(row.fields, fm.publish_at, now, execute_date, errors)
 
@@ -244,6 +260,7 @@ def _check_video(
     nas_finder: NasFinder,
     account_cfg: Any,
     errors: list[FieldError],
+    path_aliases: dict[str, str],
 ) -> Path | None:
     raw = _get_str(fields.get(field_name))
     if not raw:
@@ -254,9 +271,14 @@ def _check_video(
         return None
     # 运营常只填裸文件名(已知都是 mp4)→ 没扩展名时自动补 .mp4。
     # 注意:不能用 "." in raw 判定(文件名里的编号如 "4." 会误判),要看真后缀。
+    # Path.suffix 对 UNC / POSIX 绝对路径同样能取到最后一个 `.` 后的扩展,两模式共用。
     lookup_name = raw if Path(raw).suffix.lower() in _VIDEO_EXTENSIONS else raw + ".mp4"
     try:
-        path = nas_finder.find_video(lookup_name, search_root=account_cfg.video_search_root)
+        path = nas_finder.find_video(
+            lookup_name,
+            search_root=account_cfg.video_search_root,
+            path_aliases=path_aliases,
+        )
     except FileNotFoundError:
         errors.append(FieldError(field=field_name, message=f"未在 NAS 下找到 {raw!r}"))
         return None
@@ -282,6 +304,7 @@ def _check_cover(
     nas_finder: NasFinder,
     account_cfg: Any,
     errors: list[FieldError],
+    path_aliases: dict[str, str],
 ) -> Path | None:
     raw = _get_str(fields.get(field_name))
     if not raw:
@@ -290,7 +313,11 @@ def _check_cover(
         errors.append(FieldError(field=field_name, message="账号未识别,无法选择封面检索路径"))
         return None
     try:
-        return nas_finder.find_cover(raw, search_root=account_cfg.cover_search_root)
+        return nas_finder.find_cover(
+            raw,
+            search_root=account_cfg.cover_search_root,
+            path_aliases=path_aliases,
+        )
     except FileNotFoundError:
         errors.append(FieldError(field=field_name, message=f"未在 NAS 下找到 {raw!r}"))
         return None

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -208,10 +209,14 @@ def check_feishu(config: Settings, *, prober: FeishuProber | None = None) -> Fei
 
 
 def check_nas(config: Settings) -> list[NasCheckRow]:
-    """按账号检查 video_search_root + cover_search_root。
+    """按账号检查 video_search_root + cover_search_root,顺带核对 path_aliases 目标盘。
 
-    无 IO 副作用,只读 stat。每个账号 2 行(video + cover),按账号 ID 排序。
-    任何路径都不抛异常,失败信息塞 NasCheckRow.detail。
+    无 IO 副作用,只读 stat。每个账号 2 行(video + cover) + 每条 alias 1 行,按账号 ID
+    排序。任何路径都不抛异常,失败信息塞 NasCheckRow.detail。
+
+    path_aliases 检查:当前 OS 上"实际会用到"的那侧 —— macOS/Linux 检查 value(POSIX
+    mount),Windows 检查 key(UNC)。运营如果配了 alias 但目标盘没挂上,daemon 跑路径
+    模式时会找不到文件,提前在 doctor 里发现比线上 task 失败再排查省事。
     """
     rows: list[NasCheckRow] = []
     for aid in sorted(config.accounts.keys()):
@@ -229,4 +234,18 @@ def check_nas(config: Settings) -> list[NasCheckRow]:
                 )
             else:
                 rows.append(NasCheckRow(path=path, label=label, ok=False, detail=f"不存在: {path}"))
+
+    is_windows = sys.platform == "win32"
+    for win_prefix, posix_prefix in sorted(config.paths.path_aliases.items()):
+        target_str = win_prefix if is_windows else posix_prefix
+        target = Path(target_str)
+        label = f"path_aliases[{win_prefix!r}]"
+        if target.is_dir():
+            rows.append(NasCheckRow(path=target, label=label, ok=True, detail=f"OK ({target})"))
+        elif target.exists():
+            rows.append(
+                NasCheckRow(path=target, label=label, ok=False, detail=f"不是目录: {target}")
+            )
+        else:
+            rows.append(NasCheckRow(path=target, label=label, ok=False, detail=f"不存在: {target}"))
     return rows

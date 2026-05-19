@@ -11,9 +11,12 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -102,19 +105,67 @@ def test_pause_unknown_account_404(client: TestClient) -> None:
     assert r.status_code == 404
 
 
-def test_login_triggers_background_spawn(
+def test_login_triggers_background_thread(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls: list[tuple[str, tuple, dict]] = []
+    """login POST 启动后台 thread 跑 _run_login(check_cookie 在里头开浏览器)。
+    测试里把 _run_login 替成 noop,只验证 thread 被起 + redirect 到位 + 收尾清理。
+    """
+    calls: list[tuple[str, Path]] = []
 
-    def fake_spawn(name: str, fn, *a, **kw) -> None:  # type: ignore[no-untyped-def]
-        calls.append((name, a, kw))
+    def fake_run_login(account_id: str, user_data_dir: Path) -> None:
+        calls.append((account_id, user_data_dir))
 
-    monkeypatch.setattr(routes_accounts, "_spawn", fake_spawn)
+    monkeypatch.setattr(routes_accounts, "_run_login", fake_run_login)
     r = client.post("/accounts/account_a/login", follow_redirects=False)
     assert r.status_code == 303
-    assert calls and calls[0][0] == "login"
-    assert calls[0][1][0] == "account_a"  # account_id 传给 _run_login
+    # noop 跑得很快,几十毫秒内 thread 应该已经退出 + 自清
+    for _ in range(50):  # 最多等 1s
+        t = routes_accounts._login_in_flight.get("account_a")
+        if t is None or not t.is_alive():
+            break
+        time.sleep(0.02)
+    assert len(calls) == 1
+    assert calls[0][0] == "account_a"
+    assert isinstance(calls[0][1], Path)
+    # finally 块清掉 _login_in_flight
+    assert "account_a" not in routes_accounts._login_in_flight
+
+
+def test_login_dedups_when_already_in_flight(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """第一次 login 起线程,第二次同账号 login 应该 *不* 起新线程,直接 redirect 提示。
+
+    回归:运营点了两次扫码登录 → chromium 抢同一个 user_data_dir,后开的崩了 +
+    DB cookie_status 被覆盖成 unknown。
+    """
+    start_event = threading.Event()
+    release_event = threading.Event()
+
+    def slow_run_login(account_id: str, user_data_dir: Path) -> None:
+        start_event.set()
+        release_event.wait(timeout=5.0)  # 卡住线程,模拟"还在扫码中"
+
+    monkeypatch.setattr(routes_accounts, "_run_login", slow_run_login)
+    # 第一次 POST → 起线程,线程卡住
+    r1 = client.post("/accounts/account_a/login", follow_redirects=False)
+    assert r1.status_code == 303
+    assert "已弹出浏览器" in unquote(r1.headers["location"])
+    assert start_event.wait(timeout=2.0), "第一个 thread 没起来"
+
+    # 第二次 POST → 不起新线程,提示已在扫码
+    r2 = client.post("/accounts/account_a/login", follow_redirects=False)
+    assert r2.status_code == 303
+    assert "已在扫码中" in unquote(r2.headers["location"])
+
+    # 放第一个线程退出,清理 in_flight
+    release_event.set()
+    for _ in range(50):
+        if "account_a" not in routes_accounts._login_in_flight:
+            break
+        time.sleep(0.02)
+    assert "account_a" not in routes_accounts._login_in_flight
 
 
 def test_login_creates_db_row_if_missing(

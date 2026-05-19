@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from datetime import date as _date
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore[import-untyped]
 from apscheduler.schedulers.base import BaseScheduler  # type: ignore[import-untyped]
@@ -22,12 +23,38 @@ from wxsp.models import (
     TASK_STATUS_PENDING,
     TASK_STATUS_RUNNING,
     Account,
+    Event,
     Task,
     Video,
 )
-from wxsp.notify import NotifyEvent, notify
+from wxsp.notify import NotifyEvent, error_type_cn, notify
 from wxsp.publisher import AlreadyClaimed, publish
 from wxsp.sync import sync_now
+
+
+@dataclass
+class AccountRunStat:
+    """单个账号在本轮 run-today 中的统计。run_summary 通知按账号 breakdown 用。
+
+    skipped:本轮被跳过(账号开局就 paused_until 或本轮被 halt_reason 中断)。
+    halt_reason:本轮某条 task 触发了不可恢复账号级错误(登录态失效/风控),
+      后续 task 不再尝试 —— 这个字段记中文原因,run_summary 文案里直接展示。
+    """
+
+    succeeded: int = 0
+    failed: int = 0
+    skipped: int = 0
+    halt_reason: str | None = None
+
+
+# 触发"本轮停掉该账号剩余 task"的错误类型。第一条命中后,后续直接 skip,不再
+# 反复跑浏览器 + 不再重复推同一条告警。
+_ACCOUNT_HALT_ERRORS: frozenset[str] = frozenset({"cookie_expired", "risk_control"})
+
+# 触发"整轮停掉所有账号剩余 task"的错误类型。这些是全局问题(视频号改版 /
+# NAS 掉线),其他账号跑也会挂同样的错;abort 整个 run 是为了 ① 不浪费时间
+# ② 不让 publisher 把同一条告警推 N 次。
+_GLOBAL_HALT_ERRORS: frozenset[str] = frozenset({"element_not_found", "nas_unreachable"})
 
 
 @dataclass
@@ -36,6 +63,11 @@ class RunSummary:
     succeeded: int = 0
     failed: int = 0
     skipped_paused: int = 0
+    # 按账号统计:key 是 account_id;display_name 在生成通知文案时从 settings 查
+    per_account: dict[str, AccountRunStat] = field(default_factory=dict)
+    # 整轮被全局错误中断(如视频号改版 / NAS 掉线);set 后剩余 task 全跳过,
+    # run_summary 文案头部高亮提示。
+    global_halt_reason: str | None = None
 
 
 def queue_today(session: Session, *, today: _date | None = None) -> list[int]:
@@ -68,31 +100,61 @@ def count_backlog(session: Session, *, today: _date | None = None) -> int:
     return len(list(session.exec(stmt).all()))
 
 
+_BACKLOG_COOLDOWN = timedelta(hours=24)
+
+# "查冷却 + 写 Event" 不是 SQL 原子操作;同进程多线程(09:00 cron 与 Web UI
+# "立即跑今天" 撞车)会在并发缝隙里都没查到 recent → 双推。用进程级 Lock 串行化。
+# 跨进程并发(多 daemon)不在本工具部署范围内(CLAUDE.md 单 worker 串行)。
+_BACKLOG_NOTIFY_LOCK = threading.Lock()
+
+
 def maybe_warn_backlog(settings: Settings, *, session: Session) -> int:
     """积压超阈值 → 推一条 backlog_high 通知(企微 + Event 表)。返回当前积压数。
 
     阈值 = `monitoring.backlog_warn_threshold`(默认 20)。
-    去重交给 notify() 自己 —— 这里每次调用都会落一条 Event,但只有 backlog_high
-    在 `monitoring.notify_on` 里时才推外部渠道。重复推送由调用频率决定(目前每天 09:00
-    cron + daemon 启动各一次),不在本函数里防抖。
+
+    24h 冷却:查 Event 表最近 24h 有没有 backlog_high,有就跳(同时不写 Event)。
+    daemon 反复重启 / 09:00 cron 多次触发都不会刷屏。运营修完积压自然进入下一轮。
+
+    "查 + 写" 用进程级 Lock + Lock 内 commit 实现原子化:Lock 保证同进程串行,
+    Lock 内 commit 保证第二个进入者能看到第一个写的 Event 行(SQLite 跨连接看不到
+    未 commit 的写)。生产唯一调用方是 daemon 启动 1 次 + run_today_pending 中调
+    用,本来就在 session_scope 里、调用前没未提交写,提早 commit 无副作用。
     """
     backlog = count_backlog(session)
-    if backlog > settings.monitoring.backlog_warn_threshold:
+    if backlog <= settings.monitoring.backlog_warn_threshold:
+        return backlog
+
+    with _BACKLOG_NOTIFY_LOCK:
+        # 冷却检查:最近一条 backlog_high Event 不到 24h 就不推
+        cutoff = datetime.now() - _BACKLOG_COOLDOWN
+        recent = session.exec(
+            select(Event).where(Event.type == "backlog_high").where(Event.ts > cutoff).limit(1)
+        ).first()
+        if recent is not None:
+            logger.info(
+                f"[scheduler] backlog_high 在冷却期内(最近一条 {recent.ts.isoformat()}),跳过推送"
+            )
+            return backlog
+
         notify(
             NotifyEvent(
                 type="backlog_high",
                 level="warn",
                 title=f"历史积压 {backlog} 条",
                 content=(
-                    f"今天之前还有 {backlog} 条任务没跑完(pending/interrupted),"
+                    f"今天之前还有 {backlog} 条任务没跑完(待发布或已中断),"
                     f"超过阈值 {settings.monitoring.backlog_warn_threshold}。"
-                    f"建议在 Web UI 的'历史积压'视图里逐条处理。"
+                    "建议到管理后台的「历史积压」视图里逐条处理。"
                 ),
-                context={"backlog": backlog},
+                context={"积压条数": backlog},
             ),
             session=session,
             settings=settings,
         )
+        # Lock 内 commit:让第二个线程进入 Lock 时能查到这条 Event(否则
+        # 跨 session 的 SELECT 看不到未 commit 的 INSERT,Lock 形同虚设)
+        session.commit()
     return backlog
 
 
@@ -118,14 +180,16 @@ def mark_stale_running_as_interrupted(session: Session, *, now: datetime | None 
 def _emit_run_summary(
     settings: Settings, *, summary: RunSummary, failed_task_ids: list[int]
 ) -> None:
-    """跑完后推一条 run_summary:成功/失败计数 + 按 error_type 聚合的失败明细。
+    """跑完后推一条 run_summary:今日累计 + 按账号 breakdown(成功/失败/暂停 + 失败明细)。
 
-    `attempted == 0` 时直接返回(不刷"今天没任务"的噪音)。
+    `attempted == 0 and skipped_paused == 0` 时直接返回(没动静不刷屏)。
     """
-    if summary.attempted == 0:
+    if summary.attempted == 0 and summary.skipped_paused == 0:
         return
+
     engine = get_engine()
-    grouped: dict[str, list[str]] = {}
+    # 收集每个失败 task 的可读信息,按 account_id 分组挂到 breakdown 行下面
+    failures_by_account: dict[str, list[str]] = {}
     if failed_task_ids:
         with Session(engine) as session:
             for tid in failed_task_ids:
@@ -134,34 +198,60 @@ def _emit_run_summary(
                     continue
                 video = session.get(Video, task.video_id)
                 title = (video.title if video is not None else "?")[:20]
-                etype = task.last_error_type or "unknown"
-                grouped.setdefault(etype, []).append(f"task#{tid} {title}")
+                etype_cn = error_type_cn(task.last_error_type)
+                # last_error_msg 可能为空字符串或 None;splitlines("") = [] 别炸
+                msg_lines = (task.last_error_msg or "").splitlines()
+                msg = msg_lines[0][:60] if msg_lines else ""
+                line = f"{etype_cn}:{title}(任务编号 {tid})"
+                if msg:
+                    line += f" —— {msg}"
+                failures_by_account.setdefault(task.account_id, []).append(line)
 
-    lines: list[str] = [
-        f"今日任务跑完:成功 {summary.succeeded} / 失败 {summary.failed} / "
-        f"跳过(账号暂停) {summary.skipped_paused},共尝试 {summary.attempted}"
-    ]
-    if grouped:
+    lines: list[str] = []
+    if summary.global_halt_reason is not None:
+        lines.append(
+            f"⚠ **整轮中止** —— 原因:{summary.global_halt_reason}。"
+            f"后续 {summary.skipped_paused} 条未尝试,请先排查后重试。"
+        )
         lines.append("")
-        lines.append("**失败明细**:")
-        for etype, items in grouped.items():
-            lines.append(f"- `{etype}` 共 {len(items)} 条")
-            for it in items:
-                lines.append(f"    - {it}")
+    lines.append(
+        f"今日累计:成功 {summary.succeeded} 条 / 失败 {summary.failed} 条 / "
+        f"暂停跳过 {summary.skipped_paused} 条(共尝试 {summary.attempted} 条)"
+    )
+    if summary.per_account:
+        lines.append("")
+        lines.append("**按账号**:")
+        for aid, stat in summary.per_account.items():
+            display = settings.accounts[aid].display_name if aid in settings.accounts else aid
+            bits: list[str] = []
+            if stat.succeeded:
+                bits.append(f"成功 {stat.succeeded}")
+            if stat.failed:
+                bits.append(f"失败 {stat.failed}")
+            if stat.skipped:
+                if stat.halt_reason:
+                    bits.append(f"后续 {stat.skipped} 条跳过(原因:{stat.halt_reason})")
+                else:
+                    bits.append(f"暂停跳过 {stat.skipped}")
+            summary_bits = " / ".join(bits) if bits else "无"
+            lines.append(f"- **{display}**:{summary_bits}")
+            for failure_line in failures_by_account.get(aid, []):
+                lines.append(f"    - {failure_line}")
 
     level = "warn" if summary.failed > 0 else "info"
+    title = f"今日发布汇总:成功 {summary.succeeded} 条 / 失败 {summary.failed} 条"
     with session_scope(engine) as session:
         notify(
             NotifyEvent(
                 type="run_summary",
                 level=level,
-                title=f"今日发布汇总:✓{summary.succeeded} ✗{summary.failed}",
+                title=title,
                 content="\n".join(lines),
                 context={
-                    "attempted": summary.attempted,
-                    "succeeded": summary.succeeded,
-                    "failed": summary.failed,
-                    "skipped_paused": summary.skipped_paused,
+                    "尝试": summary.attempted,
+                    "成功": summary.succeeded,
+                    "失败": summary.failed,
+                    "暂停跳过": summary.skipped_paused,
                 },
             ),
             session=session,
@@ -169,16 +259,21 @@ def _emit_run_summary(
         )
 
 
-def run_today_pending(settings: Settings) -> RunSummary:
-    """worker 入口:① sync_now() ② queue_today() ③ 串行跑(跳过 paused 账号)。
+def run_today_pending(settings: Settings, *, do_sync: bool = True) -> RunSummary:
+    """worker 入口:① sync_now()(可选)② queue_today() ③ 串行跑(跳过 paused 账号)。
+
+    do_sync=False 时假设调用方(如 Web UI 路由)已经做过 sync_now 校验过结果。
+    do_sync=True 时(09:00 cron 默认路径)sync_now 失败只 warn 不打断,
+    保证已入库的还能继续跑。
 
     任何一条 task 失败 / 抛 AlreadyClaimed 都不阻断后面的;细节走 publish 自己的回写。
     跑完后推一条 run_summary 汇总通知(attempted=0 时静默)。
     """
-    try:
-        sync_now(settings)
-    except Exception as exc:
-        logger.warning(f"[scheduler] sync_now 失败,继续跑已入库的: {exc}")
+    if do_sync:
+        try:
+            sync_now(settings)
+        except Exception as exc:
+            logger.warning(f"[scheduler] sync_now 失败,继续跑已入库的: {exc}")
 
     summary = RunSummary()
     failed_task_ids: list[int] = []
@@ -204,29 +299,65 @@ def run_today_pending(settings: Settings) -> RunSummary:
             if acc is not None and acc.paused_until is not None and acc.paused_until > now:
                 paused_accounts.add(acc_id)
 
+    # 本轮中触发账号级不可恢复错误(登录态失效 / 风控)的账号 → 后续 task 全跳过。
+    # 这么做有两个好处:① 不浪费时间反复开浏览器跑同一个会失败的账号;
+    # ② publisher 的 notify 只会推第一条,避免企微群里 20 条一样的"登录态失效"刷屏。
+    halted_accounts: dict[str, str] = {}
+
     for task_id, account_id in plan:
-        if account_id in paused_accounts:
+        # 即使账号被暂停 / 全局 halt 也建条 per_account 槽,文案里好展示"被跳过"
+        acc_stat = summary.per_account.setdefault(account_id, AccountRunStat())
+
+        # 整轮 abort:全局错误(改版/NAS)出现后,后面所有账号 task 全 skip
+        if summary.global_halt_reason is not None:
             summary.skipped_paused += 1
-            logger.info(f"[scheduler] 跳过 task={task_id}:账号 {account_id} 暂停中")
+            acc_stat.skipped += 1
+            if acc_stat.halt_reason is None:
+                acc_stat.halt_reason = summary.global_halt_reason
+            logger.info(f"[scheduler] 跳过 task={task_id}:整轮已中止({summary.global_halt_reason})")
+            continue
+
+        if account_id in paused_accounts or account_id in halted_accounts:
+            summary.skipped_paused += 1
+            acc_stat.skipped += 1
+            reason = halted_accounts.get(account_id) or "账号暂停中"
+            logger.info(f"[scheduler] 跳过 task={task_id}:账号 {account_id} {reason}")
             continue
         summary.attempted += 1
         try:
             result = publish(task_id, dry_run=False, settings=settings)
         except AlreadyClaimed as exc:
             summary.failed += 1
+            acc_stat.failed += 1
             failed_task_ids.append(task_id)
             logger.warning(f"[scheduler] task={task_id} 已被认领: {exc}")
             continue
         except Exception as exc:
             summary.failed += 1
+            acc_stat.failed += 1
             failed_task_ids.append(task_id)
             logger.exception(f"[scheduler] task={task_id} 跑挂了: {exc}")
             continue
         if result.ok:
             summary.succeeded += 1
+            acc_stat.succeeded += 1
         else:
             summary.failed += 1
+            acc_stat.failed += 1
             failed_task_ids.append(task_id)
+            reason_cn = error_type_cn(result.error_type)
+            # 全局错误(平台改版/NAS 掉线)→ 立刻中止整轮,通知就 publisher 第一条
+            if result.error_type in _GLOBAL_HALT_ERRORS:
+                summary.global_halt_reason = reason_cn
+                logger.warning(f"[scheduler] 整轮中止:遇到 {reason_cn},剩余 task 全跳过")
+            # 账号级错误 → 仅停该账号剩余 task
+            elif result.error_type in _ACCOUNT_HALT_ERRORS:
+                halted_accounts[account_id] = reason_cn
+                if acc_stat.halt_reason is None:
+                    acc_stat.halt_reason = reason_cn
+                logger.warning(
+                    f"[scheduler] 账号 {account_id} 触发 {reason_cn},本轮剩余 task 全跳过"
+                )
 
     try:
         _emit_run_summary(settings, summary=summary, failed_task_ids=failed_task_ids)

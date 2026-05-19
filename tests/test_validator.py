@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -176,6 +177,48 @@ def _stub_nas_with_video(tmp_path: Path) -> _StubNas:
 
 
 from wxsp.validator import validate  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# 完整性检查:4 核心字段任一空 → incomplete(跳过 + 不回写,不算失败)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    ["标题", "视频文件", "执行日期", "定时发布时间"],
+)
+def test_validate_incomplete_when_core_field_missing(tmp_path: Path, missing_field: str) -> None:
+    """4 个核心字段(标题/视频文件/执行日期/定时发布时间)任一空 → incomplete=True,errors=[]。
+    业务还没填完的草稿,sync 该跳过且不回写飞书,不能当成"失败"。"""
+    empty_value: Any = None if missing_field in ("执行日期", "定时发布时间") else ""
+    row = _row_with(tmp_path, **{missing_field: empty_value})
+    nas = _stub_nas_with_video(tmp_path)
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+    )
+    assert result.ok is False
+    assert result.incomplete is True
+    assert result.errors == []
+
+
+def test_validate_complete_row_runs_full_validation(tmp_path: Path) -> None:
+    """4 个核心字段都填了 → incomplete=False,继续走标题长度等完整校验。"""
+    row = _row_with(tmp_path, 标题="字" * 10)  # 10 字,标题校验会拦(要求 16-30)
+    nas = _stub_nas_with_video(tmp_path)
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+    )
+    assert result.ok is False
+    assert result.incomplete is False
+    assert any(e.field == "标题" for e in result.errors)
 
 
 def test_validate_title_too_short(tmp_path: Path) -> None:
@@ -392,23 +435,8 @@ def test_validate_cover_empty_is_ok(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_validate_execute_date_missing(tmp_path: Path) -> None:
-    fields = dict(_make_happy_row(tmp_path).fields)
-    fields["标题"] = "字" * 16
-    fields["执行日期"] = None
-    row = BitableRow(record_id="r", fields=fields)
-    nas = _StubNas()
-    nas.video_returns["国庆01.mp4"] = tmp_path / "国庆01.mp4"
-    (tmp_path / "国庆01.mp4").write_bytes(b"x")
-    result = validate(
-        row,
-        config=_make_settings(tmp_path),
-        now=datetime(2026, 5, 12, 9, 0),
-        nas_finder=nas,
-        active_accounts={"account_a": "测试号"},
-    )
-    assert result.ok is False
-    assert any(e.field == "执行日期" for e in result.errors)
+# 执行日期为空已不再作为字段级错误,改走 incomplete 分支(见上面的
+# test_validate_incomplete_when_core_field_missing parametrize)
 
 
 def test_validate_publish_at_too_close(tmp_path: Path) -> None:

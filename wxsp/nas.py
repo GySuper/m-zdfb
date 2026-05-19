@@ -44,7 +44,8 @@ def stage_to_tmp(src: Path, *, task_id: int, tmp_root: Path) -> Path:
     try:
         stage_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise NasUnreachable(f"stage_to_tmp 失败 src={src!s} task_id={task_id}: {exc}") from exc
+        logger.warning(f"[nas] 创建暂存目录失败 src={src!s} task_id={task_id}: {exc}")
+        raise NasUnreachable(f"暂存目录创建失败,可能本地磁盘满 / 没权限({stage_dir})") from exc
 
     out_path = stage_dir / src.name
     if out_path.is_symlink() or out_path.exists():
@@ -62,9 +63,9 @@ def stage_to_tmp(src: Path, *, task_id: int, tmp_root: Path) -> Path:
             shutil.copy2(src, out_path)
             return out_path
         except OSError as copy_exc:
+            logger.warning(f"[nas] copy2 也失败 src={src!s} task_id={task_id}: {copy_exc}")
             raise NasUnreachable(
-                f"stage_to_tmp 失败(symlink + copy 都失败) src={src!s} task_id={task_id}: "
-                f"{copy_exc}"
+                f"NAS 视频文件读取失败,NAS 可能掉线或文件已被删除({src.name})"
             ) from copy_exc
 
 

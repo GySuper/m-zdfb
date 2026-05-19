@@ -29,9 +29,18 @@ class FieldError:
 
 @dataclass(frozen=True)
 class ValidationResult:
-    """validate() 的返回值。ok=True 时业务字段填充,errors 为空;ok=False 时反之。"""
+    """validate() 的返回值。
+
+    三种结果:
+    - ok=True:校验通过,业务字段填充。
+    - ok=False, incomplete=True:4 个核心字段(执行日期/定时发布时间/标题/视频文件)
+      有一个为空 → 业务还没填完,sync 跳过该行,不回写飞书,不算失败。
+    - ok=False, incomplete=False:字段填了但校验失败(标题超长、视频文件不存在、
+      日期早于 now+30min 等)→ sync 算失败,回写飞书"失败 + 错因"。
+    """
 
     ok: bool
+    incomplete: bool = False
     video_path: Path | None = None
     cover_path: Path | None = None
     title: str | None = None
@@ -88,6 +97,13 @@ def validate(
     飞书"账号"字段允许写 account_id 或 display_name 任一形式,validator 反查。
     """
     fm = config.feishu.field_map
+
+    # ① 完整性前置检查:4 个核心字段任一为空 → incomplete=True 返回。
+    #    业务还没填完的草稿(运营在飞书慢慢补),sync 跳过且不回写"失败",等下次再拉。
+    #    其他字段(描述/标签/封面/合集/原创/账号)允许为空,走默认值或 round-robin。
+    if _is_incomplete(row.fields, fm):
+        return ValidationResult(ok=False, incomplete=True)
+
     errors: list[FieldError] = []
 
     title = _check_title(row.fields, fm.title, errors)
@@ -122,6 +138,24 @@ def validate(
 # ---------------------------------------------------------------------------
 # 私有 helpers
 # ---------------------------------------------------------------------------
+
+
+def _is_incomplete(fields: dict[str, Any], fm: Any) -> bool:
+    """业务尚未填完的判定:4 个核心字段任一缺 → True。
+
+    判空规则:
+      - 标题 / 视频文件:_get_str 返回 None(空字符串、rich-text 空数组都算空)
+      - 执行日期 / 定时发布时间:原始值是 None(飞书日期字段空 → key 缺失或 None)
+    """
+    if _get_str(fields.get(fm.title)) is None:
+        return True
+    if _get_str(fields.get(fm.video_file)) is None:
+        return True
+    if fields.get(fm.execute_date) is None:
+        return True
+    if fields.get(fm.publish_at) is None:
+        return True
+    return False
 
 
 def _check_title(fields: dict[str, Any], field_name: str, errors: list[FieldError]) -> str | None:

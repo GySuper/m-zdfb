@@ -14,6 +14,7 @@ venv/
 
 # wxsp local
 config.yaml
+config.yaml.*
 data/
 logs/
 

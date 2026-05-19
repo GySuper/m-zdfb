@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from sqlmodel import Session, select
 
 from tests.conftest import make_settings
 from wxsp.db import get_engine, init_db, session_scope
-from wxsp.models import Account, Task, Video
+from wxsp.models import Account, Event, Task, Video
 from wxsp.publisher import PublishResult
 from wxsp.scheduler import (
     RunSummary,
@@ -371,12 +372,19 @@ def test_run_today_pending_emits_run_summary_with_failure_breakdown(
     assert len(run_summary_events) == 1
     ev = run_summary_events[0]
     assert ev.level == "warn"
-    assert "risk_control" in ev.content
+    # 失败明细用中文 error_type(风控触发),不再是英文 risk_control
+    assert "风控触发" in ev.content
+    assert "risk_control" not in ev.content
+    # 按账号 breakdown:本测试只有一个账号 a
+    assert "**按账号**" in ev.content
+    assert "成功 1" in ev.content
+    assert "失败 1" in ev.content
+    # context 也中文化
     assert ev.context == {
-        "attempted": 2,
-        "succeeded": 1,
-        "failed": 1,
-        "skipped_paused": 0,
+        "尝试": 2,
+        "成功": 1,
+        "失败": 1,
+        "暂停跳过": 0,
     }
 
 
@@ -402,6 +410,75 @@ def test_run_today_pending_silent_run_summary_when_nothing_attempted(
 
     assert summary.attempted == 0
     assert captured == []
+
+
+def test_run_today_pending_halts_account_after_cookie_expired(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同一账号第一条 task 出 cookie_expired → 该账号本轮剩余 task 全跳过(去重 + 省时间)。"""
+    from wxsp import scheduler as sched_mod
+
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    today = date.today()
+    now = datetime.now()
+
+    with session_scope(engine) as session:
+        for vid in ("v1", "v2", "v3"):
+            _seed_account_video(session, video_id=vid)
+        for vid in ("v1", "v2", "v3"):
+            session.add(
+                Task(
+                    video_id=vid,
+                    account_id="a",
+                    execute_date=today,
+                    publish_at=now,
+                    status="pending",
+                )
+            )
+
+    settings = make_settings(tmp_path, tmp_path)
+    monkeypatch.setattr("wxsp.scheduler.sync_now", lambda settings: None)
+
+    publish_calls: list[int] = []
+
+    def fake_publish(task_id, *, dry_run, settings):
+        publish_calls.append(task_id)
+        # 第一次调用就 cookie_expired,后续应该根本不会被调到
+        return PublishResult(
+            task_id=task_id,
+            ok=False,
+            dry_run=False,
+            error_type="cookie_expired",
+            error_msg="扫码框出现",
+        )
+
+    monkeypatch.setattr("wxsp.scheduler.publish", fake_publish)
+    captured: list = []
+    monkeypatch.setattr(
+        sched_mod, "notify", lambda event, *, session, settings: captured.append(event)
+    )
+
+    summary = run_today_pending(settings)
+
+    # 只跑了第一条,后两条直接 skip,不再调 publish
+    assert len(publish_calls) == 1
+    assert summary.attempted == 1
+    assert summary.failed == 1
+    assert summary.skipped_paused == 2  # 后续两条算作"被跳过"
+
+    # per_account 应有 halt_reason
+    stat = summary.per_account["a"]
+    assert stat.failed == 1
+    assert stat.skipped == 2
+    assert stat.halt_reason == "登录态失效"
+
+    # run_summary 文案里要展示原因
+    run_summary_events = [e for e in captured if e.type == "run_summary"]
+    assert len(run_summary_events) == 1
+    assert "后续 2 条跳过(原因:登录态失效)" in run_summary_events[0].content
 
 
 def test_run_today_pending_continues_after_a_publish_failure(
@@ -566,7 +643,7 @@ def test_maybe_warn_backlog_pushes_notification_when_over_threshold(
     assert len(captured) == 1
     assert captured[0].type == "backlog_high"
     assert captured[0].level == "warn"
-    assert captured[0].context["backlog"] == 3
+    assert captured[0].context["积压条数"] == 3
 
 
 def test_maybe_warn_backlog_silent_when_at_or_under_threshold(
@@ -598,3 +675,54 @@ def test_maybe_warn_backlog_silent_when_at_or_under_threshold(
 
     assert backlog == 2
     assert captured == []
+
+
+def test_maybe_warn_backlog_serializes_concurrent_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同进程并发 (09:00 cron 与 Web UI 撞车) 时,Lock 应让"查冷却 + insert"原子化,
+    只产出一条 backlog_high(而非两条)。
+
+    没有 Lock 的旧实现:两个线程都查不到 recent → 都进入 notify → 两条 Event。
+    """
+    from wxsp import scheduler as sched_mod
+    from wxsp.notify import notify as real_notify
+
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    with session_scope(engine) as session:
+        for i in range(5):
+            _seed_task_with_status(session, video_id=f"v{i}", exec_date=yesterday, status="pending")
+
+    settings = make_settings(tmp_path, tmp_path)
+    settings.monitoring.backlog_warn_threshold = 2  # 5 > 2 → 触发
+    settings.monitoring.notify_on = ["backlog_high"]  # 进 notify_on 才会进外部 notifier
+
+    # 用真 notify(它会写 Event),但禁用外部 notifier(避免起企微 HTTP)
+    monkeypatch.setattr(sched_mod, "notify", real_notify)
+    monkeypatch.setattr("wxsp.notify.build_notifiers_from_settings", lambda s: [])
+
+    barrier = threading.Barrier(2)
+
+    def worker() -> None:
+        barrier.wait()
+        # 用 session_scope 跟生产一致,退出时 commit Event 落库
+        with session_scope(engine) as session:
+            maybe_warn_backlog(settings, session=session)
+
+    t1 = threading.Thread(target=worker)
+    t2 = threading.Thread(target=worker)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    # 应只产出 1 条 backlog_high Event(Lock 保证第二次进来时查到 recent → 跳过)
+    with Session(engine) as session:
+        rows = session.exec(select(Event).where(Event.type == "backlog_high")).all()
+    assert len(rows) == 1, f"并发 backlog_high 写了 {len(rows)} 条,Lock 没生效"

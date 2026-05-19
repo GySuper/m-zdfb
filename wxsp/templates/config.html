@@ -287,11 +287,21 @@
               </div>
               <div class="cfg-row">
                 <label>企微 Webhook</label>
-                <div class="cfg-control secret-input">
-                  <input type="password" name="mon_wecom_webhook" value="{{ vm.mon_wecom_webhook_display }}" placeholder="留空 = 保持原值;或填 ${ENV_VAR}">
-                  <button type="button" class="eye-toggle" onclick="toggleSecret(this)" tabindex="-1">👁</button>
+                <div class="cfg-control">
+                  <div class="secret-input">
+                    <input type="password" name="mon_wecom_webhook" value="{{ vm.mon_wecom_webhook_display }}" placeholder="留空 = 保持原值;或填 ${ENV_VAR}">
+                    <button type="button" class="eye-toggle" onclick="toggleSecret(this)" tabindex="-1">👁</button>
+                  </div>
+                  <button type="button" class="btn-sm"
+                          hx-post="/config/test-wecom"
+                          hx-include="[name='mon_wecom_webhook']"
+                          hx-target="#wecom-test-result"
+                          hx-swap="innerHTML"
+                          hx-indicator="#wecom-test-spinner">测试推送</button>
+                  <span class="op-spinner" id="wecom-test-spinner">推送中…</span>
                 </div>
-                <span class="cfg-hint">企微群机器人 webhook URL,建议 <code>${WECOM_BOT_WEBHOOK}</code> 引用 env</span>
+                <span class="cfg-hint">企微群机器人 webhook URL,建议 <code>${WECOM_BOT_WEBHOOK}</code> 引用 env;改密码框留空 → 用磁盘已存的测</span>
+                <div id="wecom-test-result" style="grid-column: 2; font-size: 12px; margin-top: 4px;"></div>
               </div>
               <div class="cfg-row cfg-row-block">
                 <label>发送告警的事件</label>

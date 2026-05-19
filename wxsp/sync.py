@@ -29,6 +29,7 @@ class SyncResult:
     accepted: int = 0
     rejected: int = 0
     skipped_existing: int = 0
+    skipped_incomplete: int = 0  # 业务还没填完(4 核心字段任一空)→ 跳过 + 不回写
     rejected_details: list[tuple[str, list[FieldError]]] = field(default_factory=list)
 
 
@@ -67,6 +68,7 @@ def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
     accepted: list[str] = []
     rejected: list[tuple[str, list[FieldError]]] = []
     skipped: list[str] = []
+    skipped_incomplete: list[str] = []  # 4 核心字段空 → 跳过且不回写,等下次拉
 
     engine = get_engine()
     init_db(engine)
@@ -93,6 +95,9 @@ def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
                 nas_finder=nas_finder,
                 active_accounts=active_accounts,
             )
+            if v_result.incomplete:
+                skipped_incomplete.append(row.record_id)
+                continue
             if not v_result.ok:
                 rejected.append((row.record_id, v_result.errors))
                 continue
@@ -130,6 +135,7 @@ def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
     result.accepted = len(accepted)
     result.rejected = len(rejected)
     result.skipped_existing = len(skipped)
+    result.skipped_incomplete = len(skipped_incomplete)
     result.rejected_details = rejected
 
     if not dry_run and settings.feishu.sync.write_back_enabled:

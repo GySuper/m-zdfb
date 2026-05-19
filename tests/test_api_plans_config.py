@@ -448,6 +448,52 @@ def test_accounts_add_generates_id_and_writes_entry(
     assert new["user_data_dir"] == f"./data/chrome-profiles/{aid}"
 
 
+def test_accounts_add_rejects_duplicate_display_name_with_friendly_msg(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """display_name 撞已有账号 → flash 给运营友好提示,不暴露 pydantic 报错 + 假 ID。"""
+    _setup(tmp_path, monkeypatch)
+    # _VALID_YAML 里 account_a 的 display_name 是 "美食号"
+    r = client_empty.post(
+        "/config/accounts/add",
+        data={
+            "display_name": "美食号",
+            "daily_limit": "20",
+            "video_search_root": "/tmp/v",
+            "cover_search_root": "/tmp/c",
+            "enabled": "on",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    location = unquote(r.headers["location"])
+    assert "已有账号叫 '美食号'" in location
+    assert "account_a" in location  # 真实的占用方
+    assert "Value error" not in location  # 不要 pydantic 包装
+    assert "重复使用" not in location  # 不要 Settings 校验器原话
+
+
+def test_accounts_add_strips_display_name(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """display_name 前后空白会被 strip(避免'测试' vs '测试 '当成两个账号)。"""
+    _setup(tmp_path, monkeypatch)
+    r = client_empty.post(
+        "/config/accounts/add",
+        data={
+            "display_name": "  美食号  ",  # 同名 + 空白
+            "daily_limit": "20",
+            "video_search_root": "/tmp/v",
+            "cover_search_root": "/tmp/c",
+            "enabled": "on",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    location = unquote(r.headers["location"])
+    assert "已有账号叫 '美食号'" in location
+
+
 def test_accounts_update_writes_changes(
     client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -538,3 +584,77 @@ def test_accounts_delete_unknown_no_op(
     assert r.status_code == 303
     assert "不存在" in unquote(r.headers["location"])
     assert cfg.read_text("utf-8") == snap
+
+
+# ============== 通知告警:测试推送 ==============
+
+
+def test_test_wecom_empty_returns_warn(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """密码框留空 + 磁盘 yaml 也没存 webhook → warn 提示'为空'。"""
+    no_webhook_yaml = _VALID_YAML.replace("webhook: https://qyapi.real/key=ABC", 'webhook: ""')
+    _setup(tmp_path, monkeypatch, content=no_webhook_yaml)
+    r = client_empty.post("/config/test-wecom", data={"mon_wecom_webhook": ""})
+    assert r.status_code == 200
+    assert 'class="flash warn"' in r.text
+    assert "为空" in r.text
+
+
+def test_test_wecom_success(
+    client_empty: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正常 https webhook + WecomNotifier.send 返回 True → ok 片段。"""
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr("wxsp.notify.WecomNotifier.send", lambda self, event: True)
+    r = client_empty.post(
+        "/config/test-wecom",
+        data={"mon_wecom_webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=fake"},
+    )
+    assert r.status_code == 200
+    assert 'class="flash ok"' in r.text
+    assert "已发送" in r.text
+
+
+def test_test_wecom_send_returns_false(
+    client_empty: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """send 返 False(errcode/网络问题)→ error 片段。"""
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr("wxsp.notify.WecomNotifier.send", lambda self, event: False)
+    r = client_empty.post(
+        "/config/test-wecom",
+        data={"mon_wecom_webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x"},
+    )
+    assert r.status_code == 200
+    assert 'class="flash error"' in r.text
+
+
+def test_test_wecom_rejects_non_https(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _setup(tmp_path, monkeypatch)
+    r = client_empty.post(
+        "/config/test-wecom", data={"mon_wecom_webhook": "http://insecure/webhook"}
+    )
+    assert r.status_code == 200
+    assert 'class="flash error"' in r.text
+    assert "https" in r.text
+
+
+def test_test_wecom_missing_env_var(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.delenv("NO_SUCH_WECOM_TEST_VAR", raising=False)
+    r = client_empty.post(
+        "/config/test-wecom",
+        data={"mon_wecom_webhook": "${NO_SUCH_WECOM_TEST_VAR}"},
+    )
+    assert r.status_code == 200
+    assert 'class="flash error"' in r.text
+    assert "环境变量" in r.text or "NO_SUCH_WECOM_TEST_VAR" in r.text

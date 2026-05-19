@@ -212,17 +212,20 @@ def doctor() -> None:
                 typer.echo(f"{row.account_id:<14} {row.status:<10} {last_active:<20}")
                 if row.status == "warn":
                     # 推 cookie_warning 告警(notify_on 里启用时才真发到企微)
+                    account_cfg = settings.accounts.get(row.account_id)
+                    display_name = account_cfg.display_name if account_cfg else row.account_id
                     notify(
                         NotifyEvent(
                             type="cookie_warning",
                             level="warn",
-                            title=f"Cookie 即将过期: {row.account_id}",
+                            title=f"登录态即将过期:{display_name}",
                             content=(
-                                f"账号 {row.account_id} 距上次成功活跃已超过 "
+                                f"账号「{display_name}」距上次成功活跃已超过 "
                                 f"{settings.monitoring.cookie_warn_days} 天,"
-                                f"cookie 可能不稳定,建议主动 `wxsp login {row.account_id}` 续命。"
+                                f"登录态可能不稳定,建议到管理后台账号页扫码续命。"
                             ),
                             account_id=row.account_id,
+                            account_display_name=display_name,
                         ),
                         session=session,
                         settings=settings,

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
@@ -139,13 +140,19 @@ def test_login_creates_db_row_if_missing(
 
 
 def test_sync_skipped_when_feishu_disabled(client: TestClient) -> None:
+    """飞书 disabled → 返回 warn 片段(HTMX),不抛 302。"""
     r = client.post("/accounts/sync", follow_redirects=False)
-    assert r.status_code == 303
-    assert "%E8%B7%B3%E8%BF%87" in r.headers["location"] or "跳过" in r.headers["location"]
+    assert r.status_code == 200
+    assert 'class="flash warn"' in r.text
+    assert "飞书未启用" in r.text
 
 
-def test_sync_spawns_when_feishu_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # 单独构造 client(让 feishu.enabled=True)
+def test_sync_runs_inline_when_feishu_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """飞书 enabled → 路由内同步阻塞跑 sync_now,返回 ok 片段(无 HX-Trigger 头)。"""
+    from wxsp.sync import SyncResult
+
     db_path = tmp_path / "db.sqlite"
     engine = get_engine(db_path)
     init_db(engine)
@@ -160,14 +167,55 @@ def test_sync_spawns_when_feishu_enabled(tmp_path: Path, monkeypatch: pytest.Mon
     app.dependency_overrides[get_session] = fake_get_session
     app.dependency_overrides[get_settings] = lambda: settings
 
-    calls: list[str] = []
     monkeypatch.setattr(
-        routes_accounts,
-        "_spawn",
-        lambda name, fn, *a, **kw: calls.append(name),
+        "wxsp.sync.sync_now",
+        lambda *a, **kw: SyncResult(pulled=3, accepted=2, rejected=1),
     )
 
     with TestClient(app) as c:
         r = c.post("/accounts/sync", follow_redirects=False)
-        assert r.status_code == 303
-    assert calls == ["feishu-sync"]
+        assert r.status_code == 200
+        assert 'class="flash ok"' in r.text
+        assert "新入库 2" in r.text
+        assert "校验失败 1" in r.text
+        assert "HX-Trigger" not in r.headers
+
+
+def test_sync_error_returns_hx_trigger_for_modal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """sync_now 抛异常 → 路由不 500,返回红色片段 + HX-Trigger:opError 头让前端弹窗。"""
+    db_path = tmp_path / "db.sqlite"
+    engine = get_engine(db_path)
+    init_db(engine)
+    settings = _settings_with_accounts(tmp_path, feishu_enabled=True)
+
+    app = create_app()
+
+    def fake_get_session() -> Iterator[Session]:
+        with session_scope(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_session] = fake_get_session
+    app.dependency_overrides[get_settings] = lambda: settings
+
+    def _boom(*a: object, **kw: object) -> object:
+        raise RuntimeError("fake feishu down")
+
+    monkeypatch.setattr("wxsp.sync.sync_now", _boom)
+
+    with TestClient(app) as c:
+        r = c.post("/accounts/sync", follow_redirects=False)
+        assert r.status_code == 200
+        assert 'class="flash error"' in r.text
+        assert "fake feishu down" in r.text
+        # HX-Trigger 必须是 htmx 可解的 JSON 形状,前端 event.detail.title /
+        # event.detail.detail 才能取到。光检查 substring 不够 —— 如果有人误
+        # 把它写成 {"opError": "字符串"} htmx 会把 detail 设成 .value,前端
+        # 用 e.detail.title 就拿不到 → 弹窗只显示通用标题。
+        hx_raw = r.headers.get("HX-Trigger", "")
+        hx = json.loads(hx_raw)
+        assert "opError" in hx
+        assert isinstance(hx["opError"], dict), "opError 必须是 dict,前端按 detail.title/detail 取"
+        assert hx["opError"]["title"] == "飞书同步失败"
+        assert "fake feishu down" in hx["opError"]["detail"]

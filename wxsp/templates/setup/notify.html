@@ -3,7 +3,7 @@
 <h1>告警渠道(可选)</h1>
 <p>失败、风控、cookie 失效会推送到企微群。留空则不启用告警。</p>
 
-<form method="post" action="/setup/step/5" id="notify-form">
+<form method="post" action="/setup/step/4" id="notify-form">
   <div class="form-row">
     <label>企微机器人 Webhook</label>
     <input type="password" name="webhook" placeholder="留空 = 不启用告警"
@@ -18,7 +18,7 @@
       hx-include="#notify-form"
       hx-target="#wecom-test-result"
       hx-swap="innerHTML">测试推送</button>
-    <a href="/setup/step/4"><button type="button">← 上一步</button></a>
+    <a href="/setup/step/3"><button type="button">← 上一步</button></a>
     <button type="submit" class="primary">下一步:确认 →</button>
   </div>
   <div id="wecom-test-result" style="margin-top: 12px;"></div>

@@ -576,6 +576,56 @@
       white-space: pre-wrap;
       margin: 0;
     }
+
+    /* ============ HTMX 操作 loading 与错误弹窗 ============ */
+    /* hx-indicator:HTMX 在请求飞行时自动加 htmx-request class,加完去掉 */
+    .op-spinner {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--color-text-mute);
+      padding: 0 8px;
+    }
+    .htmx-request .op-spinner,
+    .op-spinner.htmx-request {
+      display: inline-flex;
+    }
+    .op-spinner::before {
+      content: "";
+      width: 12px;
+      height: 12px;
+      border: 2px solid var(--color-border);
+      border-top-color: var(--color-primary);
+      border-radius: 50%;
+      animation: op-spin 0.7s linear infinite;
+    }
+    @keyframes op-spin { to { transform: rotate(360deg); } }
+    /* 发起请求的按钮在请求飞行时禁用,避免连点 */
+    button.htmx-request, .htmx-request button { opacity: 0.6; pointer-events: none; }
+
+    .op-modal {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 0;
+      max-width: 520px;
+      width: 90%;
+      box-shadow: var(--shadow-md);
+    }
+    .op-modal::backdrop { background: rgba(17, 20, 24, 0.35); }
+    .op-modal-head {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      padding: var(--space-3) var(--space-4);
+      border-bottom: 1px solid var(--color-border-soft);
+      background: var(--color-error-soft);
+      color: var(--color-error);
+      font-weight: 600;
+      border-radius: var(--radius-md) var(--radius-md) 0 0;
+    }
+    .op-modal-body { padding: var(--space-4); font-size: 13px; line-height: 1.7; max-height: 50vh; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+    .op-modal-foot { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-border-soft); display: flex; justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -647,6 +697,18 @@
     </main>
   </div>
 
+  {# 全局操作错误弹窗:由后端 HX-Trigger:{"opError":{"title","detail"}} 触发 #}
+  <dialog id="op-modal" class="op-modal">
+    <div class="op-modal-head">
+      <span>⚠</span>
+      <span id="op-modal-title">操作失败</span>
+    </div>
+    <div class="op-modal-body" id="op-modal-detail"></div>
+    <div class="op-modal-foot">
+      <button type="button" onclick="document.getElementById('op-modal').close()">关闭</button>
+    </div>
+  </dialog>
+
   <script>
     // 侧边栏时钟,每秒刷新
     (function () {
@@ -664,6 +726,18 @@
     document.addEventListener('click', (e) => {
       const ps = document.getElementById('platformSwitcher');
       if (ps && !ps.contains(e.target)) ps.classList.remove('open');
+    });
+
+    // 全局错误弹窗:HTMX 响应头 HX-Trigger:{"opError":{"title","detail"}} 触发
+    document.body.addEventListener('opError', (e) => {
+      const detail = (e.detail && (e.detail.detail || e.detail.value)) || '';
+      const title = (e.detail && e.detail.title) || '操作失败';
+      const titleEl = document.getElementById('op-modal-title');
+      const detailEl = document.getElementById('op-modal-detail');
+      if (titleEl) titleEl.textContent = title;
+      if (detailEl) detailEl.textContent = detail;
+      const modal = document.getElementById('op-modal');
+      if (modal && typeof modal.showModal === 'function') modal.showModal();
     });
   </script>
 </body>

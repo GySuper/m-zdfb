@@ -58,6 +58,17 @@ ORIGINAL_CHECKBOX_LABEL = "视频为原创"
 ORIGINAL_TERMS_LABEL = "我已阅读并同意 《视频号原创声明使用条款》"
 ORIGINAL_DECLARE_BUTTON = "声明原创"
 
+# ============== [11.5] 位置(写死"不显示位置",不接飞书字段) ==============
+# 视频号默认可能记忆上次发布选过的位置,或走 IP 定位 → 泄露发布地点。
+# 这一步显式选"不显示位置"兜底。改版时调本节即可:trigger 是入口候选,按序 try。
+LOCATION_TRIGGER_SELECTORS = (
+    "div.position-display-wrap",
+    "div.location-display-wrap",
+    'div.form-item:has-text("位置")',
+    'div:has-text("添加位置")',
+)
+LOCATION_HIDE_OPTION_TEXT = "不显示位置"
+
 # ============== [12] 定时发布 ==============
 SCHEDULE_RADIO_LABEL_HAS_TEXT = "定时"
 SCHEDULE_DATE_INPUT = 'input[placeholder="请选择发表时间"]'

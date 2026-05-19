@@ -25,6 +25,7 @@ from typing import Any
 import yaml
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from loguru import logger
 from pydantic import ValidationError
 
 from wxsp.api.deps import templates
@@ -50,6 +51,7 @@ NOTIFY_ON_OPTIONS: list[tuple[str, str]] = [
     ("element_not_found", "元素未找到(可能改版)"),
     ("nas_unreachable", "NAS 不可达"),
     ("backlog_high", "历史积压超阈值"),
+    ("run_summary", "跑完汇总(每次跑完推一条 ✓N ✗M)"),
 ]
 
 FIELD_MAP_KEYS: list[tuple[str, str]] = [
@@ -408,9 +410,20 @@ def add_account(
     本地新增成功后,会尝试把 display_name 追加到飞书 Bitable "账号" 单选字段的选项里
     (前提 feishu.enabled=true);失败不阻断本地新增,只在 flash 里追加提示。
     """
+    display_name = display_name.strip()
+    if not display_name:
+        return RedirectResponse("/config?flash=新增失败:显示名不能为空", status_code=303)
     with _config_lock:
         data = _load_raw_yaml()
         accounts = data.setdefault("accounts", {}) or {}
+        # 提前查重:display_name 必须唯一(Settings 也会兜底,但那里报错带 pydantic
+        # 包装 + 暴露 generated ID,运营看了一头雾水;这里给清爽错误)
+        dup_aid = _find_duplicate_display_name(accounts, display_name, exclude_id=None)
+        if dup_aid is not None:
+            return RedirectResponse(
+                f"/config?flash=新增失败:已有账号叫 {display_name!r}(ID={dup_aid}),请改个名",
+                status_code=303,
+            )
         aid = _generate_account_id(accounts)
         accounts[aid] = _build_account_entry(
             display_name=display_name,
@@ -427,6 +440,23 @@ def add_account(
         _save_yaml(data)
     suffix = _sync_account_to_feishu(data, display_name)
     return RedirectResponse(f"/config?flash=已添加账号 {aid}{suffix}", status_code=303)
+
+
+def _find_duplicate_display_name(
+    accounts: dict[str, Any], display_name: str, *, exclude_id: str | None
+) -> str | None:
+    """在已有账号里找跟 display_name 同名的(忽略大小写、忽略首尾空白);
+    返回那个 account_id;没找到返 None。
+    exclude_id:跳过该 ID(给 update 路由用,避免把自己当成重复)。
+    """
+    target = display_name.strip().lower()
+    for aid, entry in accounts.items():
+        if aid == exclude_id:
+            continue
+        existing = (entry.get("display_name") or "").strip().lower()
+        if existing == target:
+            return aid
+    return None
 
 
 def _sync_account_to_feishu(data: dict[str, Any], display_name: str) -> str:
@@ -482,12 +512,25 @@ def update_account(
     enabled: bool = Form(False),
 ) -> RedirectResponse:
     """编辑账号(account_id 和 user_data_dir 不可改:它们与 chrome profile 强绑定)。"""
+    display_name = display_name.strip()
+    if not display_name:
+        return RedirectResponse(
+            f"/config?flash=保存失败:显示名不能为空&edit={account_id}", status_code=303
+        )
     with _config_lock:
         data = _load_raw_yaml()
         accounts = data.get("accounts", {}) or {}
         if account_id not in accounts:
             return RedirectResponse(
                 f"/config?flash=账号 {account_id} 不存在,无法编辑", status_code=303
+            )
+        # 改名时也要查重:不能跟其他账号撞 display_name(自己不算)
+        dup_aid = _find_duplicate_display_name(accounts, display_name, exclude_id=account_id)
+        if dup_aid is not None:
+            return RedirectResponse(
+                f"/config?flash=保存失败:显示名 {display_name!r} 已被账号 {dup_aid} 用了"
+                f"&edit={account_id}",
+                status_code=303,
             )
         old_entry = accounts[account_id]
         accounts[account_id] = _build_account_entry(
@@ -701,3 +744,59 @@ def save_fieldmap(
         }
 
     return _apply_and_save("✓ 字段映射已保存", apply)
+
+
+# ---------- 通知告警:测试推送 ----------
+
+
+@router.post("/config/test-wecom", response_class=HTMLResponse)
+def test_wecom(mon_wecom_webhook: str = Form("")) -> HTMLResponse:
+    """企微测试推送:表单 webhook 为空 → 用 config.yaml 已存的;
+    支持 ${ENV_VAR} 引用展开;真发一条 markdown 给 webhook;结果以片段返回,inline 展示。
+    """
+    from wxsp.notify import NotifyEvent, WecomNotifier
+
+    submitted = (mon_wecom_webhook or "").strip()
+    if not submitted:
+        # 用户没改密码框 → 用磁盘里已存的(可能是 ${ENV} 或明文)
+        disk_data = _load_raw_yaml()
+        submitted = (
+            disk_data.get("monitoring", {}).get("notifiers", {}).get("wecom", {}).get("webhook", "")
+            or ""
+        ).strip()
+
+    if not submitted:
+        return HTMLResponse(_flash_fragment("warn", "webhook 为空,无法测试"))
+
+    try:
+        url = _expand_env_vars(submitted)
+    except ValueError as exc:
+        return HTMLResponse(_flash_fragment("error", f"环境变量展开失败:{exc}"))
+
+    if not url.startswith("https://"):
+        return HTMLResponse(_flash_fragment("error", "webhook URL 必须以 https:// 开头"))
+
+    notifier = WecomNotifier(webhook=url)
+    try:
+        ok = notifier.send(
+            NotifyEvent(
+                type="config_test",
+                level="info",
+                title="自动发布平台 · 测试推送",
+                content="如果你看到这条消息,说明机器人地址配置正确。",
+            )
+        )
+    except Exception as exc:
+        logger.exception(f"[web/test-wecom] {exc}")
+        return HTMLResponse(_flash_fragment("error", f"调用失败:{exc}"))
+    if ok:
+        return HTMLResponse(_flash_fragment("ok", "✓ 已发送,请到企微群查看"))
+    return HTMLResponse(_flash_fragment("error", "推送失败,看后端日志(errcode/网络)"))
+
+
+def _flash_fragment(level: str, text: str) -> str:
+    """HTMX inline flash 片段。level: ok | warn | error。"""
+    safe = (
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    )
+    return f'<div class="flash {level}">{safe}</div>'

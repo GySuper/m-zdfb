@@ -1,4 +1,4 @@
-"""测试 routes_setup.py:6 步向导 + 校验 + 最终写 yaml。"""
+"""测试 routes_setup.py:5 步向导 + 校验 + 最终写 yaml(账号在 /config 加)。"""
 
 from __future__ import annotations
 
@@ -58,37 +58,23 @@ def test_step3_post_stores_nas_and_advances(fresh_app, tmp_path):
     assert resp.headers["location"] == "/setup/step/4"
 
 
-def test_step4_post_validates_accounts(fresh_app):
+def test_step4_post_stores_notify_and_advances(fresh_app):
+    """step/4 = notify(原来的 step/5),账号步骤已删除。"""
     app, _ = fresh_app
     client = TestClient(app, follow_redirects=False)
-    resp = client.post(
-        "/setup/step/4",
-        data={
-            "account_id[]": ["account_a", "account_b"],
-            "display_name[]": ["美食号", "健身号"],
-            "daily_limit[]": ["20", "20"],
-        },
+    # 先把 feishu / nas 填完,否则 step 4 会被前置守卫拦回
+    client.post(
+        "/setup/step/2",
+        data={"app_id": "x", "app_secret": "y", "app_token": "z", "table_id": "t"},
     )
+    client.post("/setup/step/3", data={"nas_root": "."})  # cwd 一定存在
+    resp = client.post("/setup/step/4", data={"webhook": ""})
     assert resp.status_code == 302
-
-
-def test_step4_rejects_invalid_account_id(fresh_app):
-    app, _ = fresh_app
-    client = TestClient(app, follow_redirects=False)
-    resp = client.post(
-        "/setup/step/4",
-        data={
-            "account_id[]": ["Account-A"],
-            "display_name[]": ["x"],
-            "daily_limit[]": ["20"],
-        },
-    )
-    assert resp.status_code == 200
-    assert "account_id" in resp.text.lower() or "格式" in resp.text
+    assert resp.headers["location"] == "/setup/step/5"
 
 
 def test_complete_writes_config_yaml(fresh_app, tmp_path):
-    """整套 happy path 走完,POST /setup/complete 后 config.yaml 落盘。"""
+    """整套 happy path 走完,POST /setup/complete 后 config.yaml 落盘;accounts 为空(运营装完后到 /config 加)。"""
     app, config_path = fresh_app
     client = TestClient(app, follow_redirects=False)
 
@@ -104,15 +90,7 @@ def test_complete_writes_config_yaml(fresh_app, tmp_path):
     nas_dir = tmp_path / "nas"
     nas_dir.mkdir()
     client.post("/setup/step/3", data={"nas_root": str(nas_dir)})
-    client.post(
-        "/setup/step/4",
-        data={
-            "account_id[]": ["account_a"],
-            "display_name[]": ["美食号"],
-            "daily_limit[]": ["20"],
-        },
-    )
-    client.post("/setup/step/5", data={"webhook": ""})
+    client.post("/setup/step/4", data={"webhook": ""})
 
     resp = client.post("/setup/complete")
     assert resp.status_code == 302
@@ -123,8 +101,7 @@ def test_complete_writes_config_yaml(fresh_app, tmp_path):
     assert parsed["feishu"]["app_id"] == "cli_x"
     assert parsed["feishu"]["app_secret"] == "s"
     assert parsed["paths"]["nas_root"] == str(nas_dir)
-    assert "account_a" in parsed["accounts"]
-    assert parsed["accounts"]["account_a"]["display_name"] == "美食号"
+    assert parsed["accounts"] == {}  # 向导不建账号
     assert parsed["monitoring"]["notifiers"]["wecom"]["enabled"] is False
 
 

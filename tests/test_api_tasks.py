@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import date as _date
 from datetime import datetime, timedelta
@@ -196,12 +197,51 @@ def test_run_today_spawns_scheduler(
     client_with_data: tuple[TestClient, _date],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """飞书 disabled fixture:sync 阶段跳过,直接 spawn 发布循环;返回 ok 片段。"""
     c, _ = client_with_data
     calls: list[str] = []
     monkeypatch.setattr(routes_tasks, "_spawn", lambda name, fn, *a, **kw: calls.append(name))
     r = c.post("/tasks/run-today", follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code == 200
+    assert 'class="flash ok"' in r.text
+    assert "飞书未启用" in r.text
     assert calls == ["run-today"]
+    # 释放全局 _run_today_running(下一个测试可能要再点)
+    routes_tasks._run_today_running = False
+
+
+def test_run_today_sync_failure_aborts_publish(
+    client_with_data: tuple[TestClient, _date],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """飞书 enabled + sync_now 抛异常 → 不 spawn 发布,返回 error 片段 + HX-Trigger。"""
+    c, _ = client_with_data
+    # 把 fixture 里的 settings 的 feishu 打开
+    settings = c.app.dependency_overrides[get_settings]()  # type: ignore[attr-defined]
+    settings.feishu.enabled = True
+
+    calls: list[str] = []
+    monkeypatch.setattr(routes_tasks, "_spawn", lambda name, fn, *a, **kw: calls.append(name))
+
+    def _boom(*a: object, **kw: object) -> object:
+        raise RuntimeError("fake feishu down")
+
+    monkeypatch.setattr("wxsp.sync.sync_now", _boom)
+
+    r = c.post("/tasks/run-today", follow_redirects=False)
+    assert r.status_code == 200
+    assert 'class="flash error"' in r.text
+    assert "fake feishu down" in r.text
+    # 验证 HX-Trigger 是 htmx 可解的 JSON 形状(前端 e.detail.title /
+    # e.detail.detail 才取得到),不光是 substring 包含 opError。
+    hx_raw = r.headers.get("HX-Trigger", "")
+    hx = json.loads(hx_raw)
+    assert "opError" in hx
+    assert isinstance(hx["opError"], dict)
+    assert hx["opError"]["title"] == "飞书同步失败"
+    assert "fake feishu down" in hx["opError"]["detail"]
+    assert calls == []  # 发布循环没被 spawn
+    routes_tasks._run_today_running = False
 
 
 # ============== 重新入队 + backlog 过滤(M9) ==============

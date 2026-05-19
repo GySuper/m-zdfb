@@ -6,13 +6,16 @@
 <div class="summary-list" style="margin: 20px 0;">
   <div><strong>飞书 app_id:</strong> {{ summary.feishu_app_id_masked }}</div>
   <div><strong>NAS 根:</strong> {{ summary.nas_root }}</div>
-  <div><strong>账号数:</strong> {{ summary.account_count }}</div>
   <div><strong>企微告警:</strong> {{ '启用' if summary.wecom_enabled else '未启用' }}</div>
 </div>
 
+<p class="hint" style="margin-top: 16px;">
+  装好后到"配置"页加视频号账号(自动生成 ID + 同步到飞书"账号"字段选项)。
+</p>
+
 <form method="post" action="/setup/complete">
   <div class="actions">
-    <a href="/setup/step/5"><button type="button">← 上一步</button></a>
+    <a href="/setup/step/4"><button type="button">← 上一步</button></a>
     <button type="submit" class="primary">完成,进入主界面 →</button>
   </div>
 </form>

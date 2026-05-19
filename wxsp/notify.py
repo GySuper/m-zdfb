@@ -29,7 +29,11 @@ from wxsp.models import Event
 
 @dataclass
 class NotifyEvent:
-    """业务侧发出的通知事件。type 与 monitoring.notify_on 的字符串保持一致。"""
+    """业务侧发出的通知事件。type 与 monitoring.notify_on 的字符串保持一致。
+
+    account_display_name:运营在飞书 / Web UI 看到的中文名(如"美食号")。
+    渲染时优先用它替代 account_id(英文 ID 对运营无意义)。发起方按需填。
+    """
 
     type: str
     level: str  # "info" | "warn" | "error"
@@ -38,6 +42,61 @@ class NotifyEvent:
     context: dict[str, Any] = field(default_factory=dict)
     task_id: int | None = None
     account_id: str | None = None
+    account_display_name: str | None = None
+
+
+# 通知里出现的英文术语 → 中文映射。运营看的全中文,且与 UI 侧 api.i18n 不依赖
+# (UI 翻译 + 通知翻译可能各自微调措辞,故各放各的)
+_ERROR_TYPE_CN: dict[str, str] = {
+    "cookie_expired": "登录态失效",
+    "risk_control": "风控触发",
+    "element_not_found": "页面元素未找到(可能改版)",
+    "task_failed": "任务失败",
+    "nas_unreachable": "存储不可达",
+    "network": "网络异常",
+    "video_invalid": "视频非法",
+    "upload_failed": "上传失败",
+    "feishu_api_error": "飞书接口错误",
+    "unknown": "未知错误",
+    "cookie_warning": "登录态即将过期",
+    "backlog_high": "历史积压超阈值",
+}
+
+_STEP_CN: dict[str, str] = {
+    "claim": "认领任务",
+    "stage": "暂存视频",
+    "browser": "启动浏览器",
+    "open_publish": "打开发布页",
+    "verify_login": "验证登录",
+    "upload": "上传视频",
+    "title": "填标题",
+    "desc": "填描述",
+    "tags": "加标签",
+    "cover": "设置封面",
+    "topic": "绑合集",
+    "original": "声明原创",
+    "location": "选位置",
+    "schedule": "定时发布",
+    "risk": "风控探测",
+    "dryrun_gate": "测试模式拦截",
+    "publish": "点击发表",
+    "wait_success": "等待成功",
+    "extract": "抓取链接",
+}
+
+
+def error_type_cn(value: str | None) -> str:
+    """英文 error_type → 中文。未知键回退到中文兜底,不让英文穿透到通知里。"""
+    if not value:
+        return "未知错误"
+    return _ERROR_TYPE_CN.get(value, "未知错误")
+
+
+def step_cn(value: str | None) -> str:
+    """英文 step 名 → 中文。未知键直接返回原值(尽量不丢信息)。"""
+    if not value:
+        return ""
+    return _STEP_CN.get(value, value)
 
 
 class Notifier(Protocol):
@@ -84,18 +143,27 @@ class WecomNotifier:
         return True
 
 
+_PLATFORM_TAG = "视频号"
+
+
 def _format_markdown(event: NotifyEvent) -> str:
-    """渲染 Markdown:头部 + level 标签 + title + 正文 + 可选 task/account/context。"""
-    tag = {"info": "[INFO]", "warn": "[WARN]", "error": "[ERROR]"}.get(event.level, "[*]")
-    lines = [f"## {tag} {event.title}", "", event.content]
+    """渲染 Markdown:平台标识 + 中文 level 标签 + title + 正文 + 可选 任务编号/账号/上下文。
+
+    平台标识 `[视频号]` 写死;后续多平台(小红书/抖音)接入时改成按 settings 取。
+    全中文输出 —— 运营收到企微推送一眼看明白,不出现英文 level / 字段名 / 账号 ID。
+    """
+    tag = {"info": "[信息]", "warn": "[警告]", "error": "[错误]"}.get(event.level, "[通知]")
+    lines = [f"## [{_PLATFORM_TAG}] {tag} {event.title}", "", event.content]
     if event.task_id is not None:
-        lines.append(f"> task_id: `{event.task_id}`")
+        lines.append(f"> 任务编号:{event.task_id}")
     if event.account_id is not None:
-        lines.append(f"> account: `{event.account_id}`")
+        # 优先 display_name(中文友好名),没有时回退到 account_id 字符串
+        shown = event.account_display_name or event.account_id
+        lines.append(f"> 账号:{shown}")
     if event.context:
         lines.append("")
         for k, v in event.context.items():
-            lines.append(f"- **{k}**: {v}")
+            lines.append(f"- **{k}**:{v}")
     return "\n".join(lines)
 
 

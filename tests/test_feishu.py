@@ -89,6 +89,20 @@ def test_make_client_builds_client() -> None:
     assert hasattr(client, "bitable")
 
 
+def test_make_client_applies_default_timeout() -> None:
+    """make_client 默认应配 HTTP timeout,避免飞书侧抖动时 Web UI 路由卡死。"""
+    client = make_client("cli_app_id", "secret_value")
+    # lark-oapi 把 builder 设的 timeout 落到 client._config.timeout
+    timeout = getattr(client._config, "timeout", None)  # type: ignore[attr-defined]
+    assert timeout is not None and timeout > 0, "make_client 必须配 timeout(>0)"
+
+
+def test_make_client_respects_custom_timeout() -> None:
+    """显式传 timeout 时 builder 应透传。"""
+    client = make_client("cli_app_id", "secret_value", timeout=3.0)
+    assert client._config.timeout == 3.0  # type: ignore[attr-defined]
+
+
 def test_fetch_pending_rows_single_page() -> None:
     fake = _FakeClient(
         [

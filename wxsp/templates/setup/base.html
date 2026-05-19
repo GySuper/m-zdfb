@@ -198,12 +198,12 @@
       <div class="brand-subtitle">首次设置向导</div>
     </div>
     <div class="progress">
-      {% for i in range(1, (total_steps or 6) + 1) %}
+      {% for i in range(1, (total_steps or 5) + 1) %}
         <div class="dot {% if i < step %}done{% elif i == step %}active{% endif %}"></div>
       {% endfor %}
     </div>
     <div class="card">
-      <div class="step-label">第 {{ step }} 步 / 共 {{ total_steps or 6 }} 步</div>
+      <div class="step-label">第 {{ step }} 步 / 共 {{ total_steps or 5 }} 步</div>
       {% if error %}<div class="error">{{ error }}</div>{% endif %}
       {% block content %}{% endblock %}
     </div>

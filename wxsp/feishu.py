@@ -34,6 +34,10 @@ _FEISHU_FIELD_TYPE_SINGLE_SELECT = 3
 # 指数退避序列:第 1 次失败等 1s,第 2 次失败等 2s,第 3 次失败直接抛
 _RETRY_DELAYS = (1.0, 2.0)
 
+# 单次 HTTP 调用超时(秒):lark-oapi 默认无超时,飞书侧抖动会让 Web UI 路由卡死。
+# 15s 足够正常调用;真挂了配合 3 次退避最多 ~50s 就抛 FeishuApiError 走 opError 弹窗。
+_DEFAULT_HTTP_TIMEOUT_SECONDS = 15.0
+
 
 @dataclass(frozen=True)
 class BitableRow:
@@ -47,9 +51,17 @@ class FeishuApiError(Exception):
     """飞书 API 在 3 次指数退避后仍失败时抛出。"""
 
 
-def make_client(app_id: str, app_secret: str) -> lark.Client:
-    """构建 lark-oapi 客户端;无缓存,sync 启动时新建。"""
-    return lark.Client.builder().app_id(app_id).app_secret(app_secret).build()
+def make_client(
+    app_id: str,
+    app_secret: str,
+    *,
+    timeout: float = _DEFAULT_HTTP_TIMEOUT_SECONDS,
+) -> lark.Client:
+    """构建 lark-oapi 客户端;无缓存,sync 启动时新建。
+
+    timeout: 单次 HTTP 调用超时(秒)。默认 15s,避免 sync_now 在 Web UI 路由里卡死。
+    """
+    return lark.Client.builder().app_id(app_id).app_secret(app_secret).timeout(timeout).build()
 
 
 def fetch_pending_rows(

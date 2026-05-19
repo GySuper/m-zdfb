@@ -4,14 +4,16 @@
 - "扫码登录":POST 触发后台线程跑 check_cookie(),浏览器弹窗显示视频号二维码,
   用户在 patchright 窗口里扫;Web 不嵌入二维码(CDP 抓 canvas 复杂且不稳),
   接口立即返回"已弹出窗口,请扫码"提示,完成后 DB.cookie_status 自动刷新。
-- "立即同步飞书":后台线程跑 feishu.sync_now(),完成后回到列表页可见新任务。
+- "立即同步飞书":HTMX 同步触发 + 内联状态;失败用 HX-Trigger 推 opError 弹窗。
+  原本走后台线程 + 跳转 + flash,但运营反馈"飞书挂了从 UI 看不出",改成在路由内
+  阻塞跑 sync_now(),把结果直接渲染成片段 + 关键错误推弹窗。
 - "暂停/恢复":同步改 DB.paused_until,直接 redirect 回列表。
-- 所有变更通过 POST + 303 redirect 回 /accounts(无 HTMX hard reload),保证从
-  CLI 改完刷新页面也能看到一致状态(避免 HTMX 缓存的乐观更新错位)。
+- 大部分 POST 还是 303 redirect 回 /accounts;只有 sync 例外用 HTMX 片段。
 """
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -25,6 +27,10 @@ from sqlmodel import Session, select
 from wxsp.api.deps import get_session, get_settings, templates
 from wxsp.config import Settings
 from wxsp.models import Account
+
+# 并发触发 sync 没必要(浪费 API quota + 写库冲突)。HTMX 同步阻塞 + lock 即可,
+# 抢不到锁返回'正在同步中'片段;sync_now 本身 1-5 秒。
+_sync_lock = threading.Lock()
 
 router = APIRouter()
 
@@ -127,13 +133,54 @@ def login_account(
     return _redirect(f"已弹出浏览器,请在窗口中扫码登录 {account_id}(完成后状态自动刷新)")
 
 
-@router.post("/accounts/sync")
-def trigger_sync(settings: Settings = Depends(get_settings)) -> RedirectResponse:
-    """触发飞书 Bitable 同步(后台线程,完成后任务进库)。"""
+@router.post("/accounts/sync", response_class=HTMLResponse)
+def trigger_sync(settings: Settings = Depends(get_settings)) -> HTMLResponse:
+    """同步执行飞书 Bitable sync;返回 HTML 片段(HTMX 用)。
+
+    设计:
+    - 飞书未启用 → 200 + 灰色片段提示。
+    - 锁占用 → 200 + 提示'正在同步中'(不重复触发)。
+    - 成功 → 200 + 绿色片段 + 入库/拒绝计数。
+    - 失败 → 200 + 红色片段 + HX-Trigger 头 opError 让前端弹 modal(因为 HTMX
+      默认遇到非 2xx 会走 onResponseError 路径,我们用 200 + header 控更稳)。
+
+    并发:_sync_lock 串行。抢不到 = 已有同步在跑,返回提示不重做。
+    """
     if not settings.feishu.enabled:
-        return _redirect("飞书未启用,跳过同步")
-    _spawn("feishu-sync", _run_sync, settings)
-    return _redirect("已触发飞书同步,稍后刷新查看 Tasks")
+        return HTMLResponse(_fragment("warn", "飞书未启用,跳过同步"))
+    if not _sync_lock.acquire(blocking=False):
+        return HTMLResponse(_fragment("warn", "正在同步中,请等当前同步完成"))
+    try:
+        from wxsp.sync import sync_now
+
+        result = sync_now(settings)
+    except Exception as exc:
+        logger.exception(f"[web/feishu-sync] {exc}")
+        msg = f"飞书同步失败:{exc}"
+        return HTMLResponse(
+            _fragment("error", msg),
+            headers={
+                "HX-Trigger": json.dumps({"opError": {"title": "飞书同步失败", "detail": str(exc)}})
+            },
+        )
+    finally:
+        _sync_lock.release()
+    parts = [f"新入库 {result.accepted} 条"]
+    if result.rejected:
+        parts.append(f"校验失败 {result.rejected} 条(已回写飞书)")
+    if result.skipped_existing:
+        parts.append(f"已存在 {result.skipped_existing} 条跳过")
+    if result.skipped_incomplete:
+        parts.append(f"未填完 {result.skipped_incomplete} 条等下次")
+    return HTMLResponse(_fragment("ok", "飞书同步完成:" + "、".join(parts)))
+
+
+def _fragment(level: str, text: str) -> str:
+    """渲染一个 flash 片段。level: ok | warn | error。"""
+    safe = (
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    )
+    return f'<div class="flash {level}">{safe}</div>'
 
 
 # ---------- 后台 worker(不持任何 request 资源) ----------
@@ -155,10 +202,3 @@ def _run_login(account_id: str, user_data_dir: Path) -> None:
     engine = get_engine()
     with session_scope(engine) as s:
         record_cookie_check(s, account_id, is_logged_in=is_logged_in, now=_dt.now())
-
-
-def _run_sync(settings: Settings) -> None:
-    """后台跑飞书 sync(sync_now 自管 session)。"""
-    from wxsp.sync import sync_now
-
-    sync_now(settings)

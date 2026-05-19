@@ -16,13 +16,18 @@
       </div>
     </div>
     <div class="page-actions">
-      <form method="post" action="/tasks/run-today" style="margin:0;">
-        <button class="primary" type="submit" title="先同步飞书,再跑今天 pending">立即跑今天</button>
-      </form>
+      <span class="op-spinner" id="run-today-spinner">同步飞书中…</span>
+      <button class="primary" type="button"
+              title="先同步飞书,再跑今天 pending"
+              hx-post="/tasks/run-today"
+              hx-target="#op-status"
+              hx-swap="innerHTML"
+              hx-indicator="#run-today-spinner">立即跑今天</button>
     </div>
   </div>
 
   {% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
+  <div id="op-status"></div>
 
   {# ============ Tabs ============ #}
   {% if not backlog_mode %}

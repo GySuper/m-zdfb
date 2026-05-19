@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import date as _date
 from datetime import datetime
@@ -269,30 +270,74 @@ def requeue_task(
     )
 
 
-@router.post("/tasks/run-today")
-def run_today(settings: Settings = Depends(get_settings)) -> RedirectResponse:
+@router.post("/tasks/run-today", response_class=HTMLResponse)
+def run_today(settings: Settings = Depends(get_settings)) -> HTMLResponse:
+    """先在路由内同步飞书(失败弹窗 + 不发布),再 spawn 发布循环异步跑。
+
+    设计:
+    - sync 在路由内做(1-5s),失败 → 红色片段 + HX-Trigger opError 弹 modal,
+      不进入发布阶段(避免静默继续跑旧数据)。
+    - sync 成功 → spawn `run_today_pending(do_sync=False)`,发布循环异步跑,
+      失败细节走 publisher 自己的截图/告警,UI 显示"已开始跑"。
+    - _run_today_running 防并发触发;sync 还在跑时第二次点会被 lock 拒。
+    """
     global _run_today_running
     with _run_today_lock:
         if _run_today_running:
-            today = _date.today().isoformat()
-            return RedirectResponse(
-                url=f"/tasks?date={today}&flash=正在跑今天,请等待完成后再试", status_code=303
-            )
+            return HTMLResponse(_fragment("warn", "正在跑今天,请等当前一轮完成后再触发"))
         _run_today_running = True
 
-    def _run_and_release() -> None:
-        global _run_today_running
+    try:
         try:
-            _run_today_pending(settings)
-        finally:
-            with _run_today_lock:
-                _run_today_running = False
+            from wxsp.sync import sync_now
 
-    _spawn("run-today", _run_and_release)
-    today = _date.today().isoformat()
-    return RedirectResponse(
-        url=f"/tasks?date={today}&flash=已触发跑今天,完成后刷新", status_code=303
+            sync_result = sync_now(settings) if settings.feishu.enabled else None
+        except Exception as exc:
+            logger.exception(f"[web/run-today] sync_now 挂了,放弃发布: {exc}")
+            return HTMLResponse(
+                _fragment("error", f"飞书同步失败,未启动发布:{exc}"),
+                headers={
+                    "HX-Trigger": json.dumps(
+                        {"opError": {"title": "飞书同步失败", "detail": str(exc)}}
+                    )
+                },
+            )
+
+        def _run_and_release() -> None:
+            global _run_today_running
+            try:
+                _run_today_pending(settings)
+            finally:
+                with _run_today_lock:
+                    _run_today_running = False
+
+        _spawn("run-today", _run_and_release)
+        # 注意:这里把 sync 状态从 finally 中拿出来,不释放 _run_today_running——
+        # 发布循环结束时它自己会释放。下面 return 之前不能进 finally。
+    except Exception:
+        with _run_today_lock:
+            _run_today_running = False
+        raise
+
+    if sync_result is None:
+        msg = "飞书未启用,直接跑今天 pending(已开始,完成后任务状态会变化)"
+    else:
+        bits = [f"飞书同步完成(新入库 {sync_result.accepted} 条"]
+        if sync_result.rejected:
+            bits.append(f",校验失败 {sync_result.rejected} 条")
+        if sync_result.skipped_incomplete:
+            bits.append(f",未填完 {sync_result.skipped_incomplete} 条等下次")
+        bits.append("),发布循环已开始,等任务列表自动刷新")
+        msg = "".join(bits)
+    return HTMLResponse(_fragment("ok", msg))
+
+
+def _fragment(level: str, text: str) -> str:
+    """渲染一个 flash 片段(HTMX 用)。level: ok | warn | error。"""
+    safe = (
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
     )
+    return f'<div class="flash {level}">{safe}</div>'
 
 
 # ---------- 后台 worker ----------
@@ -305,9 +350,10 @@ def _run_publish(task_id: int, settings: Settings) -> None:
 
 
 def _run_today_pending(settings: Settings) -> None:
+    """发布部分(sync 在路由里已经做过,这里跳过避免重复)。"""
     from wxsp.scheduler import run_today_pending
 
-    run_today_pending(settings)
+    run_today_pending(settings, do_sync=False)
 
 
 def _parse_date(s: str) -> _date | None:

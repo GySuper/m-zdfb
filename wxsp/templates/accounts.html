@@ -8,15 +8,19 @@
       <div class="page-subtitle">共 {{ rows|length }} 个视频号账号</div>
     </div>
     <div class="page-actions">
-      <form method="post" action="/accounts/sync" style="margin:0;">
-        <button class="primary" type="submit">同步飞书</button>
-      </form>
+      <span class="op-spinner" id="sync-spinner">同步中…</span>
+      <button class="primary" type="button"
+              hx-post="/accounts/sync"
+              hx-target="#op-status"
+              hx-swap="innerHTML"
+              hx-indicator="#sync-spinner">同步飞书</button>
     </div>
   </div>
 
   {% if flash %}
     <div class="flash">{{ flash }}</div>
   {% endif %}
+  <div id="op-status"></div>
 
   {% if rows %}
     {# ============ 账号卡列表 ============ #}

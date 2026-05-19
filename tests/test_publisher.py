@@ -365,10 +365,10 @@ def test_publish_failure_writes_event_with_mapped_notify_type(
         assert ev.type == expected_notify_type
         assert ev.task_id == task_id
         assert ev.account_id == "a"
-        # error_type 和 last_step 进 context_json
+        # 错误类型 + 最近步骤 进 context_json(中文 key)
         ctx_json = ev.context_json
-        assert "error_type" in ctx_json
-        assert "last_step" in ctx_json
+        assert "错误类型" in ctx_json
+        assert "最近步骤" in ctx_json
 
 
 def test_publish_success_does_not_write_notify_event(

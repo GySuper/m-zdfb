@@ -120,16 +120,32 @@ def test_format_markdown_includes_title_content_task_account_context() -> None:
         level="error",
         title="风控触发",
         content="账号 a 命中关键词:请稍后",
-        context={"keyword": "请稍后", "step": "risk"},
+        context={"关键词": "请稍后", "步骤": "风控探测"},
         task_id=42,
         account_id="account_a",
+        account_display_name="美食号",
     )
     md = _format_markdown(event)
     assert "风控触发" in md
     assert "请稍后" in md
-    assert "task_id: `42`" in md
-    assert "account: `account_a`" in md
-    assert "keyword" in md and "step" in md
+    # 字段名 + level 标签都是中文,账号显示 display_name 而非 ID
+    assert "任务编号:42" in md
+    assert "账号:美食号" in md
+    assert "account_a" not in md
+    assert "关键词" in md and "步骤" in md
+
+
+def test_format_markdown_falls_back_to_account_id_when_no_display_name() -> None:
+    """没传 display_name 时回退到 account_id —— 兼容老调用方。"""
+    event = NotifyEvent(
+        type="info",
+        level="info",
+        title="x",
+        content="y",
+        account_id="account_a",
+    )
+    md = _format_markdown(event)
+    assert "账号:account_a" in md
 
 
 def test_format_markdown_minimal_event_omits_optional_lines() -> None:
@@ -137,8 +153,24 @@ def test_format_markdown_minimal_event_omits_optional_lines() -> None:
     md = _format_markdown(event)
     assert "Hi" in md
     assert "body" in md
-    assert "task_id" not in md
-    assert "account" not in md
+    assert "任务编号" not in md
+    assert "账号:" not in md
+
+
+def test_format_markdown_includes_platform_tag_and_chinese_level() -> None:
+    """所有推送的标题前面都要带 [视频号] + 中文 level 标签(信息/警告/错误)。"""
+    event = NotifyEvent(type="info", level="info", title="今日发布汇总", content="x")
+    md = _format_markdown(event)
+    first_line = md.splitlines()[0]
+    assert first_line.startswith("## [视频号] [信息]")
+    assert "今日发布汇总" in first_line
+
+
+def test_format_markdown_translates_level_warn_and_error() -> None:
+    md_warn = _format_markdown(NotifyEvent(type="x", level="warn", title="t", content=""))
+    md_err = _format_markdown(NotifyEvent(type="x", level="error", title="t", content=""))
+    assert "[警告]" in md_warn and "WARN" not in md_warn
+    assert "[错误]" in md_err and "ERROR" not in md_err
 
 
 # ============== build_notifiers_from_settings ==============

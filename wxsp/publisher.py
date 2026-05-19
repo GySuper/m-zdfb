@@ -32,14 +32,14 @@ from wxsp.errors import (
 from wxsp.feishu import FeishuApiError, make_client, writeback_row
 from wxsp.models import Account, Task, Video
 from wxsp.nas import cleanup_tmp, stage_to_tmp
-from wxsp.notify import NotifyEvent, notify
+from wxsp.notify import NotifyEvent, error_type_cn, notify, step_cn
 
 # error_type → (notify type, level, 中文标题)
 _NOTIFY_BY_ERROR: dict[str, tuple[str, str, str]] = {
-    "cookie_expired": ("cookie_expired", "error", "Cookie 失效,等待扫码"),
-    "risk_control": ("risk_control", "error", "风控触发,账号已暂停 24h"),
-    "element_not_found": ("element_not_found", "warn", "元素未找到 —— 视频号可能改版"),
-    "nas_unreachable": ("nas_unreachable", "error", "NAS 不可达"),
+    "cookie_expired": ("cookie_expired", "error", "登录态失效,等待扫码"),
+    "risk_control": ("risk_control", "error", "风控触发,账号已暂停 24 小时"),
+    "element_not_found": ("element_not_found", "warn", "页面元素未找到,视频号可能改版"),
+    "nas_unreachable": ("nas_unreachable", "error", "存储不可达"),
 }
 
 
@@ -113,13 +113,15 @@ def verify_logged_in(page: Page, *, timeout_ms: int = 15_000) -> None:
     # 先看是否有扫码框(强信号:未登录)
     for selector in sel.LOGIN_QRCODE_SELECTORS:
         if page.locator(selector).first.is_visible():
-            raise CookieExpired("发布页跳出扫码二维码,cookie 已失效")
+            raise CookieExpired("登录态已失效:发布页跳出了扫码二维码,请到管理后台账号页扫码续命")
     # 再看登录后元素
     joined = ", ".join(sel.LOGGED_IN_SELECTORS)
     try:
         page.wait_for_selector(joined, timeout=timeout_ms, state="visible")
     except Exception as exc:
-        raise CookieExpired(f"未找到登录后标记元素: {exc}") from exc
+        # 异常细节进日志(loguru 自己抓),通知文本只给运营看的版本
+        logger.warning(f"[publisher] verify_logged_in 等待登录元素超时: {exc}")
+        raise CookieExpired("登录态可能已失效:发布页没出现登录后该有的入口,请扫码续命") from exc
 
 
 def upload_video(page: Page, *, file_path: Path, timeout_seconds: int) -> None:
@@ -130,7 +132,8 @@ def upload_video(page: Page, *, file_path: Path, timeout_seconds: int) -> None:
     try:
         page.locator(sel.FILE_INPUT).set_input_files(str(file_path))
     except Exception as exc:
-        raise UploadFailed(f"set_input_files 失败: {exc}") from exc
+        logger.warning(f"[publisher] upload_video 提交文件失败: {exc}")
+        raise UploadFailed("提交视频文件失败,可能是文件格式不支持或浏览器侧异常") from exc
 
     deadline = time.monotonic() + timeout_seconds
     role_name, role_text = sel.UPLOAD_PUBLISH_BUTTON_ROLE
@@ -140,14 +143,14 @@ def upload_video(page: Page, *, file_path: Path, timeout_seconds: int) -> None:
             page.locator(sel.UPLOAD_FAILED_INDICATOR).count()
             and page.locator(sel.UPLOAD_DELETE_TAG).count()
         ):
-            raise UploadFailed("页面提示上传失败")
+            raise UploadFailed("视频号页面提示上传失败,请检查视频文件能否正常播放")
         # 发表按钮 class 不含 disabled → 上传完成
         publish_button = page.get_by_role(role_name, name=role_text)  # type: ignore[arg-type]
         cls = publish_button.get_attribute("class") if publish_button.count() else None
         if cls and sel.UPLOAD_DISABLED_CLASS not in cls:
             return
         time.sleep(2)
-    raise UploadFailed(f"上传 {timeout_seconds}s 后仍未完成")
+    raise UploadFailed(f"上传超过 {timeout_seconds} 秒仍未完成,可能视频过大或网络慢")
 
 
 def fill_title(page: Page, *, title: str) -> None:
@@ -263,6 +266,47 @@ def toggle_original(page: Page, *, original_claim: bool) -> None:
     if terms_visible:
         page.get_by_label(sel.ORIGINAL_TERMS_LABEL).check()
         page.get_by_role("button", name=sel.ORIGINAL_DECLARE_BUTTON).click()
+
+
+def disable_location(page: Page) -> None:
+    """[11.5] 把"位置"显式选为"不显示位置"(写死,不接飞书字段)。
+
+    视频号页面会记忆上次选过的位置,或按 IP 推荐附近位置 —— 不显式关掉的话,
+    自动发布出去会带地理信息。这步打开位置面板 → 选"不显示位置"。
+
+    所有失败(找不到入口/选项、改版、点击异常)只 warn,不抛 —— 视频该能发还能发,
+    最差结果是带默认位置上线;改版时来调 selectors.py:LOCATION_TRIGGER_SELECTORS 即可。
+    """
+    trigger = None
+    for sel_str in sel.LOCATION_TRIGGER_SELECTORS:
+        cand = page.locator(sel_str).first
+        try:
+            if cand.count() and cand.is_visible():
+                trigger = cand
+                break
+        except Exception:
+            continue
+    if trigger is None:
+        logger.info("[publisher] 未见位置入口,跳过(可能视频号改版或本来就没有此控件)")
+        return
+    try:
+        trigger.click()
+        page.wait_for_timeout(500)
+        not_show = page.get_by_text(sel.LOCATION_HIDE_OPTION_TEXT, exact=True).first
+        if not_show.count():
+            not_show.click()
+            return
+        logger.warning(
+            f"[publisher] 位置面板打开,但找不到 {sel.LOCATION_HIDE_OPTION_TEXT!r} 选项 —— 跳过"
+        )
+    except Exception as exc:
+        logger.warning(f"[publisher] disable_location 异常,跳过: {exc}")
+    finally:
+        # 兜底:popover 可能还在开着,Escape 关掉避免遮挡后面的"定时发布"控件
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
 
 
 def set_schedule(page: Page, *, publish_at: datetime) -> None:
@@ -480,6 +524,10 @@ def publish(
                 toggle_original(page, original_claim=video_original)
                 random_pause(step_pause)
 
+                last_step = "location"
+                disable_location(page)
+                random_pause(step_pause)
+
                 last_step = "schedule"
                 set_schedule(page, publish_at=task_publish_at)
                 random_pause(step_pause)
@@ -596,17 +644,29 @@ def publish(
             if not result.ok and not result.dry_run:
                 error_type = result.error_type or "unknown"
                 notify_type, level, title = _NOTIFY_BY_ERROR.get(
-                    error_type, ("task_failed", "error", f"任务失败 ({error_type})")
+                    error_type,
+                    ("task_failed", "error", f"任务失败:{error_type_cn(error_type)}"),
                 )
+                # element_not_found 给 title 拼上"在哪一步",运营一眼看到改版的位置
+                if error_type == "element_not_found":
+                    step_zh = step_cn(last_step)
+                    title = f"元素未找到 · {step_zh} —— 视频号可能改版"
+                # 通知里"账号"那行优先显示中文名;config 没配的回退到 ID
+                account_cfg = settings.accounts.get(account_id)
+                display_name = account_cfg.display_name if account_cfg else None
                 notify(
                     NotifyEvent(
                         type=notify_type,
                         level=level,
                         title=title,
                         content=result.error_msg or "(无错误信息)",
-                        context={"error_type": error_type, "last_step": last_step},
+                        context={
+                            "错误类型": error_type_cn(error_type),
+                            "最近步骤": step_cn(last_step),
+                        },
                         task_id=task_id,
                         account_id=account_id,
+                        account_display_name=display_name,
                     ),
                     session=session,
                     settings=settings,

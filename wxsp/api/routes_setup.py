@@ -1,12 +1,12 @@
-"""向导后端:6 页表单 → 写 config.yaml → 注册自启 → 跳 /accounts(M11)。
+"""向导后端:5 页表单 → 写 config.yaml → 注册自启 → 跳 /accounts(M11)。
 
+账号不在向导里建,装完后到 /config 加(自动生成 ID + 同步飞书选项)。
 向导数据存在 app.state.wizard_data(进程内 dict),重启 daemon 数据丢失,运营要重来。
 """
 
 from __future__ import annotations
 
 import html
-import re
 from pathlib import Path
 from typing import Any
 
@@ -20,13 +20,11 @@ from wxsp.api.deps import templates
 
 router = APIRouter(prefix="/setup")
 
-_ACCOUNT_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-_TOTAL_STEPS = 6
+_TOTAL_STEPS = 5
 _STEP_KEYS = {
     2: "feishu",
     3: "nas",
-    4: "accounts",
-    5: "notify",
+    4: "notify",
 }
 
 
@@ -65,9 +63,8 @@ def render_step(step: int, request: Request) -> HTMLResponse:
         1: "setup/welcome.html",
         2: "setup/feishu.html",
         3: "setup/nas.html",
-        4: "setup/accounts.html",
-        5: "setup/notify.html",
-        6: "setup/complete.html",
+        4: "setup/notify.html",
+        5: "setup/complete.html",
     }[step]
 
     # 预填:若向导尚未填飞书但本地已有 config.yaml,用其 feishu 配置做初始值
@@ -83,7 +80,7 @@ def render_step(step: int, request: Request) -> HTMLResponse:
         ctx["data_dir"] = str(wxsp_config.get_user_data_dir())
         ctx["logs_dir"] = str(wxsp_config.get_user_logs_dir())
         ctx["self_check"] = _run_self_check()
-    if step == 6:
+    if step == 5:
         ctx["summary"] = _build_summary(data)
     return templates.TemplateResponse(request, template_name, ctx)
 
@@ -135,14 +132,12 @@ def _prefill_from_existing_config(data: dict[str, Any]) -> None:
 
 def _build_summary(data: dict[str, Any]) -> dict[str, Any]:
     feishu = data.get("feishu", {})
-    accounts = data.get("accounts", [])
     notify = data.get("notify", {})
     return {
         "feishu_app_id_masked": feishu.get("app_id", "")[:6] + "..."
         if feishu.get("app_id")
         else "(未填)",
         "nas_root": data.get("nas", {}).get("nas_root", "(未填)"),
-        "account_count": len(accounts),
         "wecom_enabled": bool(notify.get("webhook")),
     }
 
@@ -197,63 +192,19 @@ def submit_nas(request: Request, nas_root: str = Form(...)) -> StarletteResponse
     return RedirectResponse(url="/setup/step/4", status_code=302)
 
 
-@router.post("/step/4", response_model=None)
-async def submit_accounts(request: Request) -> StarletteResponse:
-    form = await request.form()
-    ids = [str(v) for v in form.getlist("account_id[]")]
-    names = [str(v) for v in form.getlist("display_name[]")]
-    limits = [str(v) for v in form.getlist("daily_limit[]")]
-
-    def _render_error(msg: str) -> StarletteResponse:
-        return templates.TemplateResponse(
-            request,
-            "setup/accounts.html",
-            {"step": 4, "total_steps": _TOTAL_STEPS, "error": msg},
-            status_code=200,
-        )
-
-    if not ids or len(ids) != len(names) or len(ids) != len(limits):
-        return _render_error("至少 1 个账号,字段数对不齐")
-
-    accounts: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    for acc_id, name, limit in zip(ids, names, limits, strict=False):
-        acc_id = acc_id.strip()
-        if not _ACCOUNT_ID_RE.match(acc_id):
-            return _render_error(f"account_id 格式非法: {acc_id}(需小写字母开头,英文蛇形)")
-        if acc_id in seen_ids:
-            return _render_error(f"account_id 重复: {acc_id}")
-        seen_ids.add(acc_id)
-        try:
-            limit_int = int(limit)
-            if limit_int < 1:
-                raise ValueError("daily_limit must be >= 1")
-        except ValueError:
-            return _render_error(f"daily_limit 必须 ≥ 1: {limit}")
-        accounts.append({"id": acc_id, "display_name": name.strip(), "daily_limit": limit_int})
-
-    # Validation passed — now enforce wizard step ordering
+@router.post("/step/4")
+def submit_notify(request: Request, webhook: str = Form("")) -> RedirectResponse:
     redirect = _required_step_or_redirect(request, 4)
     if redirect:
         return redirect
-
-    _get_wizard_data(request)["accounts"] = accounts
-    return RedirectResponse(url="/setup/step/5", status_code=302)
-
-
-@router.post("/step/5")
-def submit_notify(request: Request, webhook: str = Form("")) -> RedirectResponse:
-    redirect = _required_step_or_redirect(request, 5)
-    if redirect:
-        return redirect
     _get_wizard_data(request)["notify"] = {"webhook": webhook.strip()}
-    return RedirectResponse(url="/setup/step/6", status_code=302)
+    return RedirectResponse(url="/setup/step/5", status_code=302)
 
 
 @router.post("/complete")
 def complete(request: Request) -> RedirectResponse:
     data = _get_wizard_data(request)
-    if _last_completed_step(data) < 5:
+    if _last_completed_step(data) < 4:
         return RedirectResponse(
             url=f"/setup/step/{_last_completed_step(data) + 1}", status_code=302
         )
@@ -272,24 +223,12 @@ def complete(request: Request) -> RedirectResponse:
 def _render_config(data: dict[str, Any]) -> dict[str, Any]:
     feishu = data["feishu"]
     nas_root = data["nas"]["nas_root"]
-    accounts = data["accounts"]
     webhook = data.get("notify", {}).get("webhook", "")
 
     data_dir = wxsp_config.get_user_data_dir()
     logs_dir = wxsp_config.get_user_logs_dir()
 
-    accounts_yaml: dict[str, Any] = {}
-    for acc in accounts:
-        acc_id = acc["id"]
-        accounts_yaml[acc_id] = {
-            "display_name": acc["display_name"],
-            "enabled": True,
-            "daily_limit": acc["daily_limit"],
-            "user_data_dir": str(data_dir / "chrome-profiles" / acc_id),
-            "video_search_root": f"{{nas_root}}/videos/{acc_id}",
-            "cover_search_root": f"{{nas_root}}/covers/{acc_id}",
-        }
-
+    # 账号不在向导里建,留空 dict;运营装完后到 /config 加账号(那里自动生成 ID + 同步飞书)。
     return {
         "app": {
             "data_dir": str(data_dir),
@@ -297,7 +236,7 @@ def _render_config(data: dict[str, Any]) -> dict[str, Any]:
             "timezone": "Asia/Shanghai",
         },
         "paths": {"nas_root": nas_root},
-        "accounts": accounts_yaml,
+        "accounts": {},
         "scheduler": {"daily_cron_hour": 9, "daily_cron_minute": 0, "strategy": "round-robin"},
         "publisher": {
             "headless": False,
@@ -383,15 +322,15 @@ def test_wecom(webhook: str = Form(...)) -> HTMLResponse:
     from wxsp.notify import NotifyEvent, WecomNotifier
 
     if not webhook.strip():
-        return HTMLResponse('<div class="check-fail">✗ webhook 为空</div>')
+        return HTMLResponse('<div class="check-fail">✗ 机器人地址为空</div>')
     notifier = WecomNotifier(webhook=webhook.strip())
     try:
         ok = notifier.send(
             NotifyEvent(
                 type="setup_test",
                 level="info",
-                title="wxsp 安装测试",
-                content="如果你看到这条消息,说明 webhook 配置正确。",
+                title="自动发布平台 · 安装测试",
+                content="如果你看到这条消息,说明机器人地址配置正确。",
             )
         )
         return HTMLResponse(

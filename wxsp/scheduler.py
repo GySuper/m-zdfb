@@ -292,12 +292,24 @@ def run_today_pending(settings: Settings, *, do_sync: bool = True) -> RunSummary
             if t is None:
                 continue
             plan.append((tid, t.account_id))
-        # 一次性拿 account.paused_until 快照
+        # 一次性拿账号快照:paused_until + cookie_status,避免发布时才发现 cookie 没登录
         paused_accounts: set[str] = set()
+        unlogged_accounts: dict[str, str] = {}  # acc_id → 中文跳过原因
         for acc_id in {acc for _, acc in plan}:
             acc = session.get(Account, acc_id)
-            if acc is not None and acc.paused_until is not None and acc.paused_until > now:
+            if acc is None:
+                continue
+            if acc.paused_until is not None and acc.paused_until > now:
                 paused_accounts.add(acc_id)
+                continue  # 暂停优先级高,不再判 cookie
+            # cookie_status != ok → 跳过本账号所有 task。expired = login 时检测到未登录;
+            # unknown = login 时浏览器异常(用户关窗 / 启动崩了),user_data_dir 里没拿到 cookie。
+            # 这俩状态下开 publisher 必然 verify_logged_in 失败,且会写一条误导性"登录态失效"
+            # 告警(实际从来就没登录过)。预检在这,task 直接 skip,提醒运营先扫码。
+            if acc.cookie_status == "expired":
+                unlogged_accounts[acc_id] = "登录态已失效,请重新扫码"
+            elif acc.cookie_status == "unknown":
+                unlogged_accounts[acc_id] = "未完成扫码登录(状态 unknown),请到账号页扫码"
 
     # 本轮中触发账号级不可恢复错误(登录态失效 / 风控)的账号 → 后续 task 全跳过。
     # 这么做有两个好处:① 不浪费时间反复开浏览器跑同一个会失败的账号;
@@ -317,10 +329,20 @@ def run_today_pending(settings: Settings, *, do_sync: bool = True) -> RunSummary
             logger.info(f"[scheduler] 跳过 task={task_id}:整轮已中止({summary.global_halt_reason})")
             continue
 
-        if account_id in paused_accounts or account_id in halted_accounts:
+        if (
+            account_id in paused_accounts
+            or account_id in halted_accounts
+            or account_id in unlogged_accounts
+        ):
             summary.skipped_paused += 1
             acc_stat.skipped += 1
-            reason = halted_accounts.get(account_id) or "账号暂停中"
+            reason = (
+                unlogged_accounts.get(account_id) or halted_accounts.get(account_id) or "账号暂停中"
+            )
+            # 未登录的也写进 halt_reason,让 run_summary 显示"跳过(原因:请扫码)"
+            # 而不是只写"暂停跳过 N"(运营一头雾水)
+            if account_id in unlogged_accounts and acc_stat.halt_reason is None:
+                acc_stat.halt_reason = reason
             logger.info(f"[scheduler] 跳过 task={task_id}:账号 {account_id} {reason}")
             continue
         summary.attempted += 1

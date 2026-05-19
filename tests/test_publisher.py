@@ -242,6 +242,10 @@ def test_publish_failure_writes_status_failed_with_screenshot(
         assert task_db.last_error_type == "cookie_expired"
         assert task_db.screenshots_json != "[]"
         assert task_db.finished_at is not None
+        # I3b: cookie_expired 时回写 Account.cookie_status,避免 /accounts 还显示绿色 ok
+        acc_db = session.get(Account, "a")
+        assert acc_db is not None
+        assert acc_db.cookie_status == "expired"
 
 
 def test_publish_risk_control_pauses_account_24h(

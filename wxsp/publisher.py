@@ -109,19 +109,32 @@ def open_publish_page(page: Page, *, timeout_ms: int = 30_000) -> None:
 
 
 def verify_logged_in(page: Page, *, timeout_ms: int = 15_000) -> None:
-    """[4] 任一登录标记可见 → 通过;否则 → CookieExpired。"""
+    """[4] 任一登录标记可见 → 通过;否则 → CookieExpired。
+
+    QR 命中时把 selector + 当前 page.url 一起写进异常 msg + 日志,
+    便于事后判断这是真登录页还是发布页上某个无关 QR 元素被误判。
+    """
     # 先看是否有扫码框(强信号:未登录)
     for selector in sel.LOGIN_QRCODE_SELECTORS:
         if page.locator(selector).first.is_visible():
-            raise CookieExpired("登录态已失效:发布页跳出了扫码二维码,请到管理后台账号页扫码续命")
+            url = page.url
+            logger.warning(
+                f"[publisher] verify_logged_in 检测到 QR:selector={selector!r} url={url!r}"
+            )
+            raise CookieExpired(
+                f"登录态已失效:发布页跳出了扫码二维码,请到管理后台账号页扫码续命"
+                f"(命中 selector={selector}, 当前 url={url})"
+            )
     # 再看登录后元素
     joined = ", ".join(sel.LOGGED_IN_SELECTORS)
     try:
         page.wait_for_selector(joined, timeout=timeout_ms, state="visible")
     except Exception as exc:
         # 异常细节进日志(loguru 自己抓),通知文本只给运营看的版本
-        logger.warning(f"[publisher] verify_logged_in 等待登录元素超时: {exc}")
-        raise CookieExpired("登录态可能已失效:发布页没出现登录后该有的入口,请扫码续命") from exc
+        logger.warning(f"[publisher] verify_logged_in 等待登录元素超时 url={page.url!r}: {exc}")
+        raise CookieExpired(
+            f"登录态可能已失效:发布页没出现登录后该有的入口,请扫码续命(当前 url={page.url})"
+        ) from exc
 
 
 def upload_video(page: Page, *, file_path: Path, timeout_seconds: int) -> None:
@@ -569,6 +582,13 @@ def publish(
                         screenshots_root=screenshots_root,
                     )
                     result.screenshots.append(str(shot))
+                    # 同时落一份 HTML(扩展名换成 .html),便于事后离线分析页面结构。
+                    # 截图都失败的话 page 可能已死,这里再 try 一次单独的失败兜底。
+                    try:
+                        html_path = Path(str(shot)).with_suffix(".html")
+                        html_path.write_text(page.content(), encoding="utf-8")
+                    except Exception as html_exc:
+                        logger.warning(f"失败时存 HTML 失败 task_id={task_id}: {html_exc}")
                 except Exception as ss_exc:
                     logger.warning(f"失败时截图也失败 task_id={task_id}: {ss_exc}")
                 raise
@@ -636,6 +656,18 @@ def publish(
                 if account_now is not None:
                     account_now.paused_until = datetime.now() + timedelta(hours=24)
                     logger.warning(f"风控触发,账号 {account_id} 暂停 24h")
+
+            # I3b: 登录态失效 → 回写 Account.cookie_status=expired。
+            # 原因:login 流程只校验主页登录态,publisher 校验发布页,两者可能不一致
+            # (微信号能进主页但发布页拒绝)。不回写的话 /accounts 还显示绿色 ok,
+            # 运营会困惑。回写后 UI 立即显示"已过期",下一轮 scheduler pre-flight 也会跳。
+            if result.error_type == "cookie_expired":
+                account_now = session.get(Account, account_id)
+                if account_now is not None:
+                    account_now.cookie_status = "expired"
+                    logger.warning(
+                        f"[publisher] 登录态失效,账号 {account_id} cookie_status → expired"
+                    )
 
             # I4: 失败时派 NotifyEvent(同事务写 Event 表 + 按 notify_on 派外部渠道)
             #   - dry-run 失败不告警(开发期场景)

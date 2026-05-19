@@ -26,8 +26,17 @@ from wxsp.scheduler import (
 
 
 def _seed_account_video(session: Session, *, account_id: str = "a", video_id: str) -> None:
+    # cookie_status='ok':default 'unknown' 会被 scheduler 入口的 pre-flight 跳过
     if session.get(Account, account_id) is None:
-        session.add(Account(id=account_id, display_name="A", user_data_dir="/tmp", daily_limit=20))
+        session.add(
+            Account(
+                id=account_id,
+                display_name="A",
+                user_data_dir="/tmp",
+                daily_limit=20,
+                cookie_status="ok",
+            )
+        )
     session.add(
         Video(id=video_id, file_path="/tmp/v.mp4", title="x" * 16, ingested_at=datetime.now())
     )
@@ -295,6 +304,75 @@ def test_run_today_pending_skips_tasks_when_account_paused(
     assert publish_calls == []
     assert summary.attempted == 0
     assert summary.skipped_paused == 1
+
+
+@pytest.mark.parametrize(
+    "cookie_status,expected_reason_keyword",
+    [
+        ("unknown", "未完成扫码登录"),
+        ("expired", "登录态已失效"),
+    ],
+)
+def test_run_today_pending_skips_tasks_when_account_cookie_not_ok(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cookie_status: str,
+    expected_reason_keyword: str,
+) -> None:
+    """回归:cookie_status != ok 的账号在 run-today 入口处直接 skip,不开浏览器。
+
+    场景:用户扫码登录窗口被关 / 浏览器异常 → record_cookie_check(is_logged_in=None)
+    → cookie_status='unknown' → DB 行存在但 user_data_dir 没拿到 cookie。预期 publisher
+    一开始 verify_logged_in 必败且会推一条误导性"登录态失效",所以在 scheduler 提前拦下。
+    """
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    today = date.today()
+    now = datetime.now()
+
+    with session_scope(engine) as session:
+        session.add(
+            Account(
+                id="a",
+                display_name="A",
+                user_data_dir="/tmp",
+                daily_limit=20,
+                cookie_status=cookie_status,
+            )
+        )
+        session.add(Video(id="v1", file_path="/tmp/v.mp4", title="x" * 16, ingested_at=now))
+        session.add(
+            Task(
+                video_id="v1",
+                account_id="a",
+                execute_date=today,
+                publish_at=now,
+                status="pending",
+            )
+        )
+
+    settings = make_settings(tmp_path, tmp_path)
+    monkeypatch.setattr("wxsp.scheduler.sync_now", lambda settings: None)
+
+    publish_calls: list[int] = []
+
+    def fake_publish(task_id, *, dry_run, settings):
+        publish_calls.append(task_id)
+        return PublishResult(task_id=task_id, ok=True, dry_run=False)
+
+    monkeypatch.setattr("wxsp.scheduler.publish", fake_publish)
+
+    summary = run_today_pending(settings)
+
+    assert publish_calls == [], "cookie 非 ok 的账号不该开 publisher"
+    assert summary.attempted == 0
+    assert summary.skipped_paused == 1
+    stat = summary.per_account["a"]
+    assert stat.skipped == 1
+    assert stat.halt_reason is not None
+    assert expected_reason_keyword in stat.halt_reason
 
 
 def test_run_today_pending_emits_run_summary_with_failure_breakdown(

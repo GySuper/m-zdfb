@@ -251,6 +251,23 @@
                 </div>
                 <span class="cfg-hint">macOS 例 <code>/Volumes/NAS/wxsp</code>;Windows 例 <code>Z:/wxsp</code>。账号下可用 <code>{nas_root}</code> 占位</span>
               </div>
+              <div class="cfg-row cfg-row-block">
+                <label>跨 OS 路径映射</label>
+                <div class="cfg-control" style="display: block; width: 100%;">
+                  <div id="path-aliases-list">
+                    {% for k, v in vm.paths_path_aliases %}
+                      <div class="path-alias-row">
+                        <input type="text" name="path_alias_key" value="{{ k }}" placeholder="Windows 前缀, 例 \\172.31.15.11\dianshang">
+                        <span class="alias-arrow">↔</span>
+                        <input type="text" name="path_alias_value" value="{{ v }}" placeholder="macOS 前缀, 例 /Volumes/dianshang">
+                        <button type="button" class="btn-sm danger" onclick="removeAliasRow(this)">删除</button>
+                      </div>
+                    {% endfor %}
+                  </div>
+                  <button type="button" class="btn-sm" onclick="addAliasRow()" style="margin-top: 6px;">+ 添加映射</button>
+                </div>
+                <span class="cfg-hint">飞书填的"视频文件"可以是完整 NAS 路径。运营在 Windows 复制 UNC 路径 <code>\\host\share\file.mp4</code>,daemon 在 macOS 上要靠这张表翻译成 <code>/Volumes/share/...</code>。<strong>daemon 只在单一 OS 跑可留空</strong>。两侧任一为空的行会被忽略</span>
+              </div>
             </div>
             <div class="cfg-foot">
               <span class="cfg-foot-status" data-role="status"></span>
@@ -645,6 +662,17 @@
     /* ============ Account table ============ */
     .account-cfg-table th, .account-cfg-table td { padding: 10px 12px; }
 
+    /* ============ Path aliases editor ============ */
+    .path-alias-row {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .path-alias-row input { width: 100%; }
+    .alias-arrow { color: var(--color-text-faint); font-size: 14px; }
+
     /* ============ Modal ============ */
     .modal {
       width: min(560px, calc(100vw - 32px));
@@ -708,6 +736,27 @@
     function submitAccountForm(e) {
       // 让浏览器走原生 form 提交 → 服务端 redirect
       return true;
+    }
+
+    // ============ 路径映射 增/删行 ============
+    function addAliasRow() {
+      const list = document.getElementById('path-aliases-list');
+      const row = document.createElement('div');
+      row.className = 'path-alias-row';
+      row.innerHTML =
+        '<input type="text" name="path_alias_key" placeholder="Windows 前缀, 例 \\\\172.31.15.11\\dianshang">' +
+        '<span class="alias-arrow">↔</span>' +
+        '<input type="text" name="path_alias_value" placeholder="macOS 前缀, 例 /Volumes/dianshang">' +
+        '<button type="button" class="btn-sm danger" onclick="removeAliasRow(this)">删除</button>';
+      list.appendChild(row);
+      // 触发 form dirty 检测
+      list.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    function removeAliasRow(btn) {
+      const row = btn.closest('.path-alias-row');
+      const list = row.parentElement;
+      row.remove();
+      list.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     // ============ 敏感字段眼睛切换 ============

@@ -160,13 +160,19 @@ def _view_model(data: dict[str, Any]) -> dict[str, Any]:
     webui = data.get("webui", {})
 
     step_pause = pub.get("step_pause_seconds", [1.0, 3.0]) or [1.0, 3.0]
+    # path_aliases:键值序对,模板按顺序渲染。排序保证 UI 表单稳定(避免每次刷新顺序乱跳)。
+    raw_aliases = paths.get("path_aliases") or {}
+    path_aliases_list: list[tuple[str, str]] = sorted(
+        (str(k), str(v)) for k, v in raw_aliases.items()
+    )
     return {
         # app
         "app_data_dir": app.get("data_dir", ""),
         "app_logs_dir": app.get("logs_dir", ""),
         "app_timezone": app.get("timezone", "Asia/Shanghai"),
-        # paths(只剩 nas_root)
+        # paths(nas_root + path_aliases)
         "paths_nas_root": paths.get("nas_root", ""),
+        "paths_path_aliases": path_aliases_list,
         # scheduler
         "sched_enabled": bool(sched.get("enabled", True)),
         "sched_hour": sched.get("daily_cron_hour", 9),
@@ -303,6 +309,11 @@ def config_save(
         old = _load_raw_yaml()
         old_feishu = old.get("feishu", {})
         old_wecom = old.get("monitoring", {}).get("notifiers", {}).get("wecom", {})
+        # legacy 整体 POST 没 path_aliases 字段,保留旧值避免被 nas_root 边吹掉
+        old_path_aliases = (old.get("paths") or {}).get("path_aliases") or {}
+        paths_section: dict[str, Any] = {"nas_root": paths_nas_root}
+        if old_path_aliases:
+            paths_section["path_aliases"] = old_path_aliases
 
         new_data: dict[str, Any] = {
             "app": {
@@ -310,7 +321,7 @@ def config_save(
                 "logs_dir": app_logs_dir,
                 "timezone": app_timezone,
             },
-            "paths": {"nas_root": paths_nas_root},
+            "paths": paths_section,
             "accounts": old.get("accounts", {}),
             "scheduler": {
                 "enabled": sched_enabled,
@@ -652,11 +663,19 @@ def save_feishu(
     feishu_bitable_table_id: str = Form(...),
     feishu_sync_writeback: bool = Form(False),
     paths_nas_root: str = Form(...),
+    # path_aliases:两个平行 list,zip 后过滤空对(运营点了 + 但没填就提交也不会落进 yaml)
+    path_alias_key: list[str] = Form(default_factory=list),
+    path_alias_value: list[str] = Form(default_factory=list),
 ) -> RedirectResponse:
+    aliases = _collect_path_aliases(path_alias_key, path_alias_value)
+
     def apply(data: dict[str, Any]) -> None:
         old_feishu = data.get("feishu", {})
         old_field_map = old_feishu.get("field_map", {})
-        data["paths"] = {"nas_root": paths_nas_root}
+        paths_section: dict[str, Any] = {"nas_root": paths_nas_root}
+        if aliases:
+            paths_section["path_aliases"] = aliases
+        data["paths"] = paths_section
         data["feishu"] = {
             "enabled": feishu_enabled,
             "app_id": feishu_app_id,
@@ -670,6 +689,20 @@ def save_feishu(
         }
 
     return _apply_and_save("✓ 连接服务已保存", apply)
+
+
+def _collect_path_aliases(keys: list[str], values: list[str]) -> dict[str, str]:
+    """zip 两个平行 list,key/value 任一为空白的行视为"用户没填完"丢弃。
+    同 key 多次出现(运营粘了重复)取最后一行,行为与字典字面量一致,不另抛错。
+    """
+    aliases: dict[str, str] = {}
+    for k, v in zip(keys, values, strict=False):
+        ks = (k or "").strip()
+        vs = (v or "").strip()
+        if not ks or not vs:
+            continue
+        aliases[ks] = vs
+    return aliases
 
 
 @router.post("/config/section/monitoring")

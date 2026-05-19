@@ -409,6 +409,125 @@ def test_config_post_no_notify_on_writes_empty_list(
     assert disk["monitoring"]["notify_on"] == []
 
 
+# ============== path_aliases (M5 跨 OS 路径) ==============
+
+
+_YAML_WITH_ALIASES = _VALID_YAML.replace(
+    "paths:\n  nas_root: /tmp/nas\n",
+    (
+        "paths:\n"
+        "  nas_root: /tmp/nas\n"
+        "  path_aliases:\n"
+        '    "\\\\\\\\172.31.15.11\\\\dianshang": /Volumes/dianshang\n'
+        '    "\\\\\\\\nas.local\\\\wxsp": /Volumes/wxsp\n'
+    ),
+)
+
+
+def _section_feishu_form(**overrides: Any) -> dict[str, Any]:
+    """构造 POST /config/section/feishu 表单。"""
+    data: dict[str, Any] = {
+        "feishu_app_id": "cli_real_id",
+        "feishu_app_secret": "",
+        "feishu_bitable_app_token": "tok",
+        "feishu_bitable_table_id": "tbl",
+        "paths_nas_root": "/tmp/nas",
+    }
+    checkbox_defaults = {
+        "feishu_enabled": False,
+        "feishu_sync_writeback": True,
+    }
+    for name, default in checkbox_defaults.items():
+        if overrides.get(name, default):
+            data[name] = "on"
+        overrides.pop(name, None)
+    data.update(overrides)
+    return data
+
+
+def test_config_get_renders_path_aliases_editor_with_existing_rows(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """YAML 有 2 条 alias → 表单渲染 2 行,key/value 都在 input 里。"""
+    _setup(tmp_path, monkeypatch, _YAML_WITH_ALIASES)
+    r = client_empty.get("/config")
+    assert r.status_code == 200
+    assert 'name="path_alias_key"' in r.text
+    assert 'name="path_alias_value"' in r.text
+    assert "/Volumes/dianshang" in r.text
+    assert "/Volumes/wxsp" in r.text
+    # 至少出现两次 path_alias_key(两行 input)
+    assert r.text.count('name="path_alias_key"') >= 2
+
+
+def test_config_section_feishu_saves_path_aliases(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /config/section/feishu 带 path_alias_key/value 平行 list → 写进 yaml。"""
+    cfg = _setup(tmp_path, monkeypatch)
+    fields = _section_feishu_form()
+    # httpx data dict 的 list 值 → 同 name 多次出现
+    fields["path_alias_key"] = [
+        "\\\\172.31.15.11\\dianshang",
+        "\\\\nas.local\\wxsp",
+    ]
+    fields["path_alias_value"] = [
+        "/Volumes/dianshang",
+        "/Volumes/wxsp",
+    ]
+    r = client_empty.post("/config/section/feishu", data=fields, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    disk = yaml.safe_load(cfg.read_text("utf-8"))
+    assert disk["paths"]["path_aliases"] == {
+        "\\\\172.31.15.11\\dianshang": "/Volumes/dianshang",
+        "\\\\nas.local\\wxsp": "/Volumes/wxsp",
+    }
+
+
+def test_config_section_feishu_filters_empty_alias_rows(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """运营点了 + 但没填 → 那行被忽略,不会留下空 key/value 进 yaml。"""
+    cfg = _setup(tmp_path, monkeypatch)
+    fields = _section_feishu_form()
+    fields["path_alias_key"] = ["\\\\host\\share", "", "  "]
+    fields["path_alias_value"] = ["/Volumes/share", "/Volumes/empty_key", ""]
+    r = client_empty.post("/config/section/feishu", data=fields, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    disk = yaml.safe_load(cfg.read_text("utf-8"))
+    assert disk["paths"]["path_aliases"] == {"\\\\host\\share": "/Volumes/share"}
+
+
+def test_config_section_feishu_clears_aliases_when_all_empty(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """所有行清空 → yaml 里不应留下空 path_aliases 字段(也不留 {})。"""
+    cfg = _setup(tmp_path, monkeypatch, _YAML_WITH_ALIASES)
+    # 验证起点确实有 alias
+    assert yaml.safe_load(cfg.read_text("utf-8"))["paths"]["path_aliases"]
+    fields = _section_feishu_form()
+    # 不带 path_alias_key/value → list 默认 []
+    r = client_empty.post("/config/section/feishu", data=fields, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    disk = yaml.safe_load(cfg.read_text("utf-8"))
+    # path_aliases key 干脆不写(YAML 里没这个字段)→ Settings 走默认 {}
+    assert "path_aliases" not in disk["paths"]
+
+
+def test_config_legacy_post_preserves_path_aliases(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """legacy POST /config 没 path_alias_* 字段,但磁盘上原值不应被吹掉。"""
+    cfg = _setup(tmp_path, monkeypatch, _YAML_WITH_ALIASES)
+    r = client_empty.post("/config", data=_form())
+    assert r.status_code == 200, r.text
+    disk = yaml.safe_load(cfg.read_text("utf-8"))
+    assert disk["paths"]["path_aliases"] == {
+        "\\\\172.31.15.11\\dianshang": "/Volumes/dianshang",
+        "\\\\nas.local\\wxsp": "/Volumes/wxsp",
+    }
+
+
 # ============== 账号 CRUD ==============
 
 

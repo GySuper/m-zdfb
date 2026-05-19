@@ -343,7 +343,7 @@ SQLite 是唯一的运行时事实来源,所有任务从飞书拉取。Web UI **
 | 封面文件 | 单行文本 | 否 | 读 | **仅文件名**,在**账号的** `cover_search_root` 递归搜,同名取 mtime 最新 |
 | 合集 | 单选 | 否 | 读 | 视频号合集名(需提前在平台建好) |
 | 原创 | 复选框 | 否 | 读 | |
-| 账号 | 单选 | 否 | 读 | 空 → round-robin 分配;否则锁定 account_a/b/c/d |
+| 账号 | 单选 | 否 | 读 | 空 → round-robin 分配;非空可填 **display_name(中文名)或 account_id**(validator 双向反查)。账号 ID 工具侧 `secrets.token_hex(4)` 自动生成,运营无需关心;平台新增账号时会自动把 display_name 追加到本字段的飞书单选项 |
 | **执行日期** | 日期 | **是** | 读 | **新增**。daemon 只跑 `execute_date = today` 的任务 |
 | **定时发布时间** | 日期时间 | **是** | 读 | **改名 + 必填**(原"计划发布时间")。视频号页面上设置的发布时刻 |
 | 状态 | 单选 | 否 | **写** | 工具回写:待入库 / 已计划 / 发布中 / 已发布 / 失败 |
@@ -370,8 +370,9 @@ wxsp run --daemon
 `sync_now()` 做的事:
 1. `lark-oapi` 拉飞书"状态=待入库"的所有行(分页)
 2. 每行 → `validator.validate()`(含 `nas.find_video/find_cover()` 按文件名递归搜)
-3. 通过 → 写本地 `Video` + 创建 `Task(status=pending, execute_date, publish_at)`
-4. 不通过 → 飞书回写"失败 + 错因"(具体到哪个字段)
+3. 4 核心字段(执行日期 / 定时发布时间 / 标题 / 视频文件)任一为空 → **跳过且不回写**(`SyncResult.skipped_incomplete`)。视为"业务还没填完的草稿",留到下次拉
+4. 通过 → 写本地 `Video` + 创建 `Task(status=pending, execute_date, publish_at)`
+5. 不通过(非草稿、确实校验失败) → 飞书回写"失败 + 错因"(具体到哪个字段)
 
 注意:**视频文件不在飞书附件里**,飞书只存文件名;实际文件由 `nas.find_video()` 在**目标账号的** `video_search_root` 下递归 `rglob` 搜索得到绝对路径。
 
@@ -523,8 +524,17 @@ wxsp web [--port p]                  启动 Web UI(开浏览器),等价于 run -
 3. **Tasks** — 任务列表带筛选(执行日期/账号/状态),点击进详情;**手动触发跑今天**按钮
 4. **TaskDetail** — 单任务全信息,每步耗时,截图缩略图,重试按钮(单条加急 fire)
 5. **Plans** — 任意日期的任务清单(按 execute_date 查询;只读)
-6. **Config** — 编辑 config.yaml(表单 + 高级 YAML 模式),敏感字段掩码
+6. **Config** — 编辑 config.yaml(表单 + 高级 YAML 模式),敏感字段掩码;**新增账号**(ID 工具自动生成 + display_name 重名预检 + 自动推送到飞书账号字段);**企微测试推送**按钮(展开 ENV + https-only 校验,实发一条 markdown)
 7. **Logs** — SSE 实时日志流(按账号/任务/级别过滤)
+
+### HTMX 操作交互约定(本仓库统一)
+
+所有走 HTMX 同步执行的操作按钮(`/accounts/sync` / `/tasks/run-today` / etc.)遵守:
+
+- **失败弹全局 modal**:路由返 `200` + 失败 HTML 片段 + 响应头 `HX-Trigger: {"opError": {"title": "...", "detail": "..."}}`。`base.html` 注册 `document.body.addEventListener('opError', ...)` 监听器,把 detail 灌进 `<dialog id="op-modal">` 并 `showModal()`。不走 4xx/5xx —— 避免 htmx 默认的 `htmx:responseError` 路径漏 swap
+- **inline 状态片段**:同时把 flash 片段 swap 到 `#op-status`(成功/失败都用同一容器,绿/红/黄三色 class)
+- **loading 指示**:按钮带 `hx-indicator="#xxx-spinner"`,htmx 飞行期间自动加 `htmx-request` class 显隐 spinner
+- **并发去重**:同步阻塞型路由(sync / run-today)用 `threading.Lock` 串行,抢不到锁就返"正在跑中,请等"
 
 ### 实时通信
 
@@ -550,7 +560,7 @@ uvicorn wxsp.api.app:app --port 8765
 
 实现前**必须先读** `_ref/social-auto-upload/uploader/tencent/main.py`,理解其选择器选择和等待策略。**但用 patchright 替代原版 Playwright**(API 兼容)。
 
-### 发布流程(严格按顺序,20 步)
+### 发布流程(严格按顺序,21 步)
 
 每步独立函数,失败时:
 - 截图到 `logs/screenshots/{YYYYMM}/{task_id}_{step}.png`
@@ -570,18 +580,19 @@ uvicorn wxsp.api.app:app --port 8765
 [9]  set_cover()                       跳过 if cover_path is None
 [10] bind_topic()                       跳过 if topic is None
 [11] toggle_original()                  跳过 if not original_claim
-[12] set_schedule(task.publish_at)     视频号页面填飞书的"定时发布时间";**无立即发布分支**
-[13] risk_control_probe()              扫"请稍后/系统繁忙/操作过于频繁/账号异常"
+[12] disable_location()                 默认选"不显示位置"(运营约定,不接飞书字段)
+[13] set_schedule(task.publish_at)     视频号页面填飞书的"定时发布时间";**无立即发布分支**
+[14] risk_control_probe()              扫"请稍后/系统繁忙/操作过于频繁/账号异常"
                                        命中 → risk_control(paused_until=now+24h,告警,raise)
 ─────── ★ DRY_RUN GATE ★ ─────────────────
-[14] if dry_run: 截图 + 关闭 + return DryRunPreview
+[15] if dry_run: 截图 + 关闭 + return DryRunPreview
 ─────────────────────────────────────────
-[15] click_publish()
-[16] wait_for_success_indicator()
-[17] extract_remote_video_id_and_url()
-[18] close_browser()
-[19] cleanup_tmp(task.id)
-[20] commit_task_success() + feishu.writeback(status, url, err)
+[16] click_publish()
+[17] wait_for_success_indicator()
+[18] extract_remote_video_id_and_url()
+[19] close_browser()
+[20] cleanup_tmp(task.id)
+[21] commit_task_success() + feishu.writeback(status, url, err)
 ```
 
 ### 选择器编写约定
@@ -618,14 +629,25 @@ window.navigator.permissions.query = (parameters) => (
 | 类型 | 含义 | 重试策略 |
 |------|------|----------|
 | `network` | 网络/超时 | 指数退避,最多 3 次 |
-| `cookie_expired` | 登录失效 | 不重试,告警,等 `wxsp login` |
-| `risk_control` | 平台风控 | 不重试,账号暂停 24 小时 |
+| `cookie_expired` | 登录失效 | 不重试,告警,等 `wxsp login`(**账号级 halt**) |
+| `risk_control` | 平台风控 | 不重试,账号暂停 24 小时(**账号级 halt**) |
 | `video_invalid` | 文件损坏/格式不支持 | 不重试 |
-| `element_not_found` | 元素找不到(可能改版) | 1 次重试,截图,告警 |
+| `element_not_found` | 元素找不到(可能改版) | 1 次重试,截图,告警(**全局 halt**) |
 | `upload_failed` | 上传中断 | 2 次重试 |
-| `nas_unreachable` | NAS 不可达 | 5 次指数退避(NAS 可能短暂掉线) |
+| `nas_unreachable` | NAS 不可达 | 5 次指数退避(NAS 可能短暂掉线)(**全局 halt**) |
 | `feishu_api_error` | 飞书 API 错误 | 3 次重试 |
 | `unknown` | 兜底 | 1 次重试,然后 failed |
+
+### Halt 机制(防告警刷屏)
+
+`run_today_pending` 单 worker 串行跑队列,某条 task 命中下面任一情况后,后续相同范畴的 task **不再尝试**(避免反复开浏览器 + 重复推同一条告警刷屏):
+
+| 范畴 | 触发错误 | 行为 |
+|---|---|---|
+| **账号级 halt** | `cookie_expired` / `risk_control` | 该账号本轮剩余 task 全 skip(写 `RunSummary.per_account[aid].halt_reason`),其他账号继续 |
+| **全局 halt** | `element_not_found` / `nas_unreachable` | 整轮中止,所有账号剩余 task 全 skip(写 `RunSummary.global_halt_reason`) |
+
+跑完后推一条 `run_summary` 通知,头部高亮 halt 原因 + 按账号 breakdown(成功/失败/跳过 + 失败明细)。`element_not_found` 选 global 是因为视频号改版会让所有账号同样失败;`nas_unreachable` 同理。
 
 ---
 
@@ -638,23 +660,35 @@ class Notifier(Protocol):
     def send(self, event: NotifyEvent) -> bool: ...
 
 class NotifyEvent:
-    type: str            # cookie_expired | risk_control | element_not_found | task_failed | nas_unreachable
+    type: str            # cookie_expired | risk_control | element_not_found | task_failed | nas_unreachable | run_summary | backlog_high | cookie_warning
     level: str           # info | warn | error
     title: str
     content: str
     context: dict
+    task_id: int | None = None
+    account_id: str | None = None
+    account_display_name: str | None = None   # 渲染时优先用,运营看中文友好名
 ```
 
 **第一版只实现 `WecomNotifier`**(企微机器人,Markdown 消息;飞书做协作平台,企微做告警,职责分工)。`FeishuNotifier` / `DingtalkNotifier` 留作接口预留,需要时几十行代码即可加上。
 
+**通知文案约定(全中文,无英文穿透)**:
+- 所有 markdown 标题前缀 `[视频号]`(后续多平台扩展时按 settings 取)
+- `level` 渲染为中文标签:`info → [信息]` / `warn → [警告]` / `error → [错误]`
+- `error_type` 通过 `error_type_cn()` 映射(如 `cookie_expired → 登录态失效`),未知 key 兜底"未知错误"
+- 发布步骤(`step`)通过 `step_cn()` 映射(如 `upload → 上传视频`)。`element_not_found` 的 title 会拼上 step,例如"元素未找到 · 设置封面 —— 视频号可能改版"
+- 账号优先显示 `display_name`,没有时回退到 `account_id`
+
 ### 通知规则
 
-- ✅ 任务**失败**(重试用完后) → 企微告警
+- ✅ 任务**失败**(重试用完后) → 企微告警(同账号同类失败已被 halt 机制去重,见上节)
 - ✅ **风控** → 高优告警 + 账号自动暂停 24h
-- ✅ **登录失效** → 提醒扫码
-- ✅ **元素找不到**(可能改版) → 告警
-- ⚠️ 任务**成功** → 默认**不发**(80 条/天会刷屏),只在 DB 留 event 记录
-- ❌ 不做"每日日报"(YAGNI,可后期加)
+- ✅ **登录失效** → 提醒扫码;`cookie_warning`(距上次 active 超阈值但本次还能登)也推一条
+- ✅ **元素找不到**(可能改版) → 告警(标题拼步骤名,运营一眼看到改版位置)
+- ✅ **历史积压超阈值**(`backlog_high`) → 告警;**24h 冷却**(进程级 `threading.Lock` + Lock 内 commit 保证查写原子化,防 daemon 反复重启 / cron 多次触发刷屏)
+- ✅ **日汇总**(`run_summary`) → 每轮 `run_today_pending` 跑完推一条:成功 N / 失败 M / 暂停跳过 K,按账号 breakdown + 失败明细。整轮 halt 时头部高亮原因。失败 > 0 时 level=warn,否则 info
+- ⚠️ 单条任务**成功** → 默认**不发**(80 条/天会刷屏);汇总在 run_summary 里出
+- ❌ 不做"每日日报"(被 run_summary 覆盖,YAGNI)
 
 ### 路由
 
@@ -723,13 +757,13 @@ M0 脚手架 ──→ M1 数据层 ──┬──→ M2 浏览器+登录 ─�
 | M2 | 浏览器 + 登录 | browser.py(patchright + user_data_dir + init script) + `wxsp login` + doctor 检查登录态 |
 | M3 | 飞书同步 + 校验 | feishu.py(`sync_now`) + validator.py(含 NAS 文件检索) + `wxsp sync` + 不合规行回写错误 |
 | M4 | NAS 处理 | nas.py(find_video/find_cover/stage_to_tmp/cleanup_tmp) + doctor 检查 NAS + nas_unreachable 重试 |
-| M5 | 发布核心 | publisher.py 步骤 [0-20] + selectors.py + errors.py + retry.py + `wxsp run --task-id N [--dry-run]` |
+| M5 | 发布核心 | publisher.py 步骤 [0-21] + selectors.py + errors.py + retry.py + `wxsp run --task-id N [--dry-run]` |
 | M6 | 调度 daemon | scheduler.py(09:00 cron + 手动 fire,无 polling)+ `wxsp run --daemon` + `wxsp run --today` + 启动扫 running→interrupted |
 | M7 | 通知 + 回写 | notify.py + WecomNotifier + 飞书回写(status/url/error) + 5 类告警事件接入 |
 | M8 | Web UI | FastAPI + Jinja2 + HTMX:Dashboard / Accounts / Tasks / TaskDetail / Logs(SSE) / Config + 扫码二维码嵌入 + 手动触发按钮 |
 | M9 | 监控 + 归档 | Dashboard 显示积压 + 重新入队按钮 + 日志/截图清理 |
 | M10 | 部署 + 文档 | README |
-| M11 | 安装器 + 设置向导 | Nuitka 编译 + .dmg/.exe 出包 + Web UI 6 页向导 |
+| M11 | 安装器 + 设置向导 | Nuitka 编译 + .dmg/.exe 出包 + Web UI **5 页向导**(账号管理放 /config,不进向导) |
 
 **合计 ~22.5 工作日**。**MVP 截止点 = M7 完成**(端到端跑通:飞书 → 发布 → 通知);M8-M11 是体验/运维优化,生产前不能跳。
 

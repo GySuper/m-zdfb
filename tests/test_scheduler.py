@@ -449,14 +449,15 @@ def test_run_today_pending_emits_run_summary_with_failure_breakdown(
     run_summary_events = [e for e in captured if e.type == "run_summary"]
     assert len(run_summary_events) == 1
     ev = run_summary_events[0]
-    assert ev.level == "warn"
-    # 失败明细用中文 error_type(风控触发),不再是英文 risk_control
+    assert ev.level == "warn"  # 失败明细用中文 error_type(风控触发),不再是英文 risk_control
     assert "风控触发" in ev.content
     assert "risk_control" not in ev.content
-    # 按账号 breakdown:本测试只有一个账号 a
-    assert "**按账号**" in ev.content
-    assert "成功 1" in ev.content
-    assert "失败 1" in ev.content
+    # 各账号明细 section + 简化文案("新增 X,成功 Y,失败 Z" + 缩进失败原因)
+    assert "各账号明细:" in ev.content
+    assert "[a] 新增 2,成功 1,失败 1" in ev.content
+    assert "失败原因:风控触发" in ev.content
+    # title 也按新模板,失败 > 0 用 ⚠
+    assert ev.title.startswith("⚠")
     # context 也中文化
     assert ev.context == {
         "尝试": 2,
@@ -558,10 +559,13 @@ def test_run_today_pending_halts_account_after_cookie_expired(
     assert stat.skipped == 3
     assert stat.halt_reason == "登录态失效"
 
-    # run_summary 文案里要展示原因
+    # run_summary 文案里要展示原因 + ⚠ 标题(全跳过虽 failed=0 但需要运营干预)
     run_summary_events = [e for e in captured if e.type == "run_summary"]
     assert len(run_summary_events) == 1
-    assert "后续 3 条跳过(原因:登录态失效)" in run_summary_events[0].content
+    ev = run_summary_events[0]
+    assert ev.title.startswith("⚠")
+    assert "[a] 新增 0,成功 0,失败 0,跳过 3" in ev.content
+    assert "跳过原因:登录态失效" in ev.content
 
 
 def test_run_today_pending_continues_after_a_publish_failure(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from dataclasses import dataclass, field
 from datetime import date as _date
@@ -25,7 +26,6 @@ from wxsp.models import (
     Account,
     Event,
     Task,
-    Video,
 )
 from wxsp.notify import NotifyEvent, error_type_cn, notify
 from wxsp.publisher import AlreadyClaimed, publish
@@ -182,12 +182,51 @@ def mark_stale_running_as_interrupted(session: Session, *, now: datetime | None 
     return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
 
+# 失败消息里 publisher 拼的 "step=xxx: " 前缀对运营无意义,文案展示前剥掉。
+_STEP_PREFIX_RE = re.compile(r"^step=\S+:\s*")
+
+
+def _short_failure_reason(task: Task) -> str:
+    """把 task.last_error_type + last_error_msg 压成一行运营能直接看懂的中文。
+
+    格式:`错误类型 —— 简短描述`(描述为空时只显示错误类型)。
+    msg 取首行 + 截到 50 字符,避免一条 publisher 长 traceback 撑爆通知。
+    """
+    etype_cn = error_type_cn(task.last_error_type)
+    raw = (task.last_error_msg or "").strip()
+    if not raw:
+        return etype_cn
+    first_line = raw.splitlines()[0]
+    cleaned = _STEP_PREFIX_RE.sub("", first_line).strip()
+    if not cleaned:
+        return etype_cn
+    if len(cleaned) > 50:
+        cleaned = cleaned[:50] + "…"
+    return f"{etype_cn} —— {cleaned}"
+
+
 def _emit_run_summary(
     settings: Settings, *, summary: RunSummary, failed_task_ids: list[int]
 ) -> None:
-    """跑完后推一条 run_summary:今日累计 + 按账号 breakdown(成功/失败/暂停 + 失败明细)。
+    """跑完后推一条 run_summary。
 
     `attempted == 0 and skipped_paused == 0` 时直接返回(没动静不刷屏)。
+
+    文案示例:
+
+        时间:2026-05-19 19:27:16
+        汇总:4 个账号,成功 11,失败 2
+
+        各账号明细:
+        - [美食号] 新增 6,成功 5,失败 1
+          失败原因:上传失败 —— 页面提示上传失败
+        - [健身号] 新增 0,成功 0,失败 0,跳过 5
+          跳过原因:登录态失效
+        - [旅游号] 新增 4,成功 4,失败 0
+        - [搞笑号] 新增 3,成功 2,失败 1
+          失败原因:风控触发 —— 操作过于频繁
+
+    整轮 halt 时顶部加一行 `⚠ 本轮中止 —— 原因:xxx`,标题前缀 `⚠`。
     """
     if summary.attempted == 0 and summary.skipped_paused == 0:
         return
@@ -201,50 +240,47 @@ def _emit_run_summary(
                 task = session.get(Task, tid)
                 if task is None:
                     continue
-                video = session.get(Video, task.video_id)
-                title = (video.title if video is not None else "?")[:20]
-                etype_cn = error_type_cn(task.last_error_type)
-                # last_error_msg 可能为空字符串或 None;splitlines("") = [] 别炸
-                msg_lines = (task.last_error_msg or "").splitlines()
-                msg = msg_lines[0][:60] if msg_lines else ""
-                line = f"{etype_cn}:{title}(任务编号 {tid})"
-                if msg:
-                    line += f" —— {msg}"
-                failures_by_account.setdefault(task.account_id, []).append(line)
+                failures_by_account.setdefault(task.account_id, []).append(
+                    _short_failure_reason(task)
+                )
 
     lines: list[str] = []
     if summary.global_halt_reason is not None:
-        lines.append(
-            f"⚠ **整轮中止** —— 原因:{summary.global_halt_reason}。"
-            f"后续 {summary.skipped_paused} 条未尝试,请先排查后重试。"
-        )
+        lines.append(f"⚠ 本轮中止 —— 原因:{summary.global_halt_reason}")
         lines.append("")
+    lines.append(f"时间:{datetime.now():%Y-%m-%d %H:%M:%S}")
+    skip_suffix = f",跳过 {summary.skipped_paused}" if summary.skipped_paused else ""
     lines.append(
-        f"今日累计:成功 {summary.succeeded} 条 / 失败 {summary.failed} 条 / "
-        f"暂停跳过 {summary.skipped_paused} 条(共尝试 {summary.attempted} 条)"
+        f"汇总:{len(summary.per_account)} 个账号,"
+        f"成功 {summary.succeeded},失败 {summary.failed}{skip_suffix}"
     )
     if summary.per_account:
         lines.append("")
-        lines.append("**按账号**:")
+        lines.append("各账号明细:")
         for aid, stat in summary.per_account.items():
             display = settings.accounts[aid].display_name if aid in settings.accounts else aid
-            bits: list[str] = []
-            if stat.succeeded:
-                bits.append(f"成功 {stat.succeeded}")
-            if stat.failed:
-                bits.append(f"失败 {stat.failed}")
+            # "新增" = 该账号实际启动 publish 的条数(=成功+失败),paused/halt 跳过的不算"新增"。
+            new_count = stat.succeeded + stat.failed
+            bits = [
+                f"新增 {new_count}",
+                f"成功 {stat.succeeded}",
+                f"失败 {stat.failed}",
+            ]
             if stat.skipped:
-                if stat.halt_reason:
-                    bits.append(f"后续 {stat.skipped} 条跳过(原因:{stat.halt_reason})")
-                else:
-                    bits.append(f"暂停跳过 {stat.skipped}")
-            summary_bits = " / ".join(bits) if bits else "无"
-            lines.append(f"- **{display}**:{summary_bits}")
+                bits.append(f"跳过 {stat.skipped}")
+            lines.append(f"- [{display}] {','.join(bits)}")
             for failure_line in failures_by_account.get(aid, []):
-                lines.append(f"    - {failure_line}")
+                lines.append(f"  失败原因:{failure_line}")
+            if stat.skipped and stat.halt_reason:
+                lines.append(f"  跳过原因:{stat.halt_reason}")
 
-    level = "warn" if summary.failed > 0 else "info"
-    title = f"今日发布汇总:成功 {summary.succeeded} 条 / 失败 {summary.failed} 条"
+    # halt_reason(cookie_expired / risk_control)需要运营干预,即使 failed=0 也用 ⚠;
+    # paused_only(运营手动暂停)halt_reason 为 None,保持 ✓ 不打扰。
+    has_halt = any(stat.halt_reason for stat in summary.per_account.values())
+    needs_attention = summary.failed > 0 or summary.global_halt_reason is not None or has_halt
+    level = "warn" if needs_attention else "info"
+    title_prefix = "⚠" if needs_attention else "✓"
+    title = f"{title_prefix} 视频号发布完成"
     with session_scope(engine) as session:
         notify(
             NotifyEvent(

@@ -2,7 +2,7 @@
 
 设计要点(详见 docs/superpowers/specs/2026-05-12-m3-feishu-sync.md):
   - 无状态函数 API:make_client / fetch_pending_rows / writeback_row
-  - 3 次指数退避(1s/2s)就近写在函数体内,不引入 M5 的 retry.py
+  - 4 次指数退避(1s/3s/10s)就近写在函数体内,不引入 M5 的 retry.py
   - BitableRow 只存 record_id + 原始 fields dict;字段语义解析交给 validator
 """
 
@@ -31,11 +31,15 @@ from lark_oapi.api.bitable.v1 import (  # type: ignore[import-untyped]
 # https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-field/guide
 _FEISHU_FIELD_TYPE_SINGLE_SELECT = 3
 
-# 指数退避序列:第 1 次失败等 1s,第 2 次失败等 2s,第 3 次失败直接抛
-_RETRY_DELAYS = (1.0, 2.0)
+# 指数退避序列:第 1 次失败等 1s,第 2 次等 3s,第 3 次等 10s,第 4 次失败直接抛。
+# 历史 (1.0, 2.0)/3 次 在飞书侧抖动时被实测打穿(运营反馈:一批 task 跑完最后一条
+# writeback 未上传 → DB success / 飞书还是"已计划")。退避总时长 14s 配 API 15s
+# timeout,最坏 ~75s 内决定成败,远小于一次 publish 的 1-5min 耗时,不会拖慢主流程。
+_RETRY_DELAYS = (1.0, 3.0, 10.0)
+_RETRY_ATTEMPTS = len(_RETRY_DELAYS) + 1  # 共尝试 4 次
 
 # 单次 HTTP 调用超时(秒):lark-oapi 默认无超时,飞书侧抖动会让 Web UI 路由卡死。
-# 15s 足够正常调用;真挂了配合 3 次退避最多 ~50s 就抛 FeishuApiError 走 opError 弹窗。
+# 15s 足够正常调用;真挂了配合 4 次退避最多 ~75s 就抛 FeishuApiError 走 opError 弹窗。
 _DEFAULT_HTTP_TIMEOUT_SECONDS = 15.0
 
 
@@ -48,7 +52,7 @@ class BitableRow:
 
 
 class FeishuApiError(Exception):
-    """飞书 API 在 3 次指数退避后仍失败时抛出。"""
+    """飞书 API 在 4 次指数退避后仍失败时抛出。"""
 
 
 def make_client(
@@ -74,7 +78,7 @@ def fetch_pending_rows(
 ) -> list[BitableRow]:
     """拉所有 status_field=status_pending_value 的行,自动翻页。
 
-    内置 3 次指数退避(1s/2s):前两次失败 sleep 后重试;第三次失败 → FeishuApiError。
+    内置 4 次指数退避(1s/3s/10s):前三次失败 sleep 后重试;第四次失败 → FeishuApiError。
     response.code != 0 也按一次失败计。
     """
     rows: list[BitableRow] = []
@@ -104,7 +108,7 @@ def _search_with_retry(
     page_token: str | None,
 ) -> Any:
     last_err: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(_RETRY_ATTEMPTS):
         try:
             response = client.bitable.v1.app_table_record.search(
                 _build_search_request(
@@ -120,10 +124,10 @@ def _search_with_retry(
             return response
         except Exception as exc:
             last_err = exc
-            if attempt < 2:
+            if attempt < len(_RETRY_DELAYS):
                 time.sleep(_RETRY_DELAYS[attempt])
     assert last_err is not None
-    raise FeishuApiError(f"飞书 fetch 重试 3 次仍失败: {last_err}") from last_err
+    raise FeishuApiError(f"飞书 fetch 重试 {_RETRY_ATTEMPTS} 次仍失败: {last_err}") from last_err
 
 
 def _build_search_request(
@@ -178,10 +182,10 @@ def writeback_row(
 ) -> None:
     """回写指定 record 的指定字段。fields 已用飞书原字段名作 key。
 
-    内置 3 次指数退避(1s/2s);3 次都失败 → FeishuApiError。
+    内置 4 次指数退避(1s/3s/10s);4 次都失败 → FeishuApiError。
     """
     last_err: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(_RETRY_ATTEMPTS):
         try:
             response = client.bitable.v1.app_table_record.update(
                 _build_update_request(
@@ -196,10 +200,12 @@ def writeback_row(
             return
         except Exception as exc:
             last_err = exc
-            if attempt < 2:
+            if attempt < len(_RETRY_DELAYS):
                 time.sleep(_RETRY_DELAYS[attempt])
     assert last_err is not None
-    raise FeishuApiError(f"飞书 writeback 重试 3 次仍失败: {last_err}") from last_err
+    raise FeishuApiError(
+        f"飞书 writeback 重试 {_RETRY_ATTEMPTS} 次仍失败: {last_err}"
+    ) from last_err
 
 
 def _build_update_request(
@@ -308,7 +314,7 @@ def _list_fields_with_retry(
         builder = builder.page_token(page_token)
     req = builder.build()
     last_err: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(_RETRY_ATTEMPTS):
         try:
             response = client.bitable.v1.app_table_field.list(req)
             if not response.success():
@@ -318,10 +324,12 @@ def _list_fields_with_retry(
             return response
         except Exception as exc:
             last_err = exc
-            if attempt < 2:
+            if attempt < len(_RETRY_DELAYS):
                 time.sleep(_RETRY_DELAYS[attempt])
     assert last_err is not None
-    raise FeishuApiError(f"飞书 list field 重试 3 次仍失败: {last_err}") from last_err
+    raise FeishuApiError(
+        f"飞书 list field 重试 {_RETRY_ATTEMPTS} 次仍失败: {last_err}"
+    ) from last_err
 
 
 def _parse_options(prop: AppTableFieldProperty | None) -> list[tuple[str, str | None]]:
@@ -370,7 +378,7 @@ def _update_field_options(
         .build()
     )
     last_err: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(_RETRY_ATTEMPTS):
         try:
             response = client.bitable.v1.app_table_field.update(req)
             if not response.success():
@@ -380,7 +388,9 @@ def _update_field_options(
             return
         except Exception as exc:
             last_err = exc
-            if attempt < 2:
+            if attempt < len(_RETRY_DELAYS):
                 time.sleep(_RETRY_DELAYS[attempt])
     assert last_err is not None
-    raise FeishuApiError(f"飞书 update field 重试 3 次仍失败: {last_err}") from last_err
+    raise FeishuApiError(
+        f"飞书 update field 重试 {_RETRY_ATTEMPTS} 次仍失败: {last_err}"
+    ) from last_err

@@ -172,13 +172,14 @@ def test_fetch_pending_rows_retries_on_transient_error(
         status_field="状态",
     )
     assert len(rows) == 1
-    # 两次失败后第三次成功 → 应该 sleep 过 2 次(指数退避 1s/2s)
-    assert sleeps == [1.0, 2.0]
+    # 两次失败后第三次成功 → 应该 sleep 过 2 次(指数退避头两个 1s/3s)
+    assert sleeps == [1.0, 3.0]
 
 
-def test_fetch_pending_rows_raises_after_3_failures(
+def test_fetch_pending_rows_raises_after_all_attempts_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """4 次失败后抛 FeishuApiError。"""
     monkeypatch.setattr("wxsp.feishu.time.sleep", lambda s: None)
 
     fake = _FakeClient(
@@ -186,6 +187,7 @@ def test_fetch_pending_rows_raises_after_3_failures(
             RuntimeError("fail 1"),
             RuntimeError("fail 2"),
             RuntimeError("fail 3"),
+            RuntimeError("fail 4"),
         ]
     )
     with pytest.raises(FeishuApiError) as exc_info:
@@ -195,7 +197,7 @@ def test_fetch_pending_rows_raises_after_3_failures(
             table_id="t",
             status_field="状态",
         )
-    assert "fail 3" in str(exc_info.value) or "3 次" in str(exc_info.value)
+    assert "fail 4" in str(exc_info.value) or "4 次" in str(exc_info.value)
 
 
 def test_fetch_pending_rows_raises_on_api_error_response(
@@ -203,13 +205,7 @@ def test_fetch_pending_rows_raises_on_api_error_response(
 ) -> None:
     monkeypatch.setattr("wxsp.feishu.time.sleep", lambda s: None)
 
-    fake = _FakeClient(
-        [
-            _FakeResponse(items=[], has_more=False, code=999, msg="forbidden"),
-            _FakeResponse(items=[], has_more=False, code=999, msg="forbidden"),
-            _FakeResponse(items=[], has_more=False, code=999, msg="forbidden"),
-        ]
-    )
+    fake = _FakeClient([_FakeResponse(items=[], has_more=False, code=999, msg="forbidden")] * 4)
     with pytest.raises(FeishuApiError):
         fetch_pending_rows(
             fake,
@@ -277,10 +273,13 @@ def test_writeback_row_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) ->
     assert len(fake.update_calls) == 2
 
 
-def test_writeback_row_raises_after_3_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_writeback_row_raises_after_all_attempts_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """4 次失败后抛 FeishuApiError。"""
     monkeypatch.setattr("wxsp.feishu.time.sleep", lambda s: None)
 
-    fake = _FakeClientForUpdate([RuntimeError("f1"), RuntimeError("f2"), RuntimeError("f3")])
+    fake = _FakeClientForUpdate(
+        [RuntimeError("f1"), RuntimeError("f2"), RuntimeError("f3"), RuntimeError("f4")]
+    )
     with pytest.raises(FeishuApiError):
         writeback_row(
             fake,

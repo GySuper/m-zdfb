@@ -493,7 +493,12 @@ def test_run_today_pending_silent_run_summary_when_nothing_attempted(
 def test_run_today_pending_halts_account_after_cookie_expired(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """同一账号第一条 task 出 cookie_expired → 该账号本轮剩余 task 全跳过(去重 + 省时间)。"""
+    """同一账号第一条 task 出 cookie_expired → 该账号本轮剩余 task 全跳过(去重 + 省时间)。
+
+    新语义(v0.5.3+):cookie_expired 是软失败,publisher 已把 task 回退 pending。
+    scheduler 这边不计 failed,把 3 条都算成 skipped + halt_reason="登录态失效"。
+    扫码续命后下轮 queue_today 自动重跑这 3 条。
+    """
     from wxsp import scheduler as sched_mod
 
     db_path = tmp_path / "db.sqlite"
@@ -544,19 +549,19 @@ def test_run_today_pending_halts_account_after_cookie_expired(
     # 只跑了第一条,后两条直接 skip,不再调 publish
     assert len(publish_calls) == 1
     assert summary.attempted == 1
-    assert summary.failed == 1
-    assert summary.skipped_paused == 2  # 后续两条算作"被跳过"
+    assert summary.failed == 0  # cookie_expired 软失败,不计 failed
+    assert summary.skipped_paused == 3  # 第一条(回退 pending)+ 后两条(halt 跳)
 
     # per_account 应有 halt_reason
     stat = summary.per_account["a"]
-    assert stat.failed == 1
-    assert stat.skipped == 2
+    assert stat.failed == 0
+    assert stat.skipped == 3
     assert stat.halt_reason == "登录态失效"
 
     # run_summary 文案里要展示原因
     run_summary_events = [e for e in captured if e.type == "run_summary"]
     assert len(run_summary_events) == 1
-    assert "后续 2 条跳过(原因:登录态失效)" in run_summary_events[0].content
+    assert "后续 3 条跳过(原因:登录态失效)" in run_summary_events[0].content
 
 
 def test_run_today_pending_continues_after_a_publish_failure(

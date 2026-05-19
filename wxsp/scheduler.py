@@ -49,7 +49,12 @@ class AccountRunStat:
 
 # 触发"本轮停掉该账号剩余 task"的错误类型。第一条命中后,后续直接 skip,不再
 # 反复跑浏览器 + 不再重复推同一条告警。
-_ACCOUNT_HALT_ERRORS: frozenset[str] = frozenset({"cookie_expired", "risk_control"})
+#
+# 注意:`cookie_expired` 不在此 set 里,它走独立的"软失败"分支(下方处理逻辑):
+#   - publisher 已把 task 回退 pending(没真给它机会),scheduler 计 skipped 不计 failed
+#   - halted_accounts 仍然标记,让后续 task 跳过
+# 这样运营扫码续命后,这账号的所有 pending task 在下轮 queue_today 自动重跑,不用手动重试。
+_ACCOUNT_HALT_ERRORS: frozenset[str] = frozenset({"risk_control"})
 
 # 触发"整轮停掉所有账号剩余 task"的错误类型。这些是全局问题(视频号改版 /
 # NAS 掉线),其他账号跑也会挂同样的错;abort 整个 run 是为了 ① 不浪费时间
@@ -363,6 +368,20 @@ def run_today_pending(settings: Settings, *, do_sync: bool = True) -> RunSummary
         if result.ok:
             summary.succeeded += 1
             acc_stat.succeeded += 1
+        elif result.error_type == "cookie_expired":
+            # 软失败:publisher 已把 task 回退成 pending(本轮没真给机会),所以这里
+            # 不计 failed 计 skipped,但仍然 halt 该账号(后续 task 不再开浏览器,
+            # 也避免反复推 cookie_expired 告警)。运营扫码后下轮自动重跑。
+            summary.skipped_paused += 1
+            acc_stat.skipped += 1
+            reason_cn = error_type_cn(result.error_type)
+            halted_accounts[account_id] = reason_cn
+            if acc_stat.halt_reason is None:
+                acc_stat.halt_reason = reason_cn
+            logger.warning(
+                f"[scheduler] 账号 {account_id} task={task_id} 触发 {reason_cn};"
+                "task 回退 pending 等扫码后重跑,本轮剩余 task 全跳过"
+            )
         else:
             summary.failed += 1
             acc_stat.failed += 1
@@ -372,7 +391,7 @@ def run_today_pending(settings: Settings, *, do_sync: bool = True) -> RunSummary
             if result.error_type in _GLOBAL_HALT_ERRORS:
                 summary.global_halt_reason = reason_cn
                 logger.warning(f"[scheduler] 整轮中止:遇到 {reason_cn},剩余 task 全跳过")
-            # 账号级错误 → 仅停该账号剩余 task
+            # 账号级错误(risk_control 等)→ 仅停该账号剩余 task
             elif result.error_type in _ACCOUNT_HALT_ERRORS:
                 halted_accounts[account_id] = reason_cn
                 if acc_stat.halt_reason is None:

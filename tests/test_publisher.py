@@ -202,15 +202,19 @@ def _noop_steps(**overrides):
 def test_publish_failure_writes_status_failed_with_screenshot(
     pending_task: tuple[int, Path],
 ) -> None:
-    """步骤抛 PublisherError → DB 写 failed + last_error_type + 截图记录。"""
-    from wxsp.errors import CookieExpired
+    """步骤抛 PublisherError(非 cookie_expired)→ DB 写 failed + last_error_type + 截图记录。
+
+    cookie_expired 是软失败,task 回退 pending,见
+    `test_publish_cookie_expired_keeps_task_pending_for_relogin`。
+    """
+    from wxsp.errors import UploadFailed
     from wxsp.models import Task
 
     task_id, tmp_path = pending_task
     settings = make_settings(tmp_path, tmp_path)
 
-    def raise_cookie_expired(*_a, **_kw):
-        raise CookieExpired("二维码出来了")
+    def raise_upload(*_a, **_kw):
+        raise UploadFailed("上传中断")
 
     shots_captured: list[str] = []
 
@@ -218,7 +222,7 @@ def test_publish_failure_writes_status_failed_with_screenshot(
         shots_captured.append(step)
         return tmp_path / f"{task_id}_{step}.png"
 
-    overrides = _noop_steps(verify_logged_in=raise_cookie_expired)
+    overrides = _noop_steps(upload_video=raise_upload)
 
     with (
         patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
@@ -230,19 +234,66 @@ def test_publish_failure_writes_status_failed_with_screenshot(
         result = publish(task_id, dry_run=False, settings=settings)
 
     assert result.ok is False
-    assert result.error_type == "cookie_expired"
-    assert "step=login" in (result.error_msg or "")
-    assert "err_login" in shots_captured  # I1: 趁 page 还活着截图
+    assert result.error_type == "upload_failed"
+    assert "step=upload" in (result.error_msg or "")
+    assert "err_upload" in shots_captured  # I1: 趁 page 还活着截图
 
     engine = get_engine()
     with Session(engine) as session:
         task_db = session.get(Task, task_id)
         assert task_db is not None
         assert task_db.status == "failed"
-        assert task_db.last_error_type == "cookie_expired"
+        assert task_db.last_error_type == "upload_failed"
         assert task_db.screenshots_json != "[]"
         assert task_db.finished_at is not None
-        # I3b: cookie_expired 时回写 Account.cookie_status,避免 /accounts 还显示绿色 ok
+
+
+def test_publish_cookie_expired_keeps_task_pending_for_relogin(
+    pending_task: tuple[int, Path],
+) -> None:
+    """cookie_expired 是账号问题,不是 task 自身问题:
+
+    - task 状态回退成 pending(清 lease + 不设 finished_at),保留 attempts 作审计
+    - Account.cookie_status 仍写 expired(pre-flight 用)
+    - last_error_type/msg 保留(运营在 Tasks 列表能看到上轮失败原因)
+
+    运营扫码后,login 把 cookie_status 改回 ok → 下轮 queue_today 自动重新拿到这条 task。
+    """
+    from wxsp.errors import CookieExpired
+    from wxsp.models import Task
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+
+    def raise_cookie_expired(*_a, **_kw):
+        raise CookieExpired("二维码出来了")
+
+    overrides = _noop_steps(verify_logged_in=raise_cookie_expired)
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is False
+    assert result.error_type == "cookie_expired"
+
+    engine = get_engine()
+    with Session(engine) as session:
+        task_db = session.get(Task, task_id)
+        assert task_db is not None
+        assert task_db.status == "pending"
+        assert task_db.last_error_type == "cookie_expired"
+        assert task_db.lease_token is None
+        assert task_db.lease_expires_at is None
+        assert task_db.started_at is None
+        assert task_db.finished_at is None
+        assert task_db.attempts == 1  # claim 加的 1 保留,审计能看出"跑过 1 次失败"
+        # I3b: cookie_expired 时仍回写 Account.cookie_status,scheduler pre-flight 用
         acc_db = session.get(Account, "a")
         assert acc_db is not None
         assert acc_db.cookie_status == "expired"
@@ -515,8 +566,12 @@ def test_publish_success_without_remote_url_writes_back_status_only(
 def test_publish_failure_writes_back_status_failed_with_error_message(
     pending_task: tuple[int, Path],
 ) -> None:
-    """失败 → 飞书回写 状态=失败 + 错误信息。"""
-    from wxsp.errors import CookieExpired
+    """失败(非 cookie_expired)→ 飞书回写 状态=失败 + 错误信息。
+
+    cookie_expired 是软失败,飞书状态保留"已计划"等扫码后重跑,见
+    `test_publish_cookie_expired_skips_feishu_writeback`。
+    """
+    from wxsp.errors import UploadFailed
 
     task_id, tmp_path = pending_task
     settings = make_settings(tmp_path, tmp_path)
@@ -527,10 +582,10 @@ def test_publish_failure_writes_back_status_failed_with_error_message(
     def fake_writeback(client, *, app_token, table_id, record_id, fields):
         captured["fields"] = fields
 
-    def raise_cookie(*_a, **_kw):
-        raise CookieExpired("二维码出现")
+    def raise_upload(*_a, **_kw):
+        raise UploadFailed("上传中断")
 
-    overrides = _noop_steps(verify_logged_in=raise_cookie)
+    overrides = _noop_steps(upload_video=raise_upload)
 
     with (
         patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
@@ -546,8 +601,43 @@ def test_publish_failure_writes_back_status_failed_with_error_message(
     assert result.ok is False
     fields = captured["fields"]
     assert fields["状态"] == "失败"
-    assert "step=login" in fields["错误信息"]
-    assert "二维码" in fields["错误信息"]
+    assert "step=upload" in fields["错误信息"]
+    assert "上传中断" in fields["错误信息"]
+
+
+def test_publish_cookie_expired_skips_feishu_writeback(
+    pending_task: tuple[int, Path],
+) -> None:
+    """cookie_expired 软失败 → 飞书状态保持'已计划'(不调用 writeback_row)。
+
+    配合 publisher 把 task 回退 pending 的策略:运营扫码后下轮自动重跑,飞书侧不动。
+    """
+    from wxsp.errors import CookieExpired
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    _enable_feishu_writeback(settings)
+
+    def raise_cookie(*_a, **_kw):
+        raise CookieExpired("二维码出现")
+
+    overrides = _noop_steps(verify_logged_in=raise_cookie)
+
+    with (
+        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx(tmp_path)),
+        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.publisher.cleanup_tmp"),
+        patch("wxsp.publisher.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
+        patch("wxsp.publisher.make_client", return_value=MagicMock()) as mc,
+        patch("wxsp.publisher.writeback_row") as wb,
+        patch.multiple("wxsp.publisher", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is False
+    assert result.error_type == "cookie_expired"
+    mc.assert_not_called()
+    wb.assert_not_called()
 
 
 def test_publish_dry_run_skips_feishu_writeback(

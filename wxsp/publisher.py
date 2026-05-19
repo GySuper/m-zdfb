@@ -627,6 +627,13 @@ def publish(
             new_status = "pending"  # dry_run 没真发 → 回到可执行
         elif result.error_type == "interrupted":
             new_status = "interrupted"
+        elif result.error_type == "cookie_expired":
+            # 登录态失效不是 task 自身的问题(同样的视频换个登录态就能发)。
+            # 标 failed 会让运营在重扫后忘记重跑(queue_today 只挑 pending),漏发。
+            # 改成回退 pending + 不动飞书状态 + 保留 attempts(审计能看出"跑过 1 次")。
+            # cookie_status 在下面 I3b 仍写 expired,scheduler pre-flight 下一轮会跳。
+            # 运营扫码后 login 流程把 cookie_status 写回 ok,task 自动被 queue_today 重新拿到。
+            new_status = "pending"
         else:
             new_status = "failed"
 
@@ -646,6 +653,13 @@ def publish(
                 task_now.lease_expires_at = None
                 task_now.started_at = None
                 task_now.attempts = max(0, task_now.attempts - 1)
+                task_now.finished_at = None
+            elif result.error_type == "cookie_expired":
+                # cookie_expired 回退分支:清 lease 让下轮 queue_today/claim_task 能抢回来。
+                # attempts 保留(已 +1),let 运营在 Tasks 列表看出"跑过 1 次失败"。
+                task_now.lease_token = None
+                task_now.lease_expires_at = None
+                task_now.started_at = None
                 task_now.finished_at = None
             else:
                 task_now.finished_at = datetime.now()
@@ -716,7 +730,8 @@ def _writeback_to_feishu(
 ) -> None:
     """任务终态回写飞书 Bitable。
 
-    跳过条件:dry-run / feishu disabled / write_back_enabled=False。
+    跳过条件:dry-run / feishu disabled / write_back_enabled=False /
+    cookie_expired(本轮没真给 task 机会,飞书状态保留'已计划'等扫码后重跑)。
     成功 → 状态=已发布 (+ 已发布链接,如能拿到)。
     失败 → 状态=失败 + 错误信息。
     API 异常被吞(只 log),不能让飞书挂掉主流程。
@@ -724,6 +739,10 @@ def _writeback_to_feishu(
     if result.dry_run:
         return
     if not settings.feishu.enabled or not settings.feishu.sync.write_back_enabled:
+        return
+    if result.error_type == "cookie_expired":
+        # 配合 publisher finally 的"task 回退 pending"策略:飞书侧也保持'已计划',
+        # 运营扫码后下轮 queue_today 自动重跑。告警靠 notify(cookie_expired)。
         return
 
     fm = settings.feishu.field_map

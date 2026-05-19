@@ -592,6 +592,26 @@ def test_validate_video_file_auto_appends_mp4(tmp_path: Path) -> None:
     assert all(e.field != "视频文件" for e in result.errors), result.errors
 
 
+def test_validate_video_file_auto_appends_mp4_when_dot_in_basename(tmp_path: Path) -> None:
+    """文件名里含数字编号点(如 'zjn-0422-4. 甜豆')也要补 .mp4。
+    回归:旧实现用 `"." in raw` 误判,导致带编号点的裸名找不到文件。
+    """
+    base = "zjn-0422-4. 甜豆70条-机制种草-WZM-紧急通知-竞品复刻3"
+    video = tmp_path / f"{base}.mp4"
+    video.write_bytes(b"x")
+    row = _row_with(tmp_path, **{"视频文件": base})
+    nas = _StubNas()
+    nas.video_returns[f"{base}.mp4"] = video
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+    )
+    assert all(e.field != "视频文件" for e in result.errors), result.errors
+
+
 def test_validate_title_rich_text_array_format(tmp_path: Path) -> None:
     """飞书"单行文本"字段实际返回 [{"text": "...", "type": "text"}] 数组,validator 必须兼容。"""
     fields = dict(_make_happy_row(tmp_path).fields)

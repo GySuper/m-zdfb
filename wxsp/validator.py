@@ -252,8 +252,9 @@ def _check_video(
     if account_cfg is None:
         errors.append(FieldError(field=field_name, message="账号未识别,无法选择视频检索路径"))
         return None
-    # 运营常只填裸文件名(已知都是 mp4)→ 没扩展名时自动补 .mp4
-    lookup_name = raw if "." in raw else raw + ".mp4"
+    # 运营常只填裸文件名(已知都是 mp4)→ 没扩展名时自动补 .mp4。
+    # 注意:不能用 "." in raw 判定(文件名里的编号如 "4." 会误判),要看真后缀。
+    lookup_name = raw if Path(raw).suffix.lower() in _VIDEO_EXTENSIONS else raw + ".mp4"
     try:
         path = nas_finder.find_video(lookup_name, search_root=account_cfg.video_search_root)
     except FileNotFoundError:

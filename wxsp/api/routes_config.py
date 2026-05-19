@@ -23,13 +23,15 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 from pydantic import ValidationError
+from sqlmodel import Session
 
-from wxsp.api.deps import templates
+from wxsp.api.deps import get_session, templates
 from wxsp.config import Settings, _expand_env_vars, get_config_path
+from wxsp.models import Account
 
 router = APIRouter()
 _config_lock = threading.Lock()
@@ -404,11 +406,15 @@ def add_account(
     video_search_root: str = Form(...),
     cover_search_root: str = Form(...),
     enabled: bool = Form(True),
+    session: Session = Depends(get_session),
 ) -> RedirectResponse:
     """account_id / user_data_dir 均由系统自动生成(account_<8-hex> + 对应 profile 目录)。
 
     本地新增成功后,会尝试把 display_name 追加到飞书 Bitable "账号" 单选字段的选项里
     (前提 feishu.enabled=true);失败不阻断本地新增,只在 flash 里追加提示。
+
+    DB Account 行也同步插入(sync.py 的 active_accounts 以 DB 为准,不入库的话
+    validator 会判 '不存在或已停用')。
     """
     display_name = display_name.strip()
     if not display_name:
@@ -425,19 +431,29 @@ def add_account(
                 status_code=303,
             )
         aid = _generate_account_id(accounts)
+        user_data_dir = _profile_dir_for(aid)
         accounts[aid] = _build_account_entry(
             display_name=display_name,
             enabled=enabled,
             daily_limit=daily_limit,
             video_search_root=video_search_root,
             cover_search_root=cover_search_root,
-            user_data_dir=_profile_dir_for(aid),
+            user_data_dir=user_data_dir,
         )
         data["accounts"] = accounts
         errors = _validate_dict(data)
         if errors:
             return RedirectResponse(f"/config?flash=新增失败: {errors[0]}", status_code=303)
         _save_yaml(data)
+        if session.get(Account, aid) is None:
+            session.add(
+                Account(
+                    id=aid,
+                    display_name=display_name,
+                    user_data_dir=user_data_dir,
+                    daily_limit=daily_limit,
+                )
+            )
     suffix = _sync_account_to_feishu(data, display_name)
     return RedirectResponse(f"/config?flash=已添加账号 {aid}{suffix}", status_code=303)
 

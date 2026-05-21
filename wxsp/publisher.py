@@ -484,9 +484,13 @@ def publish(
         if video_cover_path is not None:
             staged_cover = stage_to_tmp(video_cover_path, task_id=task_id, tmp_root=tmp_root)
 
-        # [2] 启浏览器(headless 跟 settings)
+        # [2] 启浏览器(headless 跟 settings);带账号指纹避免视频号"同设备多账号"风控
         last_step = "browser"
-        with browser_context(user_data_dir, headless=settings.publisher.headless) as page:
+        with browser_context(
+            user_data_dir,
+            headless=settings.publisher.headless,
+            account_id=account_id,
+        ) as page:
             try:
                 last_step = "open"
                 open_publish_page(page)

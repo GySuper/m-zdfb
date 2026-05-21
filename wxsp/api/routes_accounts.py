@@ -233,7 +233,9 @@ def _run_login(account_id: str, user_data_dir: Path) -> None:
     from wxsp.doctor import record_cookie_check
 
     try:
-        is_logged_in: bool | None = check_cookie(user_data_dir, timeout_ms=300_000)
+        is_logged_in: bool | None = check_cookie(
+            user_data_dir, timeout_ms=300_000, account_id=account_id
+        )
     except Exception as exc:
         logger.exception(f"[web/login] {account_id} 浏览器异常: {exc}")
         is_logged_in = None

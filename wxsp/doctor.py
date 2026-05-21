@@ -72,7 +72,7 @@ def record_cookie_check(
     session.add(account)
 
 
-CookieChecker = Callable[[Path], bool]
+CookieChecker = Callable[[str, Path], bool]
 
 
 class CookieStatusRow(NamedTuple):
@@ -92,8 +92,9 @@ def refresh_cookie_status(
 ) -> list[CookieStatusRow]:
     """对所有账号跑一次 cookie 检查,回写状态。**调用方负责 commit**。
 
-    `cookie_checker` 是注入点:传一个 `Path -> bool` 的回调。生产代码传
-    `wxsp.browser.check_cookie`(真打开浏览器);测试传一个 stub。
+    `cookie_checker` 是注入点:传一个 `(account_id, user_data_dir) -> bool` 的回调。
+    生产代码包一层调 `wxsp.browser.check_cookie(..., account_id=...)`(真打开浏览器,
+    要带账号指纹保持跟 publisher 一致);测试传一个 stub。
 
     `cookie_checker` 抛异常 → 该账号被标 `unknown`,不影响其它账号继续检查。
 
@@ -106,7 +107,7 @@ def refresh_cookie_status(
     for account in accounts:
         now = now_fn()
         try:
-            is_logged_in: bool | None = cookie_checker(Path(account.user_data_dir))
+            is_logged_in: bool | None = cookie_checker(account.id, Path(account.user_data_dir))
         except Exception:
             is_logged_in = None
         record_cookie_check(

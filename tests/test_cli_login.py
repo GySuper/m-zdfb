@@ -60,7 +60,7 @@ def test_login_success_marks_cookie_ok_and_bumps_last_active(
     _add_account(db_env)
     captured: list[Path] = []
 
-    def fake_check(path: Path, *, timeout_ms: int) -> bool:
+    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
         captured.append(path)
         assert timeout_ms >= 60_000, "login must use a generous timeout for QR scan"
         return True
@@ -91,7 +91,7 @@ def test_login_failure_marks_cookie_expired_and_exits_nonzero(
 ) -> None:
     _add_account(db_env)
 
-    def fake_check(path: Path, *, timeout_ms: int) -> bool:
+    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
         return False  # simulated scan timeout
 
     from wxsp import cli as cli_module
@@ -140,7 +140,7 @@ def test_login_outputs_chinese_success_message(
 ) -> None:
     _add_account(db_env)
 
-    def fake_check(path: Path, *, timeout_ms: int) -> bool:
+    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
         return True
 
     from wxsp import cli as cli_module

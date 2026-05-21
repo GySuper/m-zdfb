@@ -63,7 +63,7 @@ def test_doctor_lists_each_account_with_status(
 
     calls: list[Path] = []
 
-    def fake_check(path: Path, *, timeout_ms: int) -> bool:
+    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
         calls.append(path)
         assert timeout_ms <= 30_000, "doctor should use a short timeout (already-logged-in path)"
         return path.name == "account_a"  # only A is logged in
@@ -99,7 +99,7 @@ def test_doctor_persists_cookie_status_to_db(
 ) -> None:
     _add_account(db_env, "account_a")
 
-    def fake_check(path: Path, *, timeout_ms: int) -> bool:
+    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
         return True
 
     video_root = tmp_path / "videos"
@@ -131,7 +131,7 @@ def test_doctor_continues_after_one_account_browser_crash(
     _add_account(db_env, "account_a")
     _add_account(db_env, "account_b")
 
-    def fake_check(path: Path, *, timeout_ms: int) -> bool:
+    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
         if path.name == "account_a":
             raise RuntimeError("simulated crash")
         return True
@@ -186,7 +186,7 @@ def test_doctor_prints_nas_section_when_all_ok(
 ) -> None:
     _add_account(db_env, "account_a")
 
-    def fake_check(path: Path, *, timeout_ms: int) -> bool:
+    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
         return True
 
     video_root = tmp_path / "videos"
@@ -214,7 +214,7 @@ def test_doctor_exits_1_when_nas_path_missing(
 ) -> None:
     _add_account(db_env, "account_a")
 
-    def fake_check(path: Path, *, timeout_ms: int) -> bool:
+    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
         return True
 
     video_root = tmp_path / "missing_videos"  # 故意不 mkdir
@@ -305,7 +305,9 @@ def test_doctor_cookie_warn_does_not_fail_exit_code(
     from wxsp import cli as cli_module
 
     # cookie 仍能登录 → 触发 warn 而不是 expired
-    monkeypatch.setattr(cli_module, "check_cookie", lambda path, *, timeout_ms: True)
+    monkeypatch.setattr(
+        cli_module, "check_cookie", lambda path, *, timeout_ms, account_id=None: True
+    )
     monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
 
     runner = CliRunner()

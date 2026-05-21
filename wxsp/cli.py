@@ -84,7 +84,9 @@ def login(account_id: str = typer.Argument(..., help="账号 ID")) -> None:
     # 2. 启浏览器,等扫码 / 等已登录标记可见(最长 5 分钟)
     typer.echo(f"[wxsp] 打开浏览器,请在弹出窗口中扫码登录 {account_id}(最长 5 分钟)...")
     try:
-        is_logged_in: bool | None = check_cookie(user_data_dir, timeout_ms=300_000)
+        is_logged_in: bool | None = check_cookie(
+            user_data_dir, timeout_ms=300_000, account_id=account_id
+        )
     except Exception as exc:
         typer.echo(f"[wxsp] 浏览器启动失败:{exc}")
         is_logged_in = None
@@ -187,8 +189,10 @@ def doctor() -> None:
     """健康检查:账号 / Cookie + NAS + 飞书 API。"""
 
     # cookie_checker 注入点:生产用 wxsp.browser.check_cookie(打开浏览器);测试可 monkeypatch
-    def cookie_checker(user_data_dir: Path) -> bool:
-        return check_cookie(user_data_dir, timeout_ms=15_000)
+    # 注意:必须把 account_id 透传给 check_cookie,否则 doctor 用"无指纹"模式开 profile,
+    # 跟 publisher/login 用的"有指纹"模式不一致 → 视频号会判定"异常设备"直接踢登录。
+    def cookie_checker(account_id: str, user_data_dir: Path) -> bool:
+        return check_cookie(user_data_dir, timeout_ms=15_000, account_id=account_id)
 
     settings = load_settings()
     warn_threshold = timedelta(days=settings.monitoring.cookie_warn_days)

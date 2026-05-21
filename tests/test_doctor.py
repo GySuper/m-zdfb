@@ -230,11 +230,11 @@ def test_refresh_cookie_status_uses_injected_checker(session: Session) -> None:
     _add_account(session, "account_b")
 
     fixed_now = datetime(2026, 5, 12, 14, 30, 0)
-    calls: list[Path] = []
+    calls: list[tuple[str, Path]] = []
 
-    def fake_checker(path: Path) -> bool:
-        calls.append(path)
-        return path.name == "account_a"  # only A is logged in
+    def fake_checker(account_id: str, path: Path) -> bool:
+        calls.append((account_id, path))
+        return account_id == "account_a"  # only A is logged in
 
     rows = refresh_cookie_status(
         session,
@@ -243,7 +243,8 @@ def test_refresh_cookie_status_uses_injected_checker(session: Session) -> None:
     )
     session.commit()
 
-    assert [p.name for p in calls] == ["account_a", "account_b"]
+    assert [aid for aid, _p in calls] == ["account_a", "account_b"]
+    assert all(isinstance(p, Path) for _aid, p in calls)
     assert [(r.account_id, r.status) for r in rows] == [
         ("account_a", COOKIE_STATUS_OK),
         ("account_b", COOKIE_STATUS_EXPIRED),
@@ -263,7 +264,7 @@ def test_refresh_cookie_status_handles_checker_exception_as_unknown(session: Ses
     _add_account(session, "account_a")
     fixed_now = datetime(2026, 5, 12, 14, 30, 0)
 
-    def crashing_checker(path: Path) -> bool:
+    def crashing_checker(_account_id: str, _path: Path) -> bool:
         raise RuntimeError("simulated patchright crash")
 
     rows = refresh_cookie_status(
@@ -287,7 +288,7 @@ def test_refresh_cookie_status_empty_db_returns_empty_list(session: Session) -> 
 
     rows = refresh_cookie_status(
         session,
-        cookie_checker=lambda _p: True,
+        cookie_checker=lambda _a, _p: True,
         now_fn=lambda: datetime(2026, 5, 12, 14, 30, 0),
     )
 
@@ -307,7 +308,7 @@ def test_refresh_cookie_status_includes_inactive_accounts(session: Session) -> N
 
     rows = refresh_cookie_status(
         session,
-        cookie_checker=lambda _p: True,
+        cookie_checker=lambda _a, _p: True,
         now_fn=lambda: datetime(2026, 5, 12, 14, 30, 0),
     )
 
@@ -318,10 +319,10 @@ def test_refresh_cookie_status_passes_pathlib_path_to_checker(session: Session) 
     from wxsp.doctor import refresh_cookie_status
 
     _add_account(session, "account_a")
-    received: list[object] = []
+    received: list[tuple[str, object]] = []
 
-    def fake_checker(path: Path) -> bool:
-        received.append(path)
+    def fake_checker(account_id: str, path: Path) -> bool:
+        received.append((account_id, path))
         return True
 
     refresh_cookie_status(
@@ -331,8 +332,9 @@ def test_refresh_cookie_status_passes_pathlib_path_to_checker(session: Session) 
     )
 
     assert len(received) == 1
-    assert isinstance(received[0], Path)
-    assert str(received[0]) == "/tmp/profiles/account_a"
+    assert received[0][0] == "account_a"
+    assert isinstance(received[0][1], Path)
+    assert str(received[0][1]) == "/tmp/profiles/account_a"
 
 
 def test_refresh_cookie_status_forwards_warn_threshold(session: Session) -> None:
@@ -346,7 +348,7 @@ def test_refresh_cookie_status_forwards_warn_threshold(session: Session) -> None
 
     rows = refresh_cookie_status(
         session,
-        cookie_checker=lambda _p: True,
+        cookie_checker=lambda _a, _p: True,
         now_fn=lambda: datetime(2026, 5, 12, 12, 0, 0),
         warn_threshold=timedelta(days=1.5),
     )

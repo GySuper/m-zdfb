@@ -51,7 +51,7 @@ def test_check_cookie_passes_user_data_dir_through_to_browser_context(tmp_path, 
     sentinel_page = object()
 
     @contextmanager
-    def fake_context(user_data_dir, *, headless=False):
+    def fake_context(user_data_dir, *, headless=False, account_id=None):
         seen_dirs.append(user_data_dir)
         yield sentinel_page
 
@@ -75,7 +75,7 @@ def test_check_cookie_returns_false_when_wait_returns_false(tmp_path, monkeypatc
     from wxsp import browser as browser_mod
 
     @contextmanager
-    def fake_context(user_data_dir, *, headless=False):
+    def fake_context(user_data_dir, *, headless=False, account_id=None):
         yield object()
 
     def fake_wait(page, *, timeout_ms):

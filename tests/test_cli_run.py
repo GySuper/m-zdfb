@@ -119,24 +119,25 @@ def test_run_no_flag_exits_two(tmp_path, monkeypatch):
 
 
 def test_run_daemon_in_packaged_mode_starts_web(monkeypatch) -> None:
-    """打包模式下 `wxsp run --daemon` 应该额外开一个 uvicorn 线程。"""
+    """打包模式下 `wxsp run --daemon` 应该用 uvicorn.run 主线程阻塞起 Web UI。
+
+    cron 由 FastAPI lifespan 内的 BackgroundScheduler 注册(避免和独立的
+    BlockingScheduler 重复),所以这里不再调用 start_daemon。
+    """
     import sys
     from unittest.mock import MagicMock, patch
 
     from typer.testing import CliRunner
 
     main_module = sys.modules["__main__"]
-    started_threads: list[str] = []
+    uvicorn_calls: list[tuple] = []
 
-    real_thread = __import__("threading").Thread
+    def fake_uvicorn_run(*args, **kwargs):
+        uvicorn_calls.append((args, kwargs))
 
-    def fake_thread(*args, **kwargs):
-        started_threads.append(kwargs.get("name", "unnamed"))
-        t = real_thread(*args, **kwargs)
-        return t
-
-    monkeypatch.setattr("threading.Thread", fake_thread)
-    monkeypatch.setattr("wxsp.cli.start_daemon", lambda s: None)
+    start_daemon_called: list[bool] = []
+    monkeypatch.setattr("wxsp.cli.start_daemon", lambda s: start_daemon_called.append(True))
+    monkeypatch.setattr("uvicorn.run", fake_uvicorn_run)
     monkeypatch.setattr(
         "wxsp.cli.load_settings",
         lambda: MagicMock(
@@ -151,7 +152,13 @@ def test_run_daemon_in_packaged_mode_starts_web(monkeypatch) -> None:
         runner = CliRunner()
         result = runner.invoke(cli_app, ["run", "--daemon"])
         assert result.exit_code == 0
-        assert "web-ui" in started_threads
+        assert len(uvicorn_calls) == 1
+        assert uvicorn_calls[0][0] == ("wxsp.api.app:app",)
+        assert uvicorn_calls[0][1]["host"] == "127.0.0.1"
+        assert uvicorn_calls[0][1]["port"] == 8765
+        # 不该再调 start_daemon(否则 BlockingScheduler 会和 lifespan 内的
+        # BackgroundScheduler 重复注册 cron)
+        assert start_daemon_called == []
 
 
 def test_run_daemon_in_dev_mode_does_not_start_web(monkeypatch) -> None:

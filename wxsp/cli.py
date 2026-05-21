@@ -359,20 +359,13 @@ def run(
         from wxsp.config import is_packaged
 
         if is_packaged():
-            import threading
-
+            # packaged 模式:Web UI + cron 都靠 uvicorn + FastAPI lifespan;
+            # 不再起独立 BlockingScheduler(否则会和 lifespan 内的
+            # BackgroundScheduler 重复注册 cron,触发时跑两次 run_today_pending)。
             import uvicorn
 
-            def _serve_web() -> None:
-                uvicorn.run(
-                    "wxsp.api.app:app",
-                    host=settings.webui.host,
-                    port=settings.webui.port,
-                    log_level="info",
-                )
-
-            threading.Thread(target=_serve_web, daemon=True, name="web-ui").start()
             if settings.webui.open_browser_on_start:
+                import threading
                 import time
                 import webbrowser
 
@@ -384,6 +377,18 @@ def run(
                         pass
 
                 threading.Thread(target=_open, daemon=True, name="open-browser").start()
+
+            typer.echo("[wxsp] 启动 daemon(Web UI + cron,按 Ctrl-C 退出)...")
+            try:
+                uvicorn.run(
+                    "wxsp.api.app:app",
+                    host=settings.webui.host,
+                    port=settings.webui.port,
+                    log_level="info",
+                )
+            except (KeyboardInterrupt, SystemExit):
+                typer.echo("[wxsp] daemon 退出")
+            return
 
         typer.echo("[wxsp] 启动 daemon(按 Ctrl-C 退出)...")
         try:

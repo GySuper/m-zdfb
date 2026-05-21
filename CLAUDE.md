@@ -66,7 +66,7 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 |--------|----------|
 | 视频号发布的 Playwright 选择器和流程 | 借鉴 social-auto-upload,在我们的架构里**重写**(它是脚本式 + 原版 Playwright,我们要模块化 + patchright),保留它的"踩坑成果"(选择器选择、等待策略) |
 | 扫码登录二维码捕获 | 可以**几乎照抄** social-auto-upload 的实现 |
-| 反检测 init script | patchright 已经内建大部分修补;额外的 init JS 从 OpenCLI 借鉴,保存到 `wxsp/stealth_js.py` 由 `wxsp/browser.py` 注入 |
+| 反检测 init script | patchright 内建 CDP 修补 + `wxsp/fingerprint.py` 的 **per-account 指纹注入**(UA / WebGL / Canvas / Audio / Client Hints 等,绕过视频号"同设备多账号"风控)。`wxsp/stealth_js.py` 是上一代静态 init script,保留供回滚 |
 | Exit code 规范 | 借鉴 OpenCLI 的 sysexits.h 命名 |
 
 **不要**直接 copy 整个 social-auto-upload 项目:它的代码风格、目录结构、Flask backend、Vue frontend 都和我们不同,生搬硬套会带来历史负担。
@@ -125,7 +125,7 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 | 配置 | YAML (PyYAML) + Pydantic Settings | 类型校验;**两层覆盖**(config.yaml + 环境变量) |
 | 数据库 | SQLite + **SQLModel** | 模型即 schema 即 Pydantic 校验;底层兼容 SQLAlchemy,后期可平滑升级 |
 | 日志 | loguru | 简单好用 |
-| 反检测 | **patchright 内建** + 自写 init script 补强 | OpenCLI 的 init script 作为补丁,patchright 兜底 |
+| 反检测 | **patchright 内建** + `wxsp/fingerprint.py` per-account 指纹注入 | 每个账号一套确定性指纹(种子 = MD5(account_id)),绕过视频号"同设备多账号"风控 |
 | 飞书 SDK | `lark-oapi`(官方 Python SDK) | 多维表格读写 |
 | 任务调度 | APScheduler | **只用一个 cron job(每天 09:00)**,无 polling |
 | 包管理 | uv | 跨平台一致;比 pip 快 |
@@ -148,8 +148,9 @@ wxsp/
 │   ├── scheduler.py                   # 09:00 cron + 手动 fire (APScheduler 包装,无 polling)
 │   ├── publisher.py                   # 视频号发布核心 (patchright)
 │   ├── selectors.py                   # 选择器集中管理(视频号改版时唯一改动点)
-│   ├── browser.py                     # patchright context 工厂 + stealth 注入
-│   ├── stealth_js.py                  # init script 常量(从 OpenCLI 借鉴)
+│   ├── browser.py                     # patchright context 工厂 + per-account 指纹注入
+│   ├── fingerprint.py                 # per-account 设备指纹生成 + JSON 持久化 + JS init script
+│   ├── stealth_js.py                  # 上一代静态 init script(已被 fingerprint 取代,保留回滚)
 │   ├── errors.py                      # 错误类型 + 分类
 │   ├── notify.py                      # Notifier 协议 + WecomNotifier
 │   ├── doctor.py                      # 健康检查
@@ -178,6 +179,9 @@ wxsp/
 │   ├── chrome-profiles/               # 每账号独立 user_data_dir(cookie 由此持久化,不再有 cookie.json)
 │   │   ├── account_a/
 │   │   ├── account_b/
+│   │   └── ...
+│   ├── fingerprints/                  # per-account 指纹 JSON(种子 = MD5(account_id),丢失能从种子重建)
+│   │   ├── account_a.json
 │   │   └── ...
 │   └── tmp/                           # 视频 stage 目录(NAS → 本地),发完清理
 ├── logs/
@@ -611,26 +615,27 @@ uvicorn wxsp.api.app:app --port 8765
 - 避免脆弱的 CSS class
 - 所有选择器集中在 `wxsp/selectors.py`,**唯一会因视频号改版而改的"易变文件"**
 
-### 反检测(patchright + 自写 init 补强)
+### 反检测(patchright + per-account 指纹注入)
 
-`patchright` 已经深度修补了 CDP 指纹泄漏。如果发现还有漏网之鱼,可以追加来自 OpenCLI 的 init script(保存在 `wxsp/stealth_js.py`):
+视频号风控按**设备指纹**判定多账号(实测同 IP 不同电脑能多账号共存,**同 IP 同电脑**会互踩 —— 后扫的赢、先扫的被踢)。`wxsp/fingerprint.py` 给每个账号生成确定性的假指纹,绕过这层风控。
 
-```python
-INIT_SCRIPT = """
-Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-window.chrome = window.chrome || { runtime: {} };
-Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });
-const originalQuery = window.navigator.permissions.query;
-window.navigator.permissions.query = (parameters) => (
-  parameters.name === 'notifications'
-    ? Promise.resolve({ state: Notification.permission })
-    : originalQuery(parameters)
-);
-"""
-```
+**核心机制**:
+- `browser_context(..., account_id=)` → `fingerprint.get_or_create_fingerprint(account_id, storage_dir)`
+- 种子 = `MD5(account_id)`,**确定性**派生(UA / screen / WebGL / Canvas 噪声 / Audio 噪声 / 字体 / Client Hints / hardwareConcurrency / deviceMemory),首次写 `data/fingerprints/{account_id}.json` 持久化,文件丢失能从种子重建
+- 应用方式:
+  - 部分字段通过 Playwright context options(`user_agent` / `viewport` / `locale` / `timezone_id` / `screen`)
+  - 其余通过 `context.add_init_script()` 注入 JS,覆写 `navigator.webdriver` / `WebGLRenderingContext.getParameter` / `HTMLCanvasElement.toDataURL` / `AudioBuffer.getChannelData` / `navigator.userAgentData` / `RTCPeerConnection`(屏蔽 ICE candidate 防 WebRTC 漏 IP)
+
+**关键不变量**:
+- **同账号永远拿同一套指纹**。指纹漂移 → 视频号判定"同账号换设备"踢登录,后果跟没指纹一样
+- **publisher / login / doctor 必须都传 account_id**。一边带指纹一边不带,视频号同样判定异常设备 → `doctor.CookieChecker` 签名是 `(account_id, user_data_dir) -> bool`,强制透传
+- 指纹生成失败 → `browser_context` **软回退到无指纹模式**(`no_viewport=True`),不阻塞发布;只记 warn 日志
+
+**升级路径**:第一次启用指纹后,旧 profile 里的 cookie 在视频号眼里关联的是"无指纹"那台设备 → **运营要重新扫码登录每个账号**。
 
 每个账号使用独立的 `user_data_dir`(配置里指定),避免互相污染。**cookie 由 persistent context 自动管理,不再单独维护 cookie.json**。
+
+`wxsp/stealth_js.py` 是上一代静态 init script(来自 OpenCLI 借鉴),已被 per-account 指纹完全取代,代码保留备用。
 
 ---
 
@@ -800,6 +805,9 @@ M0 脚手架 ──→ M1 数据层 ──┬──→ M2 浏览器+登录 ─�
 - **Q: NAS 暂时连不上怎么办?** `nas_unreachable` 错误类型,5 次指数退避;持续不可达则告警
 - **Q: 视频文件名重复怎么办?** `nas.find_video()` 在 `video_search_root` 递归找,多匹配取 **mtime 最新**;0 匹配 → validator 拒绝入库 + 飞书回写"文件不存在"
 - **Q: Web UI 能创建任务吗?** 不能。Web UI 是运维控制台,任务创建只走飞书表
+- **Q: 同一台机器上 4 个账号能不能同时登录?** 能,靠 `wxsp/fingerprint.py` 的 per-account 指纹。视频号按设备指纹判定多账号,4 个账号 4 套不同指纹 → 视频号眼里像 4 台不同电脑,不会互踩
+- **Q: 升级到带指纹的版本后,为什么所有账号都掉登录了?** 旧 profile 在视频号眼里关联的是"无指纹"那台设备,新版本启动会带新指纹 → 视频号判定换设备踢登录。**升级后每个账号都要重新扫码登录一次**,后续就稳定了
+- **Q: `data/fingerprints/*.json` 能删吗?** 别。删了等于让账号生成新指纹,视频号会判定"同账号换设备"踢登录。文件丢了能从 `MD5(account_id)` 种子重建出同一套(确定性),所以**真要删也得连带 `data/chrome-profiles/{account_id}/` 一起删 + 重新扫码登录**
 
 ---
 

@@ -144,9 +144,23 @@ def browser_context(
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(**launch_kwargs)
         try:
-            if fp_init_script is not None:
-                context.add_init_script(fp_init_script)
             page = context.pages[0] if context.pages else context.new_page()
+            if fp_init_script is not None:
+                # patchright 1.59.1 + 当前 Chromium 下,context.add_init_script /
+                # page.add_init_script 一旦调用,后续 navigate 全部 ERR_CONNECTION_CLOSED
+                # (本地复现:连 about:blank → baidu/google/example.com 全炸)。
+                # 改用 framenavigated 事件,navigate 完成后立即对 frame evaluate
+                # 同一段覆写脚本 —— 错过第一拍 server-side first GET 的 fingerprint
+                # check(视频号实际是 navigate 后 JS 上报指纹,所以仍然有效)。
+                def _inject_on_nav(frame: Any) -> None:
+                    try:
+                        frame.evaluate(fp_init_script)
+                    except Exception:
+                        # about:blank / 已 detach 的 frame / cross-origin iframe 都
+                        # 可能 evaluate 失败,无所谓 —— 我们只关心主站和 wujie 子 frame。
+                        pass
+
+                page.on("framenavigated", _inject_on_nav)
             yield page
         finally:
             context.close()

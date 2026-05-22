@@ -90,15 +90,27 @@ def browser_context(
         "headless": headless,
         "args": [
             "--disable-blink-features=AutomationControlled",
-            # Chromium 内置 async DNS 在企业网 / 某些 Windows DNS 配置下会
-            # 整段失败(ERR_NAME_NOT_RESOLVED 即使系统 nslookup 能解析);
-            # 关掉走系统 thread-pool getaddrinfo,跟普通 Chrome 行为一致。
-            "--disable-features=AsyncDns",
+            # Chromium 内置 DNS 路径在企业网 / 某些 Windows DNS 配置下会整段失败
+            # (ERR_NAME_NOT_RESOLVED 即使系统 nslookup 能解析)。把已知 DNS-related
+            # feature 全关,强制走系统 thread-pool getaddrinfo;unknown feature 名
+            # 会被 Chromium 忽略,所以多写几个版本名兼容不同 patchright Chromium 版。
+            "--disable-features=AsyncDns,AsyncDnsResolver,DnsOverHttps,SecureDnsForFreshnessCheck",
+            "--dns-prefetch-disable",
         ],
     }
 
+    # 诊断 escape hatch:WXSP_DISABLE_FINGERPRINT=1 时彻底跳过指纹注入,用来对照
+    # 排查"是不是指纹引入了某种副作用"。生产默认不设,行为不变。
+    disable_fingerprint = os.environ.get("WXSP_DISABLE_FINGERPRINT", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if disable_fingerprint and account_id is not None:
+        logger.warning(f"[browser] WXSP_DISABLE_FINGERPRINT=1,跳过 account={account_id} 的指纹注入")
+
     fp_init_script: str | None = None
-    if account_id is not None:
+    if account_id is not None and not disable_fingerprint:
         try:
             from wxsp.fingerprint import (
                 context_options as fp_context_options,

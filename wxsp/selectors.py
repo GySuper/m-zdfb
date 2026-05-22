@@ -77,6 +77,12 @@ SCHEDULE_NEXT_MONTH_BTN = "button.weui-desktop-btn__icon__right"
 SCHEDULE_DAY_TABLE = "table.weui-desktop-picker__table a"
 SCHEDULE_DAY_DISABLED_CLASS = "weui-desktop-picker__disabled"
 SCHEDULE_TIME_INPUT = 'input[placeholder="请选择时间"]'
+# 时分面板:weui 在 picker 里给"时""分"各放一个 ol,<li> 是 00..23 / 00..59,
+# 当前选中带 .weui-desktop-picker__selected;**已过/到不了的时段也带 disabled class**。
+# 老逻辑用 keyboard.type("%H") 走 weui 内建数字快捷输入,但冒号被吞导致分钟列从不更新,
+# 现在改为按数字精确 click 对应 <li>,小时分钟独立选,绕开输入法 parse 不确定。
+SCHEDULE_TIME_HOUR_LI = "ol.weui-desktop-picker__time__hour > li"
+SCHEDULE_TIME_MINUTE_LI = "ol.weui-desktop-picker__time__minute > li"
 
 # ============== [13] 风控文案 ==============
 # 任一在页面 body 文本中出现 → RiskControl

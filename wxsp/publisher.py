@@ -323,7 +323,11 @@ def disable_location(page: Page) -> None:
 
 
 def set_schedule(page: Page, *, publish_at: datetime) -> None:
-    """[12] 切到"定时" → 选日期 → 输入小时数(分钟交给平台 0)。
+    """[12] 切到"定时" → 选日期 → 在时分面板里点小时 li + 分钟 li。
+
+    weui picker 是分栏 spinner:小时和分钟各一列 ``<li>``,**点 li 提交而非键盘**。
+    早期 ``keyboard.type("%H")`` 靠的是 weui 数字快捷匹配,冒号被吞导致分钟列从不
+    被更新 —— 飞书 "21:20" 永远被发布成 "21:00"。
 
     publish_at ∈ [now+30min, now+14d];超出 raise VideoInvalid
     (validator 已挡了一道,这里只是兜底)。
@@ -351,11 +355,13 @@ def set_schedule(page: Page, *, publish_at: datetime) -> None:
             element.click()
             break
 
-    # 输入小时(平台默认分钟=00,参考实现也是只输小时)
+    # 点时间输入框展开时分面板,然后分别点小时 li + 分钟 li
     page.click(sel.SCHEDULE_TIME_INPUT)
-    page.keyboard.press("Control+KeyA")
-    page.keyboard.type(publish_at.strftime("%H"))
-    page.locator(sel.TITLE_EDITOR).click()  # 点别处收起时间选择器
+    hour_text = f"{publish_at.hour:02d}"
+    minute_text = f"{publish_at.minute:02d}"
+    page.locator(sel.SCHEDULE_TIME_HOUR_LI).get_by_text(hour_text, exact=True).first.click()
+    page.locator(sel.SCHEDULE_TIME_MINUTE_LI).get_by_text(minute_text, exact=True).first.click()
+    page.locator(sel.TITLE_EDITOR).click()  # 点别处收起 picker
 
 
 def risk_control_probe(page: Page) -> None:

@@ -99,18 +99,23 @@ def browser_context(
         ],
     }
 
-    # 诊断 escape hatch:WXSP_DISABLE_FINGERPRINT=1 时彻底跳过指纹注入,用来对照
-    # 排查"是不是指纹引入了某种副作用"。生产默认不设,行为不变。
-    disable_fingerprint = os.environ.get("WXSP_DISABLE_FINGERPRINT", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    )
-    if disable_fingerprint and account_id is not None:
-        logger.warning(f"[browser] WXSP_DISABLE_FINGERPRINT=1,跳过 account={account_id} 的指纹注入")
+    # 诊断 escape hatch:WXSP_DISABLE_FINGERPRINT 接受
+    #   "1" / "true" / "all" → 全禁(等同 v0.7.2 行为)
+    #   "context" / "contextopts" → 只禁 context options(UA / viewport / locale / tz / screen)
+    #   "initscript" / "script" → 只禁 add_init_script 的 JS 覆写
+    # 用来二分定位"指纹的哪一部分让 Chromium 内部 DNS 失败"。生产留空 = 全启用。
+    _fp_disable = os.environ.get("WXSP_DISABLE_FINGERPRINT", "").strip().lower()
+    disable_all = _fp_disable in ("1", "true", "yes", "all")
+    disable_context = disable_all or _fp_disable in ("context", "contextopts", "options")
+    disable_init = disable_all or _fp_disable in ("initscript", "script", "js")
+    if account_id is not None and _fp_disable:
+        logger.warning(
+            f"[browser] WXSP_DISABLE_FINGERPRINT={_fp_disable!r},account={account_id} "
+            f"context_disabled={disable_context} init_script_disabled={disable_init}"
+        )
 
     fp_init_script: str | None = None
-    if account_id is not None and not disable_fingerprint:
+    if account_id is not None and not disable_all:
         try:
             from wxsp.fingerprint import (
                 context_options as fp_context_options,
@@ -123,8 +128,12 @@ def browser_context(
             )
 
             fp = get_or_create_fingerprint(account_id, _fingerprint_storage_dir())
-            launch_kwargs.update(fp_context_options(fp))
-            fp_init_script = fp_init_script_fn(fp)
+            if not disable_context:
+                launch_kwargs.update(fp_context_options(fp))
+            else:
+                launch_kwargs["no_viewport"] = True
+            if not disable_init:
+                fp_init_script = fp_init_script_fn(fp)
         except Exception as exc:
             # 指纹生成不该阻塞登录/发布;退化到 no_viewport 老路径,记日志告警。
             logger.warning(f"[browser] 指纹注入失败 account={account_id}: {exc};退化到无指纹模式")

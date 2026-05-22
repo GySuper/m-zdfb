@@ -88,7 +88,13 @@ def browser_context(
     launch_kwargs: dict[str, Any] = {
         "user_data_dir": str(user_data_dir),
         "headless": headless,
-        "args": ["--disable-blink-features=AutomationControlled"],
+        "args": [
+            "--disable-blink-features=AutomationControlled",
+            # Chromium 内置 async DNS 在企业网 / 某些 Windows DNS 配置下会
+            # 整段失败(ERR_NAME_NOT_RESOLVED 即使系统 nslookup 能解析);
+            # 关掉走系统 thread-pool getaddrinfo,跟普通 Chrome 行为一致。
+            "--disable-features=AsyncDns",
+        ],
     }
 
     fp_init_script: str | None = None

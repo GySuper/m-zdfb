@@ -31,6 +31,7 @@ from sqlmodel import Session
 
 from wxsp.api.deps import get_session, templates
 from wxsp.config import Settings, _expand_env_vars, get_config_path
+from wxsp.config import platform_label as _platform_label
 from wxsp.models import Account
 
 router = APIRouter()
@@ -56,14 +57,10 @@ NOTIFY_ON_OPTIONS: list[tuple[str, str]] = [
     ("run_summary", "跑完汇总(每次跑完推一条 ✓N ✗M)"),
 ]
 
-FIELD_MAP_KEYS: list[tuple[str, str]] = [
+_SHARED_FIELD_MAP_KEYS = [
     ("video_file", "视频文件"),
     ("title", "标题"),
     ("description", "描述"),
-    ("tags", "标签"),
-    ("cover", "封面文件"),
-    ("topic", "合集"),
-    ("original_claim", "原创"),
     ("account", "账号"),
     ("execute_date", "执行日期"),
     ("publish_at", "定时发布时间"),
@@ -71,6 +68,26 @@ FIELD_MAP_KEYS: list[tuple[str, str]] = [
     ("remote_url", "已发布链接"),
     ("error_message", "错误信息"),
 ]
+
+_PLATFORM_FIELD_MAP_KEYS: dict[str, list[tuple[str, str]]] = {
+    "tencent_channel": [
+        ("tags", "标签"),
+        ("cover", "封面文件"),
+        ("topic", "合集"),
+        ("original_claim", "原创"),
+    ],
+    "taobao_guanghe": [
+        ("topic", "话题活动"),
+        ("product_ids", "商品ID"),
+        ("declaration", "创作者声明"),
+        ("ai_optimize", "AI优化"),
+    ],
+}
+
+
+def _field_map_keys(platform: str) -> list[tuple[str, str]]:
+    extra = _PLATFORM_FIELD_MAP_KEYS.get(platform, [])
+    return _SHARED_FIELD_MAP_KEYS + extra
 
 
 def _profile_dir_for(account_id: str) -> str:
@@ -213,7 +230,9 @@ def _view_model(data: dict[str, Any], *, platform: str | None = None) -> dict[st
         "feishu_app_secret_display": _display_secret(feishu.get("app_secret", "")),
         "feishu_bitable_app_token": bitable.get("app_token", ""),
         "feishu_bitable_table_id": bitable.get("table_id", ""),
-        "feishu_fm": {k: fm.get(k, label) for k, label in FIELD_MAP_KEYS},
+        "feishu_fm": {
+            k: fm.get(k, label) for k, label in _field_map_keys(platform or "tencent_channel")
+        },
         "feishu_sync_writeback": bool(sync.get("write_back_enabled", True)),
         # monitoring
         "mon_cookie_warn_days": mon.get("cookie_warn_days", 1.5),
@@ -243,8 +262,8 @@ def _render_config(
     platform: str | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
-    platform_options = sorted({"tencent_channel": "视频号", "taobao_guanghe": "淘宝光合"}.keys())
     cfg_path = _config_path(platform or "tencent_channel")
+    p_label = _platform_label(platform or "tencent_channel")
     return templates.TemplateResponse(
         request,
         "config.html",
@@ -256,10 +275,9 @@ def _render_config(
             "errors": errors or [],
             "vm": _view_model(data, platform=platform),
             "notify_on_options": NOTIFY_ON_OPTIONS,
-            "field_map_keys": FIELD_MAP_KEYS,
+            "field_map_keys": _field_map_keys(platform or "tencent_channel"),
             "edit_account_id": edit_account_id,
-            "filter_platform": platform or "",
-            "platform_options": platform_options,
+            "platform_label": p_label,
         },
         status_code=status_code,
     )
@@ -811,10 +829,13 @@ def save_fieldmap(
     feishu_fm_video_file: str = Form(...),
     feishu_fm_title: str = Form(...),
     feishu_fm_description: str = Form(...),
-    feishu_fm_tags: str = Form(...),
-    feishu_fm_cover: str = Form(...),
-    feishu_fm_topic: str = Form(...),
-    feishu_fm_original_claim: str = Form(...),
+    feishu_fm_tags: str = Form(""),
+    feishu_fm_cover: str = Form(""),
+    feishu_fm_topic: str = Form(""),
+    feishu_fm_original_claim: str = Form(""),
+    feishu_fm_declaration: str = Form(""),
+    feishu_fm_ai_optimize: str = Form(""),
+    feishu_fm_product_ids: str = Form(""),
     feishu_fm_account: str = Form(...),
     feishu_fm_execute_date: str = Form(...),
     feishu_fm_publish_at: str = Form(...),
@@ -832,6 +853,9 @@ def save_fieldmap(
             "cover": feishu_fm_cover,
             "topic": feishu_fm_topic,
             "original_claim": feishu_fm_original_claim,
+            "declaration": feishu_fm_declaration,
+            "ai_optimize": feishu_fm_ai_optimize,
+            "product_ids": feishu_fm_product_ids,
             "account": feishu_fm_account,
             "execute_date": feishu_fm_execute_date,
             "publish_at": feishu_fm_publish_at,

@@ -4,26 +4,16 @@
 
   <div class="page-header">
     <div>
-      <div class="page-title">配置</div>
+      <div class="page-title">{{ platform_label or '视频号' }}配置</div>
       <div class="page-subtitle">
         文件 <code>{{ abs_path }}</code>
         {% if not exists %} <span class="badge error">未找到</span>{% endif %}
-        · 每个分区可单独保存 · 保存前自动备份到 <code>config.yaml.bak</code>
+        · 每分区单独保存 · 保存前自动备份到 <code>.bak</code>
       </div>
     </div>
   </div>
 
   {% if flash %}<div class="flash ok" id="flash-banner">{{ flash }}</div>{% endif %}
-
-  {% if platform_options|length > 1 %}
-  <div class="platform-tabs">
-    <span class="platform-tabs-label">编辑配置的平台:</span>
-    <a class="platform-tab {% if not filter_platform %}active{% endif %}" href="/config">默认</a>
-    {% for p in platform_options %}
-      <a class="platform-tab {% if filter_platform==p %}active{% endif %}" href="/config?platform={{ p }}">{{ platform_cn(p) }}</a>
-    {% endfor %}
-  </div>
-  {% endif %}
 
   <div class="cfg-layout">
     {# ============ 左侧锚点导航 ============ #}

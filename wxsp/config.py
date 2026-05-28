@@ -88,6 +88,7 @@ class AccountConfig(BaseModel):
     display_name: str
     enabled: bool = True
     daily_limit: int
+    platform: str = "tencent_channel"
     user_data_dir: Path
     # 视频/封面检索路径(支持 {nas_root} 占位,会在 Settings.after 钩子里展开)
     video_search_root: Path
@@ -169,15 +170,99 @@ class WebUIConfig(BaseModel):
     open_browser_on_start: bool = True
 
 
+class PlatformSchedulerConfig(BaseModel):
+    daily_cron_hour: int = 9
+    daily_cron_minute: int = 0
+
+
+class PlatformPublisherConfig(BaseModel):
+    headless: bool = False
+    upload_timeout_seconds: int = 600
+    step_pause_seconds: tuple[float, float] = (1.0, 3.0)
+    max_concurrent_accounts: int = 1
+
+
+class PlatformFeishuConfig(BaseModel):
+    enabled: bool = True
+    app_id: str
+    app_secret: str
+    bitable: FeishuBitableConfig
+    field_map: FeishuFieldMap = Field(default_factory=FeishuFieldMap)
+    sync: FeishuSyncConfig = Field(default_factory=FeishuSyncConfig)
+
+
+class PlatformMonitoringConfig(BaseModel):
+    cookie_warn_days: float = 1.5
+    notifiers: NotifiersConfig
+    notify_on: list[str] = Field(default_factory=list)
+
+
+class PlatformConfig(BaseModel):
+    scheduler: PlatformSchedulerConfig = Field(default_factory=PlatformSchedulerConfig)
+    publisher: PlatformPublisherConfig = Field(default_factory=PlatformPublisherConfig)
+    feishu: PlatformFeishuConfig | None = None
+    monitoring: PlatformMonitoringConfig | None = None
+
+
 class Settings(BaseModel):
     app: AppConfig
     paths: PathsConfig
     accounts: dict[str, AccountConfig]
+    platforms: dict[str, PlatformConfig] = Field(default_factory=dict)
     scheduler: SchedulerConfig
     publisher: PublisherConfig
     feishu: FeishuConfig
     monitoring: MonitoringConfig
     webui: WebUIConfig
+
+    @model_validator(mode="before")
+    @classmethod
+    def _extract_flat_from_platforms(cls, data: Any) -> Any:
+        """When new platforms.* format is used, copy scheduler/publisher/feishu/monitoring
+        from the tencent_channel block up to top-level flat fields, so old accessors
+        (settings.scheduler etc.) still work.
+
+        This runs BEFORE field validation.  `data` may contain raw dicts (YAML load)
+        or already-validated model instances (direct Settings(...) constructor).
+        Platform types are converted to their flat counterparts via model_dump +
+        model_validate (extra fields get defaults, missing fields are dropped).
+        """
+        if not isinstance(data, dict):
+            return data
+        platforms_raw = data.get("platforms")
+        if not platforms_raw or not isinstance(platforms_raw, dict):
+            return data
+        tc = platforms_raw.get("tencent_channel")
+        if tc is None:
+            return data
+
+        _CONVERSION: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
+            "scheduler": (PlatformSchedulerConfig, SchedulerConfig),
+            "publisher": (PlatformPublisherConfig, PublisherConfig),
+            "feishu": (PlatformFeishuConfig, FeishuConfig),
+            "monitoring": (PlatformMonitoringConfig, MonitoringConfig),
+        }
+
+        # scheduler / publisher have all-default fields → safe to seed with {}
+        # when missing from the platform block.
+        _SEEDABLE = frozenset({"scheduler", "publisher"})
+
+        for field, (_src_t, _dst_t) in _CONVERSION.items():
+            if field in data:
+                continue
+            if isinstance(tc, dict):
+                if field in tc:
+                    data[field] = tc[field]  # raw dict → Pydantic validates to _dst_t
+                elif field in _SEEDABLE:
+                    data[field] = {}  # all-defaults flat type
+            elif hasattr(tc, field):
+                val = getattr(tc, field)
+                if val is not None:
+                    # Convert platform model → flat model via dump/validate
+                    data[field] = _dst_t.model_validate(val.model_dump())
+                elif field in _SEEDABLE:
+                    data[field] = _dst_t()
+        return data
 
     @model_validator(mode="after")
     def _expand_nas_root_template(self) -> Settings:
@@ -206,6 +291,63 @@ class Settings(BaseModel):
                 )
             seen[ac.display_name] = aid
         return self
+
+    @model_validator(mode="after")
+    def _resolve_platform_configs(self) -> Settings:
+        """If platforms dict is empty, derive tencent_channel platform from old flat fields."""
+        if self.platforms:
+            return self
+        # Backward compat: old config.yaml without platforms key
+        if self.feishu and self.scheduler and self.publisher and self.monitoring:
+            self.platforms = {
+                "tencent_channel": PlatformConfig(
+                    scheduler=PlatformSchedulerConfig(
+                        daily_cron_hour=self.scheduler.daily_cron_hour,
+                        daily_cron_minute=self.scheduler.daily_cron_minute,
+                    ),
+                    publisher=PlatformPublisherConfig(
+                        headless=self.publisher.headless,
+                        upload_timeout_seconds=self.publisher.upload_timeout_seconds,
+                        step_pause_seconds=self.publisher.step_pause_seconds,
+                        max_concurrent_accounts=self.publisher.max_concurrent_accounts,
+                    ),
+                    feishu=PlatformFeishuConfig(
+                        enabled=self.feishu.enabled,
+                        app_id=self.feishu.app_id,
+                        app_secret=self.feishu.app_secret,
+                        bitable=self.feishu.bitable,
+                        field_map=self.feishu.field_map,
+                        sync=self.feishu.sync,
+                    ),
+                    monitoring=PlatformMonitoringConfig(
+                        cookie_warn_days=self.monitoring.cookie_warn_days,
+                        notifiers=self.monitoring.notifiers,
+                        notify_on=self.monitoring.notify_on,
+                    ),
+                )
+            }
+        return self
+
+    # ------------------------------------------------------------------
+    # Helper accessors for platform config
+    # ------------------------------------------------------------------
+
+    def get_platform_config(self, platform: str) -> PlatformConfig:
+        if platform in self.platforms:
+            return self.platforms[platform]
+        return self.platforms.get("tencent_channel", PlatformConfig())
+
+    def get_feishu_config(self, platform: str) -> PlatformFeishuConfig | None:
+        return self.get_platform_config(platform).feishu
+
+    def get_monitoring_config(self, platform: str) -> PlatformMonitoringConfig | None:
+        return self.get_platform_config(platform).monitoring
+
+    def get_publisher_config(self, platform: str) -> PlatformPublisherConfig:
+        return self.get_platform_config(platform).publisher
+
+    def get_scheduler_config(self, platform: str) -> PlatformSchedulerConfig:
+        return self.get_platform_config(platform).scheduler
 
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")

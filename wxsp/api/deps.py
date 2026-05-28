@@ -36,7 +36,7 @@ _db_initialized = False
 
 
 def get_settings() -> Settings:
-    return load_settings()
+    return load_settings(platform="tencent_channel")
 
 
 def get_session() -> Iterator[Session]:

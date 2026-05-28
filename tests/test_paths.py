@@ -55,16 +55,16 @@ def test_user_logs_dir_dev_mode() -> None:
 
 
 def test_config_path_dev_mode() -> None:
-    """开发模式 config.yaml 在项目根。"""
-    assert get_config_path() == Path("./config.yaml").resolve()
+    """开发模式 config_tencent_channel.yaml 在项目根。"""
+    assert get_config_path("tencent_channel") == Path("./config_tencent_channel.yaml").resolve()
 
 
 def test_config_path_packaged(monkeypatch) -> None:
-    """打包模式 config.yaml 在用户数据目录(get_user_data_dir().parent)。"""
+    """打包模式 config_tencent_channel.yaml 在用户数据目录。"""
     main_module = sys.modules["__main__"]
     with patch.object(main_module, "__compiled__", True, create=True):
         monkeypatch.delenv("WXSP_DEV_MODE", raising=False)
-        config_path = get_config_path()
+        config_path = get_config_path("tencent_channel")
         data_dir = get_user_data_dir()
         assert config_path.parent == data_dir.parent
-        assert config_path.name == "config.yaml"
+        assert config_path.name == "config_tencent_channel.yaml"

@@ -179,10 +179,10 @@ def build_notifiers_from_settings(
 ) -> list[Notifier]:
     """从平台 monitoring 配置构造 enabled notifier 列表。
 
-    使用 settings.get_monitoring_config(platform) 取对应平台的 notifiers 配置。
+    使用 settings.monitoring 取对应平台的 notifiers 配置。
     第一版只有 wecom;接入飞书/钉钉时在此 append 即可。
     """
-    monitoring_cfg = settings.get_monitoring_config(platform)
+    monitoring_cfg = settings.monitoring
     notifiers: list[Notifier] = []
     if monitoring_cfg is not None and monitoring_cfg.notifiers.wecom.enabled:
         notifiers.append(WecomNotifier(webhook=monitoring_cfg.notifiers.wecom.webhook))
@@ -205,7 +205,7 @@ def notify(
     字段时优先使用 event.platform(否则用参数兜底)。
     """
     effective_platform = event.platform or platform
-    monitoring_cfg = settings.get_monitoring_config(effective_platform)
+    monitoring_cfg = settings.monitoring
     notify_on: list[str] = monitoring_cfg.notify_on if monitoring_cfg is not None else []
 
     # ① Event 表落地(无论 type 是否在 notify_on)

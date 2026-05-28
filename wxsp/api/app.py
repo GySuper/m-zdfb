@@ -22,7 +22,7 @@ from wxsp.api.routes_plans import router as plans_router
 from wxsp.api.routes_setup import router as setup_router
 from wxsp.api.routes_tasks import router as tasks_router
 from wxsp.archive import cleanup_old_files
-from wxsp.config import get_config_path, load_settings
+from wxsp.config import ALL_PLATFORMS, get_config_path, load_settings, platform_label
 from wxsp.db import get_engine, init_db, session_scope
 from wxsp.scheduler import (
     make_scheduler,
@@ -35,7 +35,11 @@ _STATIC_PREFIX = "/static"
 
 
 def _setup_required() -> bool:
-    return not get_config_path().exists()
+    """setup 向导模式: 没有任何平台配置文件时启用。"""
+    from wxsp.config import ALL_PLATFORMS
+    from wxsp.config import get_config_path as _gcp
+
+    return not any(_gcp(p).exists() for p in ALL_PLATFORMS)
 
 
 @asynccontextmanager
@@ -117,43 +121,28 @@ def create_app() -> FastAPI:
     async def platform_context(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        """Inject platform list + current into request.state for sidebar cross-page switching."""
+        """Discover available platforms from config_*.yaml files, inject into request.state."""
         path = request.url.path
         if not path.startswith(_SETUP_PREFIX) and not path.startswith(_STATIC_PREFIX):
-            try:
-                settings = load_settings()
-            except Exception:
-                settings = None
-            if settings is not None:
-                # 所有已知平台(无论是否已配置)
-                all_platforms = {
-                    "tencent_channel": "视频号",
-                    "taobao_guanghe": "淘宝光合",
+            # Discover available platforms by globbing config files
+            platforms = {}
+            for pkey in ALL_PLATFORMS:
+                try:
+                    cfg_path = get_config_path(pkey)
+                    configured = cfg_path.exists()
+                except Exception:
+                    configured = False
+                platforms[pkey] = {
+                    "key": pkey,
+                    "label": platform_label(pkey),
+                    "configured": configured,
                 }
-                platforms = {}
-                for pkey, plabel in all_platforms.items():
-                    cfg_exists = pkey in settings.platforms
-                    accts = [
-                        a
-                        for a in settings.accounts.values()
-                        if getattr(a, "platform", "tencent_channel") == pkey
-                    ]
-                    platforms[pkey] = {
-                        "key": pkey,
-                        "label": plabel,
-                        "configured": cfg_exists,
-                        "accounts": len(accts),
-                    }
-                current = request.query_params.get("platform", "tencent_channel")
-                if current not in platforms:
-                    current = "tencent_channel"
-                request.state.platforms = platforms
-                request.state.current_platform = current
-                request.state.has_multiple_platforms = len(platforms) > 1
-            else:
-                request.state.platforms = {}
-                request.state.current_platform = "tencent_channel"
-                request.state.has_multiple_platforms = False
+            current = request.query_params.get("platform", "tencent_channel")
+            if current not in platforms:
+                current = "tencent_channel"
+            request.state.platforms = platforms
+            request.state.current_platform = current
+            request.state.has_multiple_platforms = len(platforms) > 1
         return await call_next(request)
 
     @app.middleware("http")

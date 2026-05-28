@@ -129,7 +129,7 @@ def maybe_warn_backlog(
     未 commit 的写)。生产唯一调用方是 daemon 启动 1 次 + run_today_pending 中调
     用,本来就在 session_scope 里、调用前没未提交写,提早 commit 无副作用。
     """
-    monitoring_cfg = settings.get_monitoring_config(platform)
+    monitoring_cfg = settings.monitoring
     threshold = monitoring_cfg.backlog_warn_threshold if monitoring_cfg is not None else 20
     backlog = count_backlog(session)
     if backlog <= threshold:
@@ -484,7 +484,7 @@ def _daily_cron(platform: str, settings: Settings) -> None:
     try:
         from wxsp.archive import install_file_sink
 
-        monitoring_cfg = settings.get_monitoring_config(platform)
+        monitoring_cfg = settings.monitoring
         retention = monitoring_cfg.log_retention_days if monitoring_cfg is not None else 30
         install_file_sink(
             logs_dir=settings.app.logs_dir,
@@ -557,20 +557,27 @@ def start_daemon(settings: Settings) -> None:
 
     scheduler = make_scheduler(settings, blocking=True)
 
-    # 按平台注册 cron job
-    platform_keys = list(settings.platforms.keys())
+    # 按平台注册 cron job — 发现所有已配置的平台
+    from wxsp.config import ALL_PLATFORMS, load_settings
+    from wxsp.config import get_config_path as _get_cfg_path
+
+    platform_keys = [p for p in ALL_PLATFORMS if _get_cfg_path(p).exists()]
     if not platform_keys:
-        # Backward compat: no platforms configured → use old single scheduler config
         if settings.scheduler.enabled:
             logger.info(
                 f"[scheduler] daemon 启动:每日 "
                 f"{settings.scheduler.daily_cron_hour:02d}:{settings.scheduler.daily_cron_minute:02d} "
-                f"({settings.app.timezone}) 跑 run_today_pending(无反平台配置)"
+                f"({settings.app.timezone}) 跑 run_today_pending(无平台配置)"
             )
     for platform_key in platform_keys:
-        sched_cfg = settings.get_scheduler_config(platform_key)
+        # Load the platform-specific config for scheduling
+        try:
+            plat_settings = load_settings(platform=platform_key)
+        except Exception:
+            plat_settings = settings
+        sched_cfg = plat_settings.scheduler
         scheduler.add_job(
-            lambda p=platform_key: _daily_cron(p, settings),
+            lambda p=platform_key: _daily_cron(p, load_settings(platform=p)),
             CronTrigger(
                 hour=sched_cfg.daily_cron_hour,
                 minute=sched_cfg.daily_cron_minute,

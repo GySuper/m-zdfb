@@ -334,7 +334,7 @@ class TaobaoGuanghePublisher:
         init_db(engine)
         screenshots_root = settings.app.logs_dir / "screenshots"
         tmp_root = settings.app.data_dir / "tmp"
-        pub_cfg = settings.get_publisher_config("taobao_guanghe")
+        pub_cfg = settings.publisher
         upload_timeout = pub_cfg.upload_timeout_seconds
         step_pause = pub_cfg.step_pause_seconds
 

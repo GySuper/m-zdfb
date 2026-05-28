@@ -318,7 +318,7 @@ def sync(
 ) -> None:
     """立即拉一次飞书 Bitable,执行入库 / 错误回写。"""
     settings = load_settings()
-    feishu_cfg = settings.get_feishu_config(platform)
+    feishu_cfg = settings.feishu
     if feishu_cfg is None or not feishu_cfg.enabled:
         typer.echo(f"[wxsp] 平台 {platform} 飞书未启用,跳过 sync。")
         return

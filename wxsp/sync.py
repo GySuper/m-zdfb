@@ -66,7 +66,7 @@ def sync_now(
     - 单行回写失败 → 静默吞掉(写到 logger),不打断整体 sync
     """
     result = SyncResult()
-    feishu_cfg = settings.get_feishu_config(platform)
+    feishu_cfg = settings.feishu
     if feishu_cfg is None or not feishu_cfg.enabled:
         return result
 

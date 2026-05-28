@@ -1,4 +1,7 @@
-"""Pydantic Settings + YAML/ENV 加载(M0)。"""
+"""Pydantic Settings + YAML/ENV 加载(M0)。
+
+每平台一个独立配置文件: config_tencent_channel.yaml / config_taobao_guanghe.yaml。
+"""
 
 from __future__ import annotations
 
@@ -15,15 +18,6 @@ from pydantic import BaseModel, Field, model_validator
 
 
 def is_packaged() -> bool:
-    """判断当前是否运行在打包产物里。
-
-    覆盖三种打包形态:
-    - PyInstaller bundle:`sys.frozen = True`
-    - Nuitka --standalone(整个 app 编译):`sys.modules['__main__'].__compiled__`
-    - Nuitka --module(只编 wxsp 包成 .so,PyInstaller 包外壳):`wxsp.__compiled__`
-
-    WXSP_DEV_MODE=1 强制走开发模式(用于在打包产物里本地调试)。
-    """
     if os.environ.get("WXSP_DEV_MODE") == "1":
         return False
     if getattr(sys, "frozen", False):
@@ -35,34 +29,103 @@ def is_packaged() -> bool:
 
 
 def get_user_data_dir() -> Path:
-    """返回 data/ 目录绝对路径。
-
-    打包模式:平台规范位置 / wxsp / data
-        mac: ~/Library/Application Support/wxsp/data
-        win: %APPDATA%\\wxsp\\data
-    开发模式:项目根 ./data
-    """
     if is_packaged():
         return Path(_platform_user_data_dir("wxsp")) / "data"
     return Path("./data").resolve()
 
 
 def get_user_logs_dir() -> Path:
-    """返回 logs/ 目录绝对路径。打包模式走 platformdirs,开发模式 ./logs。"""
     if is_packaged():
         return Path(_platform_user_log_dir("wxsp"))
     return Path("./logs").resolve()
 
 
-def get_config_path() -> Path:
-    """返回 config.yaml 的绝对路径。
+# ---------------------------------------------------------------------------
+# known platforms
+# ---------------------------------------------------------------------------
+_PLATFORM_LABELS: dict[str, str] = {
+    "tencent_channel": "视频号",
+    "taobao_guanghe": "淘宝光合",
+}
 
-    打包模式:user_data_dir("wxsp")/config.yaml(与 data/ 同级)
-    开发模式:./config.yaml
+ALL_PLATFORMS = list(_PLATFORM_LABELS)
+
+
+def platform_label(key: str) -> str:
+    return _PLATFORM_LABELS.get(key, key)
+
+
+def get_config_path(platform: str = "tencent_channel") -> Path:
+    """返回 config_{platform}.yaml 的绝对路径。
+
+    向后兼容: 如果旧版单文件 config.yaml 存在且目标平台文件不存在, 自动迁移。
     """
     if is_packaged():
-        return Path(_platform_user_data_dir("wxsp")) / "config.yaml"
-    return Path("./config.yaml").resolve()
+        base = Path(_platform_user_data_dir("wxsp"))
+    else:
+        base = Path(".").resolve()
+
+    new_path = base / f"config_{platform}.yaml"
+    if new_path.exists():
+        return new_path
+
+    # 向后兼容: 从旧 config.yaml 迁移
+    old_path = base / "config.yaml"
+    if old_path.exists():
+        _migrate_old_config(old_path, base)
+        if new_path.exists():
+            return new_path
+
+    return new_path
+
+
+def _migrate_old_config(old_path: Path, base: Path) -> None:
+    """将旧版单文件 config.yaml 拆分为每平台独立配置文件。"""
+    import shutil
+
+    raw = old_path.read_text(encoding="utf-8")
+    data: dict[str, Any] = yaml.safe_load(raw)
+
+    # 如果已有 platforms.* 嵌套结构, 每个平台写一份
+    platforms_data = data.get("platforms")
+    if platforms_data and isinstance(platforms_data, dict):
+        for pkey, pdata in platforms_data.items():
+            new_data: dict[str, Any] = {
+                "app": data.get("app", {}),
+                "paths": data.get("paths", {}),
+                "webui": data.get("webui", {}),
+                "scheduler": pdata.get("scheduler", {}),
+                "publisher": pdata.get("publisher", {}),
+            }
+            if pdata.get("feishu"):
+                new_data["feishu"] = pdata["feishu"]
+            if pdata.get("monitoring"):
+                new_data["monitoring"] = pdata["monitoring"]
+            # 只保留该平台的账号
+            new_accounts = {}
+            for aid, ac in data.get("accounts", {}).items():
+                if isinstance(ac, dict) and ac.get("platform", "tencent_channel") == pkey:
+                    new_accounts[aid] = ac
+            new_data["accounts"] = new_accounts
+            new_path = base / f"config_{pkey}.yaml"
+            new_path.write_text(
+                yaml.dump(new_data, allow_unicode=True, default_flow_style=False), encoding="utf-8"
+            )
+        # 备份旧文件
+        bak = old_path.with_suffix(".yaml.bak")
+        shutil.move(str(old_path), str(bak))
+        return
+
+    # 旧格式(无 platforms 嵌套): 整个作为 tencent_channel 的配置
+    new_path = base / "config_tencent_channel.yaml"
+    shutil.copy(str(old_path), str(new_path))
+    bak = old_path.with_suffix(".yaml.bak")
+    shutil.move(str(old_path), str(bak))
+
+
+# ---------------------------------------------------------------------------
+# Config models (flat, no platforms nesting)
+# ---------------------------------------------------------------------------
 
 
 class AppConfig(BaseModel):
@@ -72,14 +135,6 @@ class AppConfig(BaseModel):
 
 
 class PathsConfig(BaseModel):
-    """全局只配 NAS 挂载根目录;每个账号自己配 video/cover 检索路径(在 AccountConfig)。
-
-    `path_aliases`:Windows UNC ↔ POSIX mount 前缀互译表(可选)。运营常从 Windows
-    复制完整 UNC 路径粘进飞书 `\\\\172.31.15.11\\dianshang\\...`,daemon 跑在 macOS
-    时需翻译成 `/Volumes/dianshang/...` 才能读到文件。在 macOS/Linux 上把 key 前缀替换为
-    value,在 Windows 上做反向替换。默认 `{}` 等于禁用,仅"按文件名搜索"模式可用。
-    """
-
     nas_root: Path
     path_aliases: dict[str, str] = Field(default_factory=dict)
 
@@ -88,15 +143,13 @@ class AccountConfig(BaseModel):
     display_name: str
     enabled: bool = True
     daily_limit: int
-    platform: str = "tencent_channel"
     user_data_dir: Path
-    # 视频/封面检索路径(支持 {nas_root} 占位,会在 Settings.after 钩子里展开)
     video_search_root: Path
     cover_search_root: Path
 
 
 class SchedulerConfig(BaseModel):
-    enabled: bool = True  # false 时 daemon 仍启动,但不注册 09:00 cron(手动入口仍可用)
+    enabled: bool = True
     daily_cron_hour: int = 9
     daily_cron_minute: int = 0
     strategy: str = "round-robin"
@@ -124,6 +177,10 @@ class FeishuFieldMap(BaseModel):
     status: str = "状态"
     remote_url: str = "已发布链接"
     error_message: str = "错误信息"
+    # taobao-specific
+    declaration: str = "创作者声明"
+    ai_optimize: str = "AI优化"
+    product_ids: str = "商品ID"
 
 
 class FeishuBitableConfig(BaseModel):
@@ -157,10 +214,8 @@ class MonitoringConfig(BaseModel):
     cookie_warn_days: float = 1.5
     notifiers: NotifiersConfig
     notify_on: list[str] = Field(default_factory=list)
-    # M9 归档保留期(spec §6.3)
     log_retention_days: int = 30
     screenshot_retention_days: int = 90
-    # M9 积压告警阈值(spec §5.6),> 此数推一条 backlog_high 告警
     backlog_warn_threshold: int = 20
 
 
@@ -170,105 +225,20 @@ class WebUIConfig(BaseModel):
     open_browser_on_start: bool = True
 
 
-class PlatformSchedulerConfig(BaseModel):
-    daily_cron_hour: int = 9
-    daily_cron_minute: int = 0
-
-
-class PlatformPublisherConfig(BaseModel):
-    headless: bool = False
-    upload_timeout_seconds: int = 600
-    step_pause_seconds: tuple[float, float] = (1.0, 3.0)
-    max_concurrent_accounts: int = 1
-
-
-class PlatformFeishuConfig(BaseModel):
-    enabled: bool = True
-    app_id: str
-    app_secret: str
-    bitable: FeishuBitableConfig
-    field_map: FeishuFieldMap = Field(default_factory=FeishuFieldMap)
-    sync: FeishuSyncConfig = Field(default_factory=FeishuSyncConfig)
-
-
-class PlatformMonitoringConfig(BaseModel):
-    cookie_warn_days: float = 1.5
-    notifiers: NotifiersConfig
-    notify_on: list[str] = Field(default_factory=list)
-    backlog_warn_threshold: int = 20
-    log_retention_days: int = 30
-
-
-class PlatformConfig(BaseModel):
-    scheduler: PlatformSchedulerConfig = Field(default_factory=PlatformSchedulerConfig)
-    publisher: PlatformPublisherConfig = Field(default_factory=PlatformPublisherConfig)
-    feishu: PlatformFeishuConfig | None = None
-    monitoring: PlatformMonitoringConfig | None = None
-
-
 class Settings(BaseModel):
+    """每个 config_{platform}.yaml 的完整结构。"""
+
     app: AppConfig
     paths: PathsConfig
     accounts: dict[str, AccountConfig]
-    platforms: dict[str, PlatformConfig] = Field(default_factory=dict)
     scheduler: SchedulerConfig
     publisher: PublisherConfig
     feishu: FeishuConfig
     monitoring: MonitoringConfig
     webui: WebUIConfig
 
-    @model_validator(mode="before")
-    @classmethod
-    def _extract_flat_from_platforms(cls, data: Any) -> Any:
-        """When new platforms.* format is used, copy scheduler/publisher/feishu/monitoring
-        from the tencent_channel block up to top-level flat fields, so old accessors
-        (settings.scheduler etc.) still work.
-
-        This runs BEFORE field validation.  `data` may contain raw dicts (YAML load)
-        or already-validated model instances (direct Settings(...) constructor).
-        Platform types are converted to their flat counterparts via model_dump +
-        model_validate (extra fields get defaults, missing fields are dropped).
-        """
-        if not isinstance(data, dict):
-            return data
-        platforms_raw = data.get("platforms")
-        if not platforms_raw or not isinstance(platforms_raw, dict):
-            return data
-        tc = platforms_raw.get("tencent_channel")
-        if tc is None:
-            return data
-
-        _CONVERSION: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
-            "scheduler": (PlatformSchedulerConfig, SchedulerConfig),
-            "publisher": (PlatformPublisherConfig, PublisherConfig),
-            "feishu": (PlatformFeishuConfig, FeishuConfig),
-            "monitoring": (PlatformMonitoringConfig, MonitoringConfig),
-        }
-
-        # scheduler / publisher have all-default fields → safe to seed with {}
-        # when missing from the platform block.
-        _SEEDABLE = frozenset({"scheduler", "publisher"})
-
-        for field, (_src_t, _dst_t) in _CONVERSION.items():
-            if field in data:
-                continue
-            if isinstance(tc, dict):
-                if field in tc:
-                    data[field] = tc[field]  # raw dict → Pydantic validates to _dst_t
-                elif field in _SEEDABLE:
-                    data[field] = {}  # all-defaults flat type
-            elif hasattr(tc, field):
-                val = getattr(tc, field)
-                if val is not None:
-                    # Convert platform model → flat model via dump/validate
-                    data[field] = _dst_t.model_validate(val.model_dump())
-                elif field in _SEEDABLE:
-                    data[field] = _dst_t()
-        return data
-
     @model_validator(mode="after")
     def _expand_nas_root_template(self) -> Settings:
-        """把账号下 video_search_root / cover_search_root 里的 {nas_root} 占位展开。"""
         nas_root_str = str(self.paths.nas_root)
         for ac in self.accounts.values():
             for field in ("video_search_root", "cover_search_root"):
@@ -280,10 +250,6 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def _check_display_name_uniqueness(self) -> Settings:
-        """display_name 必须全局唯一。
-        飞书 '账号' 单选用 display_name 作选项,validator 按 display_name 反查
-        account_id —— 重名会让反查走错位置(spec: 平台账号 → 飞书选项同步)。
-        """
         seen: dict[str, str] = {}
         for aid, ac in self.accounts.items():
             if ac.display_name in seen:
@@ -294,87 +260,15 @@ class Settings(BaseModel):
             seen[ac.display_name] = aid
         return self
 
-    @model_validator(mode="after")
-    def _resolve_platform_configs(self) -> Settings:
-        """If platforms dict is empty, derive tencent_channel platform from old flat fields.
 
-        monitoring config is intentionally NOT copied into the auto-derived PlatformConfig.
-        get_monitoring_config() will construct PlatformMonitoringConfig from the live
-        flat self.monitoring on each call, so runtime modifications to self.monitoring
-        (e.g. in tests) are always reflected.
-        """
-        if self.platforms:
-            return self
-        # Backward compat: old config.yaml without platforms key
-        if self.feishu and self.scheduler and self.publisher and self.monitoring:
-            self.platforms = {
-                "tencent_channel": PlatformConfig(
-                    scheduler=PlatformSchedulerConfig(
-                        daily_cron_hour=self.scheduler.daily_cron_hour,
-                        daily_cron_minute=self.scheduler.daily_cron_minute,
-                    ),
-                    publisher=PlatformPublisherConfig(
-                        headless=self.publisher.headless,
-                        upload_timeout_seconds=self.publisher.upload_timeout_seconds,
-                        step_pause_seconds=self.publisher.step_pause_seconds,
-                        max_concurrent_accounts=self.publisher.max_concurrent_accounts,
-                    ),
-                    feishu=PlatformFeishuConfig(
-                        enabled=self.feishu.enabled,
-                        app_id=self.feishu.app_id,
-                        app_secret=self.feishu.app_secret,
-                        bitable=self.feishu.bitable,
-                        field_map=self.feishu.field_map,
-                        sync=self.feishu.sync,
-                    ),
-                    # monitoring=None: derived live from flat self.monitoring in get_monitoring_config()
-                )
-            }
-        return self
-
-    # ------------------------------------------------------------------
-    # Helper accessors for platform config
-    # ------------------------------------------------------------------
-
-    def get_platform_config(self, platform: str) -> PlatformConfig:
-        if platform in self.platforms:
-            return self.platforms[platform]
-        return self.platforms.get("tencent_channel", PlatformConfig())
-
-    def get_feishu_config(self, platform: str) -> PlatformFeishuConfig | None:
-        return self.get_platform_config(platform).feishu
-
-    def get_monitoring_config(self, platform: str) -> PlatformMonitoringConfig | None:
-        """Return per-platform monitoring config if explicitly configured,
-        otherwise derive live from flat self.monitoring (backward compat).
-        """
-        plat_cfg = self.platforms.get(platform)
-        if plat_cfg is not None and plat_cfg.monitoring is not None:
-            return plat_cfg.monitoring
-        # Backward compat: auto-derived platform without explicit monitoring,
-        # or platform not in platforms dict at all. Derive from flat settings
-        # so runtime modifications (e.g. in tests) are reflected.
-        return PlatformMonitoringConfig(
-            cookie_warn_days=self.monitoring.cookie_warn_days,
-            notifiers=self.monitoring.notifiers,
-            notify_on=self.monitoring.notify_on,
-            backlog_warn_threshold=self.monitoring.backlog_warn_threshold,
-            log_retention_days=self.monitoring.log_retention_days,
-        )
-
-    def get_publisher_config(self, platform: str) -> PlatformPublisherConfig:
-        return self.get_platform_config(platform).publisher
-
-    def get_scheduler_config(self, platform: str) -> PlatformSchedulerConfig:
-        return self.get_platform_config(platform).scheduler
-
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
 
 
 def _expand_env_vars(text: str) -> str:
-    """Replace ${VAR} with os.environ[VAR]; raise ValueError if missing."""
-
     def replace(match: re.Match[str]) -> str:
         name = match.group(1)
         if name not in os.environ:
@@ -384,13 +278,31 @@ def _expand_env_vars(text: str) -> str:
     return _ENV_PATTERN.sub(replace, text)
 
 
-def load_settings(config_path: Path | None = None) -> Settings:
-    """Load and validate config.yaml; expand ${ENV_VAR} and {nas_root}."""
-    if config_path is None:
-        config_path = get_config_path()
-    if not config_path.exists():
-        raise FileNotFoundError(f"找不到配置文件: {config_path}")
-    raw = config_path.read_text(encoding="utf-8")
-    expanded = _expand_env_vars(raw)
-    data: dict[str, Any] = yaml.safe_load(expanded)
-    return Settings.model_validate(data)
+def load_settings(
+    config_path: Path | None = None,
+    *,
+    platform: str = "tencent_channel",
+) -> Settings:
+    """加载 config_{platform}.yaml, 展开 ${ENV_VAR} 和 {nas_root}。
+
+    支持旧的 load_settings(config_path=Path(...)) 调用方式向后兼容。
+    """
+    if config_path is not None:
+        # 旧式调用: 直接传文件路径
+        if not config_path.exists():
+            raise FileNotFoundError(f"找不到配置文件: {config_path}")
+        raw = config_path.read_text(encoding="utf-8")
+        expanded = _expand_env_vars(raw)
+        cfg_data: dict[str, Any] = yaml.safe_load(expanded)
+        return Settings.model_validate(cfg_data)
+
+    path = get_config_path(platform)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"找不到配置文件: {path}\n"
+            f"请创建 config_{platform}.yaml (可参考 config.example.yaml)"
+        )
+    raw2 = path.read_text(encoding="utf-8")
+    expanded2 = _expand_env_vars(raw2)
+    platform_data: dict[str, Any] = yaml.safe_load(expanded2)
+    return Settings.model_validate(platform_data)

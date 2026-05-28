@@ -147,8 +147,8 @@ def create_app() -> FastAPI:
             current = request.query_params.get("platform")
             if current and current in platforms:
                 pass  # explicit ?platform= in URL
-            else:
-                # No valid platform in URL -> redirect to add it
+            elif request.method == "GET":
+                # No valid platform in URL on GET -> redirect to add it
                 from fastapi.responses import RedirectResponse as _Redir
 
                 qp = dict(request.query_params)
@@ -156,6 +156,12 @@ def create_app() -> FastAPI:
                 qs = "&".join(f"{k}={v}" for k, v in qp.items())
                 target = f"{path}?{qs}" if qs else f"{path}?platform={default_p}"
                 return _Redir(url=target, status_code=302)
+            else:
+                # POST/DELETE etc: just set the state without redirecting
+                request.state.platforms = platforms
+                request.state.current_platform = default_p
+                request.state.has_multiple_platforms = len(platforms) > 1
+                return await call_next(request)
             request.state.platforms = platforms
             request.state.current_platform = current
             request.state.has_multiple_platforms = len(platforms) > 1

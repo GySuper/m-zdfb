@@ -71,4 +71,3 @@ webui:
   host: 127.0.0.1
   port: 8765
   open_browser_on_start: true
-  default_platform: taobao_guanghe

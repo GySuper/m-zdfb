@@ -431,14 +431,12 @@
               </div>
               <div class="cfg-row">
                 <label>默认平台</label>
-                <div class="cfg-control" style="display:flex;align-items:center;gap:8px;">
-                  <form method="post" action="/config/default-platform" style="display:flex;align-items:center;gap:8px;margin:0;">
-                  <select name="default_platform" onchange="this.form.submit()">
+                <div class="cfg-control">
+                  <select name="default_platform" onchange="saveDefaultPlatform(this.value)">
                     {% for p in all_platforms %}
                     <option value="{{ p }}" {% if vm.webui_default_platform == p %}selected{% endif %}>{{ platform_cn(p) }}</option>
                     {% endfor %}
                   </select>
-                  </form>
                 </div>
                 <span class="cfg-hint">打开 Web UI 时默认显示的平台(选择即保存)</span>
               </div>
@@ -878,4 +876,16 @@
       }, 4000);
     })();
   </script>
+<script>
+function saveDefaultPlatform(val) {
+  fetch('/config/default-platform', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'default_platform=' + encodeURIComponent(val)
+  }).then(() => {
+    const f = document.getElementById('flash-banner');
+    if (f) { f.textContent = '✓ 默认平台已更新'; f.className = 'flash ok'; f.style.display = ''; }
+  });
+}
+</script>
 {% endblock %}

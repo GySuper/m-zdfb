@@ -53,7 +53,7 @@
   {% else %}
   <div class="flash warn">
     <strong>历史积压视图</strong> · 仅显示执行日期早于今天且仍是待发布/已中断的任务
-    · <a href="/tasks">返回今日 →</a>
+    · <a href="/tasks?platform={{ request.state.current_platform }}">返回今日 →</a>
   </div>
   {% endif %}
 
@@ -90,7 +90,7 @@
       </label>
       <input type="hidden" name="bucket" value="{{ filter_bucket }}">
       <button class="primary" type="submit">应用筛选</button>
-      <a class="btn" href="/tasks">清空</a>
+      <a class="btn" href="/tasks?platform={{ request.state.current_platform }}">清空</a>
     </form>
   </details>
 

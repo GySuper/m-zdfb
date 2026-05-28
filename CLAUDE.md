@@ -1,7 +1,9 @@
-# CLAUDE.md — 视频号自动发布工具 (wxsp)
+# CLAUDE.md — 多平台自动发布工具 (wxsp)
 
 > 本文件给 Claude Code 阅读,用于指导项目从零开发。**请逐节通读后再开始编码**,
-> 特别留意 "核心约束"、"复用与参考"、"视频号发布关键技术点"。
+> 特别留意 "核心约束"、"复用与参考"、"平台架构"。
+
+**当前支持平台**:视频号(tencent_channel)、淘宝光合(taobao_guanghe)
 
 ---
 
@@ -22,20 +24,19 @@
 
 ## 项目目标
 
-为运营方提供一个**稳定、可观测、可恢复**的视频号自动化发布工具,本地运行,带 Web UI。
+为运营方提供一个**稳定、可观测、可恢复**的多平台自动化发布工具,本地运行,带 Web UI。每个平台独立配置、独立调度、独立通知,互不干扰。
 
 **规模需求**:
-- 4 个视频号账号(数量可扩展,配置驱动)
+- 多平台多账号(数量可扩展,配置驱动),每账号独立 Chrome profile + 设备指纹
 - 每天约 80 条视频(每账号约 20 条,可配置)
 - 视频文件存储在 NAS,通过本地挂载路径访问
-- 任务元数据**单一来源:飞书多维表格(Bitable)**;Web UI 作为运维控制台只做查看/重试/扫码/告警/配置,**不**用于创建任务
+- 任务元数据**单一来源:飞书多维表格(Bitable)**,每平台独立飞书表;Web UI 作为运维控制台只做查看/重试/扫码/告警/配置,**不**用于创建任务
 - 全自动调度发布;人工只负责准备视频、维护飞书表、处理异常
 - **跨平台:macOS + Windows 都要支持**(单机部署)
 
 **非目标**:
 - 不做内容生成(标题/描述/标签由用户提供)
 - 不做数据采集和分析
-- 不做多平台(只做视频号;如未来扩展,按 adapter 模式新增)
 - 不做用户系统、登录系统(本地单用户)
 
 ---
@@ -133,6 +134,43 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 
 ---
 
+## 平台架构(多平台 adapter 模式)
+
+### PlatformPublisher 协议
+
+`wxsp/platforms/base.py` 定义 `PlatformPublisher` 协议。每个平台实现 `publish_one()` + `login()`,只管浏览器交互,不碰 DB/通知/飞书回写。
+
+```
+wxsp/platforms/
+├── __init__.py
+├── base.py                  # PublishResult + PlatformPublisher 协议
+├── tencent_channel.py       # 视频号发布
+├── tencent_selectors.py     # 视频号选择器
+├── taobao_guanghe.py        # 淘宝光合发布
+└── taobao_selectors.py      # 淘宝光合选择器
+```
+
+`publisher.py` 是薄路由层,根据 `task.platform` 调对应的 `PlatformPublisher.publish_one()`。
+
+### 配置文件:每平台独立
+
+每个平台一个独立配置文件:`config_{platform}.yaml`(如 `config_tencent_channel.yaml` / `config_taobao_guanghe.yaml`)。Settings 模型是扁平的(app + paths + accounts + scheduler + publisher + feishu + monitoring + webui),没有平台嵌套。
+
+`get_config_path(platform)` 返回对应文件路径。`load_settings(platform=...)` 加载。
+
+### 数据隔离
+
+- `Account.platform` / `Task.platform` / `Event.platform` 标识所属平台
+- Dashboard / Tasks / Accounts / Plans 路由按 `?platform=` 查询参数过滤
+- 中间件 `platform_context` 发现可用平台,对 GET 请求无 `?platform=` 时自动重定向到默认平台
+- 默认平台存储在 `data/default_platform`(共享文件,全局设置,非 per-platform 配置)
+
+### Web UI 平台切换
+
+Sidebar 左上角 "当前平台" 下拉动态列出所有平台,切换后所有 nav 链接带 `?platform=`,各页面数据完全隔离。
+
+---
+
 ## 目录结构(扁平,单文件单职责;超 500 行再拆模块)
 
 ```
@@ -140,24 +178,29 @@ wxsp/
 ├── wxsp/                              # 后端主包
 │   ├── __init__.py
 │   ├── cli.py                         # Typer CLI 入口
-│   ├── config.py                      # Pydantic Settings (config.yaml + env)
+│   ├── config.py                      # Pydantic Settings (per-platform config_{platform}.yaml)
 │   ├── db.py                          # SQLModel engine + session + 状态转换辅助 + 幂等锁
-│   ├── models.py                      # SQLModel 表 (Account/Video/Task/Event)
+│   ├── models.py                      # SQLModel 表 (Account/Video/Task/Event),含 platform 字段
 │   ├── feishu.py                      # Bitable 拉取(sync_now) + 回写
-│   ├── validator.py                   # 入库校验(纯函数)
-│   ├── scheduler.py                   # 09:00 cron + 手动 fire (APScheduler 包装,无 polling)
-│   ├── publisher.py                   # 视频号发布核心 (patchright)
-│   ├── selectors.py                   # 选择器集中管理(视频号改版时唯一改动点)
+│   ├── validator.py                   # 入库校验(纯函数,按平台区分字段)
+│   ├── scheduler.py                   # 每平台独立 cron + 手动 fire (APScheduler 包装)
+│   ├── publisher.py                   # 薄路由层,根据 task.platform 路由到对应 platform
+│   ├── platforms/                     # 平台 adapter 实现
+│   │   ├── base.py                    #   PublishResult + PlatformPublisher 协议
+│   │   ├── tencent_channel.py         #   视频号发布核心
+│   │   ├── tencent_selectors.py       #   视频号选择器
+│   │   ├── taobao_guanghe.py          #   淘宝光合发布核心
+│   │   └── taobao_selectors.py        #   淘宝光合选择器
 │   ├── browser.py                     # patchright context 工厂 + per-account 指纹注入
 │   ├── fingerprint.py                 # per-account 设备指纹生成 + JSON 持久化 + JS init script
 │   ├── stealth_js.py                  # 上一代静态 init script(已被 fingerprint 取代,保留回滚)
-│   ├── errors.py                      # 错误类型 + 分类
-│   ├── notify.py                      # Notifier 协议 + WecomNotifier
+│   ├── errors.py                      # 错误类型 + 分类(含 taobao 特有:ProductNotFound/TopicNotFound)
+│   ├── notify.py                      # Notifier 协议 + WecomNotifier(platform 感知)
 │   ├── doctor.py                      # 健康检查
 │   ├── nas.py                         # find_video / find_cover / stage_to_tmp / cleanup_tmp
 │   ├── retry.py                       # 重试装饰器 / 指数退避
-│   ├── api/                           # FastAPI 路由层(稍微深一点,文件较多)
-│   │   ├── app.py                     # FastAPI 入口 + StaticFiles + Jinja2
+│   ├── api/                           # FastAPI 路由层
+│   │   ├── app.py                     # FastAPI 入口 + platform_context 中间件
 │   │   ├── deps.py
 │   │   ├── routes_dashboard.py
 │   │   ├── routes_accounts.py
@@ -166,7 +209,7 @@ wxsp/
 │   │   ├── routes_config.py
 │   │   └── routes_logs.py             # SSE
 │   └── templates/                     # Jinja2 模板
-│       ├── base.html
+│       ├── base.html                  #   含动态平台切换器
 │       ├── dashboard.html
 │       ├── accounts.html
 │       ├── tasks.html
@@ -176,9 +219,10 @@ wxsp/
 │       └── logs.html
 ├── data/
 │   ├── db.sqlite
-│   ├── chrome-profiles/               # 每账号独立 user_data_dir(cookie 由此持久化,不再有 cookie.json)
+│   ├── default_platform               # 全局默认平台设置
+│   ├── chrome-profiles/               # 每账号独立 user_data_dir(cookie 由此持久化)
 │   │   ├── account_a/
-│   │   ├── account_b/
+│   │   ├── taobao_a1/
 │   │   └── ...
 │   ├── fingerprints/                  # per-account 指纹 JSON(种子 = MD5(account_id),丢失能从种子重建)
 │   │   ├── account_a.json
@@ -201,15 +245,15 @@ wxsp/
 
 ---
 
-## 配置系统(两层)
+## 配置系统(每平台独立文件)
 
 ### 配置加载
 
-加载优先级(后者覆盖前者):
-1. `config.yaml`(用户本地,基于 `config.example.yaml` 复制,gitignore)
-2. 环境变量(用 `${ENV_VAR}` 语法在 yaml 里引用,如 `app_secret: ${FEISHU_APP_SECRET}`)
+每个平台一个独立配置文件:`config_{platform}.yaml`(如 `config_tencent_channel.yaml` / `config_taobao_guanghe.yaml`)。`get_config_path(platform)` 返回对应路径,`load_settings(platform=...)` 加载。
 
-实现用 Pydantic Settings,所有字段强类型校验,启动时若配置非法立即报错。**没有** default.yaml 或 CLI 多层覆盖,YAGNI。
+向后兼容:旧的 `config.yaml` 在首次访问时会自动迁移拆分为平台文件。
+
+环境变量用 `${ENV_VAR}` 语法在 yaml 里引用(如 `app_secret: ${FEISHU_APP_SECRET}`)。实现用 Pydantic Settings,所有字段强类型校验。
 
 ### config.yaml 完整示例
 

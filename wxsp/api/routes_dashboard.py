@@ -61,14 +61,12 @@ def dashboard(
         )
     )
 
-    # 最近 10 个事件 — 只统计当前平台账号
-    account_ids_for_platform = [a.id for a in accounts]
-    recent_events_query = select(Event).order_by(Event.id.desc()).limit(10)  # type: ignore[union-attr]
-    if account_ids_for_platform:
-        recent_events_query = recent_events_query.where(
-            col(Event.account_id).in_(account_ids_for_platform)
-        )
-    recent_events = list(session.exec(recent_events_query).all())
+    # 最近 10 个事件 — 跨平台可见(全局事件 account_id 可能为 NULL)
+    recent_events = list(
+        session.exec(
+            select(Event).order_by(Event.id.desc()).limit(10)  # type: ignore[union-attr]
+        ).all()
+    )
 
     # 账号卡片 — 只包含当前平台的配置
     account_cards: list[dict[str, Any]] = []

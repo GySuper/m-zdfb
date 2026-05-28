@@ -69,6 +69,7 @@ def tasks_page(
     account: str | None = None,
     status: str | None = None,
     bucket: str | None = None,
+    platform: str | None = None,
     backlog: int | None = None,
     flash: str | None = None,
     session: Session = Depends(get_session),
@@ -95,6 +96,8 @@ def tasks_page(
         )
     if account:
         count_stmt = count_stmt.where(Task.account_id == account)
+    if platform:
+        count_stmt = count_stmt.where(Task.platform == platform)
     status_counter: dict[str, int] = {}
     for s in session.exec(count_stmt).all():
         status_counter[s] = status_counter.get(s, 0) + 1
@@ -116,6 +119,8 @@ def tasks_page(
         stmt = stmt.where(Task.execute_date == parsed_date)
     if account:
         stmt = stmt.where(Task.account_id == account)
+    if platform:
+        stmt = stmt.where(Task.platform == platform)
     if status:
         stmt = stmt.where(Task.status == status)
     elif bucket and bucket in BUCKETS:
@@ -131,6 +136,7 @@ def tasks_page(
                 "id": t.id,
                 "title": v.title,
                 "account_id": t.account_id,
+                "platform": t.platform,
                 "execute_date": t.execute_date,
                 "publish_at": t.publish_at,
                 "status": t.status,
@@ -143,6 +149,16 @@ def tasks_page(
         )
 
     account_options = list(settings.accounts.keys())
+    # Collect available platform options for filter dropdown
+    platform_set: set[str] = set()
+    for t, _v in pairs:
+        if t.platform:
+            platform_set.add(t.platform)
+    # Also include platforms from account configs
+    for cfg in settings.accounts.values():
+        p = getattr(cfg, "platform", "tencent_channel") or "tencent_channel"
+        platform_set.add(p)
+    platform_options = sorted(platform_set)
     return templates.TemplateResponse(
         request,
         "tasks.html",
@@ -153,9 +169,11 @@ def tasks_page(
             "filter_account": account or "",
             "filter_status": status or "",
             "filter_bucket": bucket or "",
+            "filter_platform": platform or "",
             "bucket_counts": bucket_counts,
             "backlog_mode": backlog_mode,
             "account_options": account_options,
+            "platform_options": platform_options,
             "status_options": ["pending", "running", "success", "failed", "skipped", "interrupted"],
             "flash": flash,
         },

@@ -60,17 +60,25 @@ def accounts_page(
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
     flash: str | None = None,
+    platform: str | None = None,
 ) -> HTMLResponse:
     db_rows = {a.id: a for a in session.exec(select(Account)).all()}
+    # Collect available platforms for filter dropdown
+    platforms_seen: dict[str, str] = {}
     rows: list[dict[str, Any]] = []
     for aid, cfg in settings.accounts.items():
         a = db_rows.get(aid)
+        p = getattr(cfg, "platform", "tencent_channel") or "tencent_channel"
+        platforms_seen[p] = p
+        if platform and p != platform:
+            continue
         rows.append(
             {
                 "id": aid,
                 "display_name": cfg.display_name,
                 "enabled": cfg.enabled,
                 "daily_limit": cfg.daily_limit,
+                "platform": p,
                 "is_active": a.is_active if a else False,
                 "cookie_status": a.cookie_status if a else "unknown",
                 "cookie_last_active_at": a.cookie_last_active_at if a else None,
@@ -78,10 +86,17 @@ def accounts_page(
                 "in_db": a is not None,
             }
         )
+    platform_options = sorted(platforms_seen.keys())
     return templates.TemplateResponse(
         request,
         "accounts.html",
-        {"active": "accounts", "rows": rows, "flash": flash},
+        {
+            "active": "accounts",
+            "rows": rows,
+            "flash": flash,
+            "filter_platform": platform or "",
+            "platform_options": platform_options,
+        },
     )
 
 

@@ -15,6 +15,16 @@
 
   {% if flash %}<div class="flash ok" id="flash-banner">{{ flash }}</div>{% endif %}
 
+  {% if platform_options|length > 1 %}
+  <div class="platform-tabs">
+    <span class="platform-tabs-label">编辑配置的平台:</span>
+    <a class="platform-tab {% if not filter_platform %}active{% endif %}" href="/config">默认</a>
+    {% for p in platform_options %}
+      <a class="platform-tab {% if filter_platform==p %}active{% endif %}" href="/config?platform={{ p }}">{{ platform_cn(p) }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <div class="cfg-layout">
     {# ============ 左侧锚点导航 ============ #}
     <aside class="cfg-nav">
@@ -51,18 +61,20 @@
             {% if vm.accounts %}
               <table class="account-cfg-table">
                 <thead>
-                  <tr><th>账号 ID</th><th>显示名</th><th>状态</th><th>日上限</th><th>视频检索根</th><th>操作</th></tr>
+                  <tr><th>账号 ID</th><th>显示名</th><th>平台</th><th>状态</th><th>日上限</th><th>视频检索根</th><th>操作</th></tr>
                 </thead>
                 <tbody>
                   {% for aid, a in vm.accounts.items() %}
+                    {% set ac_platform = a.get("platform", "tencent_channel") or "tencent_channel" %}
                     <tr>
                       <td><code>{{ aid }}</code></td>
                       <td>{{ a.display_name }}</td>
+                      <td><span class="badge platform-badge">{{ platform_cn(ac_platform) }}</span></td>
                       <td>{% if a.enabled %}<span class="badge ok">启用</span>{% else %}<span class="badge mute">禁用</span>{% endif %}</td>
                       <td class="muted">{{ a.daily_limit }}</td>
                       <td class="text-xs muted" style="max-width: 240px; overflow: hidden; text-overflow: ellipsis;"><code>{{ a.video_search_root }}</code></td>
                       <td class="nowrap">
-                        <button type="button" class="btn-sm" onclick='openAccountModal({{ {"id": aid, "display_name": a.display_name, "enabled": a.enabled, "daily_limit": a.daily_limit, "video_search_root": a.video_search_root, "cover_search_root": a.cover_search_root} | tojson }})'>编辑</button>
+                        <button type="button" class="btn-sm" onclick='openAccountModal({{ {"id": aid, "display_name": a.display_name, "enabled": a.enabled, "daily_limit": a.daily_limit, "video_search_root": a.video_search_root, "cover_search_root": a.cover_search_root, "platform": ac_platform} | tojson }})'>编辑</button>
                         <form method="post" action="/config/accounts/{{ aid }}/delete" style="display:inline;"
                               onsubmit="return confirm('确认删除账号 {{ aid }}?(配置中的条目会被移除,Chrome profile 目录不会自动删除)');">
                           <button class="btn-sm danger" type="submit">删除</button>
@@ -497,6 +509,16 @@
           <span class="cfg-hint">禁用后,该账号的任务被 worker 跳过</span>
         </div>
         <div class="cfg-row">
+          <label>平台</label>
+          <div class="cfg-control">
+            <select name="platform">
+              <option value="tencent_channel">视频号</option>
+              <option value="taobao_guanghe">淘宝光合</option>
+            </select>
+          </div>
+          <span class="cfg-hint">该账号所属的发布平台</span>
+        </div>
+        <div class="cfg-row">
           <label>日发布上限</label>
           <div class="cfg-control">
             <input type="number" name="daily_limit" value="20" min="1" max="200" style="width: 120px;">
@@ -673,6 +695,39 @@
     .path-alias-row input { width: 100%; }
     .alias-arrow { color: var(--color-text-faint); font-size: 14px; }
 
+    /* ============ Platform tabs ============ */
+    .platform-tabs {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      margin-bottom: var(--space-4);
+      padding: var(--space-3) var(--space-4);
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+    }
+    .platform-tabs-label {
+      font-size: 13px;
+      color: var(--color-text-mute);
+      margin-right: var(--space-2);
+    }
+    .platform-tab {
+      padding: 4px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      color: var(--color-text-mute);
+      text-decoration: none;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+    }
+    .platform-tab:hover { background: var(--color-primary-soft); color: var(--color-primary); }
+    .platform-tab.active {
+      background: var(--color-primary);
+      color: #fff;
+      border-color: var(--color-primary);
+      font-weight: 500;
+    }
+
     /* ============ Modal ============ */
     .modal {
       width: min(560px, calc(100vw - 32px));
@@ -724,6 +779,9 @@
         modalForm.elements['daily_limit'].value = data.daily_limit ?? 20;
         modalForm.elements['video_search_root'].value = data.video_search_root || '';
         modalForm.elements['cover_search_root'].value = data.cover_search_root || '';
+        if (data.platform && modalForm.elements['platform']) {
+          modalForm.elements['platform'].value = data.platform;
+        }
         submitBtn.textContent = '保存修改';
       } else {
         modalTitle.textContent = '添加账号';

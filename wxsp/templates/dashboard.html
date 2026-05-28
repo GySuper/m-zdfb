@@ -154,7 +154,9 @@
             <div class="account-card">
               <div class="ac-head">
                 <div>
-                  <div class="ac-name">{{ a.display_name }}</div>
+                  <div class="ac-name">{{ a.display_name }}
+                    {% if a.platform %}<span class="badge platform-badge">{{ platform_cn(a.platform) }}</span>{% endif %}
+                  </div>
                   <div class="ac-meta">{{ a.id }}</div>
                 </div>
                 {% if a.cookie_status == "ok" %}

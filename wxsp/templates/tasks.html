@@ -58,10 +58,20 @@
   {% endif %}
 
   {# ============ Filters ============ #}
-  <details class="filters" {% if filter_status or (filter_date and not backlog_mode) or filter_account %}open{% endif %}>
-    <summary><span>筛选</span><span class="filters-state">日期 {{ filter_date or '不限' }}{% if filter_account %} · 账号 {{ filter_account }}{% endif %}{% if filter_status %} · 状态 {{ status_cn(filter_status) }}{% endif %}</span></summary>
+  <details class="filters" {% if filter_status or (filter_date and not backlog_mode) or filter_account or filter_platform %}open{% endif %}>
+    <summary><span>筛选</span><span class="filters-state">日期 {{ filter_date or '不限' }}{% if filter_platform %} · {{ platform_cn(filter_platform) }}{% endif %}{% if filter_account %} · 账号 {{ filter_account }}{% endif %}{% if filter_status %} · 状态 {{ status_cn(filter_status) }}{% endif %}</span></summary>
     <form method="get" action="/tasks" class="filter-form">
       <label>执行日期 <input type="date" name="date" value="{{ filter_date.isoformat() if filter_date else '' }}"></label>
+      {% if platform_options|length > 1 %}
+      <label>平台
+        <select name="platform">
+          <option value="">全部</option>
+          {% for p in platform_options %}
+            <option value="{{ p }}" {% if filter_platform==p %}selected{% endif %}>{{ platform_cn(p) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
       <label>账号
         <select name="account">
           <option value="">全部</option>
@@ -110,6 +120,7 @@
             </div>
             <div class="tc-meta">
               <span><code>{{ r.account_id }}</code></span>
+              {% if r.platform %}<span class="badge platform-badge">{{ platform_cn(r.platform) }}</span>{% endif %}
               <span class="text-mute">·</span>
               <span>执行 {{ r.execute_date }}</span>
               <span class="text-mute">·</span>
@@ -296,6 +307,13 @@
     @media (max-width: 900px) {
       .task-card { grid-template-columns: 32px 1fr; }
       .tc-state, .tc-actions { grid-column: 2; }
+    }
+
+    .badge.platform-badge {
+      background: var(--color-info-soft);
+      color: var(--color-info);
+      font-size: 11px;
+      padding: 1px 7px;
     }
   </style>
 {% endblock %}

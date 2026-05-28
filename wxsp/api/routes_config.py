@@ -145,19 +145,39 @@ def _merge_secret(submitted: str, fallback: str) -> str:
     return s if s else fallback
 
 
-def _view_model(data: dict[str, Any]) -> dict[str, Any]:
-    """磁盘 dict → 模板用的扁平字段。"""
+def _view_model(data: dict[str, Any], *, platform: str | None = None) -> dict[str, Any]:
+    """磁盘 dict → 模板用的扁平字段。
+
+    若 platform 指定,优先从 platforms.<platform> 读取该平台的独立配置;
+    未指定或 platform 区块不存在时回退到顶层 flat 字段(后向兼容)。
+    """
     app = data.get("app", {})
     paths = data.get("paths", {})
-    sched = data.get("scheduler", {})
-    pub = data.get("publisher", {})
-    feishu = data.get("feishu", {})
-    bitable = feishu.get("bitable", {})
-    fm = feishu.get("field_map", {})
-    sync = feishu.get("sync", {})
-    mon = data.get("monitoring", {})
-    wecom = mon.get("notifiers", {}).get("wecom", {})
     webui = data.get("webui", {})
+
+    # 平台特定配置:优先读 platforms.<p>,fallback 到顶层
+    plat_section: dict[str, Any] | None = None
+    if platform:
+        plat_section = (data.get("platforms") or {}).get(platform)
+    if plat_section is None:
+        # backward compat: read from flat fields
+        plat_section = {}
+
+    def _plat(key: str, default: Any = None) -> Any:
+        return (
+            plat_section.get(key, data.get(key, default))
+            if plat_section is not None
+            else data.get(key, default)
+        )
+
+    sched = _plat("scheduler") or {}
+    pub = _plat("publisher") or {}
+    feishu = _plat("feishu") or {}
+    mon = _plat("monitoring") or {}
+    bitable = feishu.get("bitable", {}) if isinstance(feishu, dict) else {}
+    fm = feishu.get("field_map", {}) if isinstance(feishu, dict) else {}
+    sync = feishu.get("sync", {}) if isinstance(feishu, dict) else {}
+    wecom = mon.get("notifiers", {}).get("wecom", {}) if isinstance(mon, dict) else {}
 
     step_pause = pub.get("step_pause_seconds", [1.0, 3.0]) or [1.0, 3.0]
     # path_aliases:键值序对,模板按顺序渲染。排序保证 UI 表单稳定(避免每次刷新顺序乱跳)。
@@ -218,8 +238,10 @@ def _render_config(
     flash: str | None = None,
     errors: list[str] | None = None,
     edit_account_id: str | None = None,
+    platform: str | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
+    platform_options = sorted((data.get("platforms") or {}).keys())
     return templates.TemplateResponse(
         request,
         "config.html",
@@ -229,10 +251,12 @@ def _render_config(
             "exists": _config_path().exists(),
             "flash": flash,
             "errors": errors or [],
-            "vm": _view_model(data),
+            "vm": _view_model(data, platform=platform),
             "notify_on_options": NOTIFY_ON_OPTIONS,
             "field_map_keys": FIELD_MAP_KEYS,
             "edit_account_id": edit_account_id,
+            "filter_platform": platform or "",
+            "platform_options": platform_options,
         },
         status_code=status_code,
     )
@@ -246,9 +270,14 @@ def config_page(
     request: Request,
     flash: str | None = None,
     edit: str | None = None,
+    platform: str | None = None,
 ) -> HTMLResponse:
-    """edit query 参数:传账号 ID 时,该账号行内 inline 展开编辑表单。"""
-    return _render_config(request, data=_load_raw_yaml(), flash=flash, edit_account_id=edit)
+    """edit query 参数:传账号 ID 时,该账号行内 inline 展开编辑表单。
+    platform 参数:选择要编辑的平台配置(如 tencent_channel / taobao_guanghe)。
+    """
+    return _render_config(
+        request, data=_load_raw_yaml(), flash=flash, edit_account_id=edit, platform=platform
+    )
 
 
 @router.post("/config", response_class=HTMLResponse)
@@ -399,6 +428,7 @@ def _build_account_entry(
     video_search_root: str,
     cover_search_root: str,
     user_data_dir: str,
+    platform: str = "tencent_channel",
 ) -> dict[str, Any]:
     return {
         "display_name": display_name,
@@ -407,6 +437,7 @@ def _build_account_entry(
         "user_data_dir": user_data_dir,
         "video_search_root": video_search_root,
         "cover_search_root": cover_search_root,
+        "platform": platform,
     }
 
 
@@ -417,6 +448,7 @@ def add_account(
     video_search_root: str = Form(...),
     cover_search_root: str = Form(...),
     enabled: bool = Form(True),
+    platform: str = Form("tencent_channel"),
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
     """account_id / user_data_dir 均由系统自动生成(account_<8-hex> + 对应 profile 目录)。
@@ -450,6 +482,7 @@ def add_account(
             video_search_root=video_search_root,
             cover_search_root=cover_search_root,
             user_data_dir=user_data_dir,
+            platform=platform,
         )
         data["accounts"] = accounts
         errors = _validate_dict(data)
@@ -461,6 +494,7 @@ def add_account(
                 Account(
                     id=aid,
                     display_name=display_name,
+                    platform=platform,
                     user_data_dir=user_data_dir,
                     daily_limit=daily_limit,
                 )
@@ -537,6 +571,7 @@ def update_account(
     video_search_root: str = Form(...),
     cover_search_root: str = Form(...),
     enabled: bool = Form(False),
+    platform: str = Form("tencent_channel"),
 ) -> RedirectResponse:
     """编辑账号(account_id 和 user_data_dir 不可改:它们与 chrome profile 强绑定)。"""
     display_name = display_name.strip()
@@ -567,6 +602,7 @@ def update_account(
             video_search_root=video_search_root,
             cover_search_root=cover_search_root,
             user_data_dir=old_entry.get("user_data_dir") or _profile_dir_for(account_id),
+            platform=platform,
         )
         data["accounts"] = accounts
         errors = _validate_dict(data)

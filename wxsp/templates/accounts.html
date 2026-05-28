@@ -5,9 +5,19 @@
   <div class="page-header">
     <div>
       <div class="page-title">账号管理</div>
-      <div class="page-subtitle">共 {{ rows|length }} 个视频号账号</div>
+      <div class="page-subtitle">共 {{ rows|length }} 个账号{% if filter_platform %} · {{ platform_cn(filter_platform) }}{% endif %}</div>
     </div>
     <div class="page-actions">
+      {% if platform_options|length > 1 %}
+      <form method="get" action="/accounts" style="display:inline-flex; align-items:center; gap:6px;">
+        <select name="platform" style="height:32px; font-size:13px;" onchange="this.form.submit()">
+          <option value="">全部平台</option>
+          {% for p in platform_options %}
+            <option value="{{ p }}" {% if filter_platform==p %}selected{% endif %}>{{ platform_cn(p) }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% endif %}
       <span class="op-spinner" id="sync-spinner">同步中…</span>
       <button class="primary" type="button"
               hx-post="/accounts/sync"
@@ -35,6 +45,7 @@
             <div class="row-id">
               <div class="row-name">
                 {{ r.display_name }}
+                {% if r.platform %}<span class="badge platform-badge">{{ platform_cn(r.platform) }}</span>{% endif %}
                 {% if not r.enabled %}<span class="badge mute">已禁用</span>{% endif %}
               </div>
               <div class="row-meta"><code>{{ r.id }}</code></div>
@@ -180,5 +191,12 @@
     .info-block[open] summary { margin-bottom: var(--space-3); }
     .info-list { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.8; color: var(--color-text); }
     .info-list li { margin-bottom: 2px; }
+
+    .badge.platform-badge {
+      background: var(--color-info-soft);
+      color: var(--color-info);
+      font-size: 11px;
+      padding: 1px 7px;
+    }
   </style>
 {% endblock %}

@@ -62,7 +62,17 @@ def enabled_cn(value: bool) -> str:
     return ENABLED_CN.get(value, "未知")
 
 
+PLATFORM_CN: dict[str, str] = {
+    "tencent_channel": "视频号",
+    "taobao_guanghe": "淘宝光合",
+}
+
+
 def error_type_cn(value: str | None) -> str:
     if not value:
         return ""
     return ERROR_TYPE_CN.get(value, value)
+
+
+def platform_cn(value: str) -> str:
+    return PLATFORM_CN.get(value, value)

@@ -73,6 +73,7 @@ def dashboard(
                 "display_name": cfg.display_name,
                 "enabled": cfg.enabled,
                 "daily_limit": cfg.daily_limit,
+                "platform": getattr(cfg, "platform", "tencent_channel") or "tencent_channel",
                 "is_active": a.is_active if a else False,
                 "cookie_status": a.cookie_status if a else "unknown",
                 "cookie_last_active_at": a.cookie_last_active_at if a else None,

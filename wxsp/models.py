@@ -60,6 +60,10 @@ class Video(SQLModel, table=True):
     cover_path: str | None = None
     topic: str | None = None
     original_claim: bool = False
+    # taobao-specific fields
+    declaration: str | None = None  # 创作者声明
+    ai_optimize: bool = False  # AI优化开关
+    product_ids_json: str = "[]"  # 商品ID列表(JSON array)
     file_hash: str | None = None
     ingested_at: datetime
 

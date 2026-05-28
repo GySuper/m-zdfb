@@ -52,6 +52,10 @@ class ValidationResult:
     execute_date: date | None = None
     publish_at: datetime | None = None
     errors: list[FieldError] = field(default_factory=list)
+    # taobao-specific
+    declaration: str | None = None
+    ai_optimize: bool = False
+    product_ids: list[str] = field(default_factory=list)
 
 
 class NasFinder(Protocol):
@@ -134,8 +138,43 @@ def validate(
     execute_date = _check_execute_date(row.fields, fm.execute_date, errors)
     publish_at = _check_publish_at(row.fields, fm.publish_at, now, execute_date, errors)
 
+    # Taobao-specific fields
+    declaration_raw = row.fields.get("declaration", "")
+    declaration = _get_str(declaration_raw) if declaration_raw else "内容无需标注"
+    if not declaration:
+        declaration = "内容无需标注"
+    valid_declarations = {
+        "内容无需标注",
+        "含AI生成内容",
+        "含虚构演绎内容",
+        "内容为转载",
+        "个人观点，仅供参考",  # noqa: RUF001
+        "内容含营销信息",
+    }
+    if declaration and declaration not in valid_declarations:
+        errors.append(FieldError("创作者声明", f"'{declaration}' 不在有效选项中"))
+        declaration = "内容无需标注"
+
+    ai_str = row.fields.get("ai_optimize", "")
+    ai_optimize = (
+        str(ai_str).strip().lower() in ("true", "是", "yes", "1", "✓") if ai_str else False
+    )
+
+    product_ids_str = (
+        _get_str(row.fields.get("product_ids")) if row.fields.get("product_ids") else ""
+    )
+    product_ids: list[str] = []
+    if product_ids_str:
+        product_ids = [p.strip() for p in product_ids_str.split(",") if p.strip()]
+
     if errors:
-        return ValidationResult(ok=False, errors=errors)
+        return ValidationResult(
+            ok=False,
+            errors=errors,
+            declaration=declaration,
+            ai_optimize=ai_optimize,
+            product_ids=product_ids,
+        )
     return ValidationResult(
         ok=True,
         title=title,
@@ -148,6 +187,9 @@ def validate(
         cover_path=cover_path,
         execute_date=execute_date,
         publish_at=publish_at,
+        declaration=declaration,
+        ai_optimize=ai_optimize,
+        product_ids=product_ids,
     )
 
 

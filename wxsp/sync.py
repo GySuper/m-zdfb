@@ -56,7 +56,9 @@ class _NasFinderImpl:
         return find_cover(filename, search_root=search_root, path_aliases=path_aliases)
 
 
-def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
+def sync_now(
+    settings: Settings, *, dry_run: bool = False, platform: str = "tencent_channel"
+) -> SyncResult:
     """拉飞书一次,入库 + 回写。
 
     - 飞书 disabled → 直接返回空 SyncResult,不抛异常
@@ -64,15 +66,16 @@ def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
     - 单行回写失败 → 静默吞掉(写到 logger),不打断整体 sync
     """
     result = SyncResult()
-    if not settings.feishu.enabled:
+    feishu_cfg = settings.get_feishu_config(platform)
+    if feishu_cfg is None or not feishu_cfg.enabled:
         return result
 
-    client = make_client(settings.feishu.app_id, settings.feishu.app_secret)
+    client = make_client(feishu_cfg.app_id, feishu_cfg.app_secret)
     rows = fetch_pending_rows(
         client,
-        app_token=settings.feishu.bitable.app_token,
-        table_id=settings.feishu.bitable.table_id,
-        status_field=settings.feishu.field_map.status,
+        app_token=feishu_cfg.bitable.app_token,
+        table_id=feishu_cfg.bitable.table_id,
+        status_field=feishu_cfg.field_map.status,
     )
     result.pulled = len(rows)
 
@@ -127,6 +130,9 @@ def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
                 cover_path=str(v_result.cover_path) if v_result.cover_path else None,
                 topic=v_result.topic,
                 original_claim=v_result.original_claim,
+                declaration=v_result.declaration,
+                ai_optimize=v_result.ai_optimize,
+                product_ids_json=json.dumps(v_result.product_ids, ensure_ascii=False),
                 ingested_at=now,
             )
             task = Task(
@@ -151,21 +157,21 @@ def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
     result.skipped_incomplete = len(skipped_incomplete)
     result.rejected_details = rejected
 
-    if not dry_run and settings.feishu.sync.write_back_enabled:
-        fm = settings.feishu.field_map
+    if not dry_run and feishu_cfg.sync.write_back_enabled:
+        fm = feishu_cfg.field_map
         for record_id in accepted:
-            _safe_writeback(client, settings, record_id, {fm.status: "已计划"})
+            _safe_writeback(client, feishu_cfg, record_id, {fm.status: "已计划"})
         for record_id, errs in rejected:
             _safe_writeback(
                 client,
-                settings,
+                feishu_cfg,
                 record_id,
                 {fm.status: "失败", fm.error_message: _format_errors(errs)},
             )
         for record_id in skipped:
             _safe_writeback(
                 client,
-                settings,
+                feishu_cfg,
                 record_id,
                 {fm.error_message: "已有历史任务,请在 Web UI 重试"},
             )
@@ -173,14 +179,12 @@ def sync_now(settings: Settings, *, dry_run: bool = False) -> SyncResult:
     return result
 
 
-def _safe_writeback(
-    client: Any, settings: Settings, record_id: str, fields: dict[str, Any]
-) -> None:
+def _safe_writeback(client: Any, feishu_cfg: Any, record_id: str, fields: dict[str, Any]) -> None:
     try:
         writeback_row(
             client,
-            app_token=settings.feishu.bitable.app_token,
-            table_id=settings.feishu.bitable.table_id,
+            app_token=feishu_cfg.bitable.app_token,
+            table_id=feishu_cfg.bitable.table_id,
             record_id=record_id,
             fields=fields,
         )

@@ -9,6 +9,7 @@ from wxsp.platforms.base import (  # re-export for callers
     PlatformPublisher,
     PublishResult,
 )
+from wxsp.platforms.taobao_guanghe import TaobaoGuanghePublisher
 from wxsp.platforms.tencent_channel import TencentChannelPublisher
 
 
@@ -18,6 +19,7 @@ class AlreadyClaimed(Exception):
 
 _PUBLISHERS: dict[str, PlatformPublisher] = {
     "tencent_channel": TencentChannelPublisher(),
+    "taobao_guanghe": TaobaoGuanghePublisher(),
 }
 
 

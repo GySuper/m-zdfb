@@ -38,6 +38,18 @@ class VideoInvalid(PublisherError):
     """视频文件本身有问题(损坏/格式/大小);validator 该拦未拦下的兜底。"""
 
 
+class ProductNotFound(PublisherError):
+    """飞书填的商品ID在弹窗搜索无结果。"""
+
+
+class TopicNotFound(PublisherError):
+    """飞书填的话题名搜索无结果。"""
+
+
+class LoginRequired(PublisherError):
+    """cookie 过期, 需要重新登录。"""
+
+
 class UnknownError(PublisherError):
     """兜底类型,classify 返回 'unknown' 时的占位。"""
 
@@ -50,6 +62,9 @@ _KIND_BY_TYPE: dict[type[Exception], str] = {
     NasUnreachable: "nas_unreachable",
     NetworkError: "network",
     VideoInvalid: "video_invalid",
+    ProductNotFound: "product_not_found",
+    TopicNotFound: "topic_not_found",
+    LoginRequired: "login_required",
 }
 
 

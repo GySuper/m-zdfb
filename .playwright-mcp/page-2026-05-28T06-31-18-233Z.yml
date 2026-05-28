@@ -1,0 +1,847 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - img "home" [ref=e6] [cursor=pointer]
+      - generic [ref=e9]:
+        - generic [ref=e10]:
+          - list [ref=e15]:
+            - generic [ref=e17] [cursor=pointer]: 你新增了0个粉丝
+            - listitem [ref=e18]:
+              - generic [ref=e19] [cursor=pointer]: 已为您总结上周全域内容表现情况
+            - listitem [ref=e20]:
+              - generic [ref=e21] [cursor=pointer]: 你发布的内容新增100条评论
+            - listitem [ref=e22]:
+              - generic [ref=e23] [cursor=pointer]: 你发布的内容新增15451个赞/收藏
+            - listitem [ref=e24]:
+              - generic [ref=e25] [cursor=pointer]: 你新增了0个粉丝
+            - generic [ref=e27] [cursor=pointer]: 已为您总结上周全域内容表现情况
+          - generic [ref=e28] [cursor=pointer]:
+            - generic "15889" [ref=e30]:
+              - img [ref=e32]
+              - superscript [ref=e34]: 99+
+            - generic [ref=e35]: 消息
+        - generic [ref=e37]:
+          - generic [ref=e39] [cursor=pointer]:
+            - generic [ref=e40]: 创作者服务
+            - generic [ref=e42]: 
+          - img "avatar" [ref=e43]
+    - generic [ref=e44]:
+      - complementary [ref=e45]:
+        - generic [ref=e47]:
+          - generic [ref=e49] [cursor=pointer]:
+            - generic [ref=e50]: 
+            - text: 发布作品
+          - listbox "global navigation" [ref=e51]:
+            - option "首页" [ref=e52] [cursor=pointer]:
+              - generic [ref=e54]:
+                - img [ref=e56]
+                - text: 首页
+            - option "内容灵感 " [ref=e58]:
+              - listitem [ref=e59] [cursor=pointer]:
+                - generic [ref=e60]:
+                  - generic [ref=e61]:
+                    - img [ref=e63]
+                    - text: 内容灵感
+                  - generic [ref=e65]: 
+            - option "内容创作 " [ref=e66]:
+              - listitem [ref=e67] [cursor=pointer]:
+                - generic [ref=e68]:
+                  - generic [ref=e69]:
+                    - img [ref=e71]
+                    - text: 内容创作
+                  - generic [ref=e73]: 
+            - option "内容合作 " [ref=e74]:
+              - listitem [ref=e75] [cursor=pointer]:
+                - generic [ref=e76]:
+                  - generic [ref=e77]:
+                    - img [ref=e79]
+                    - text: 内容合作
+                  - generic [ref=e81]: 
+            - option "内容管理 " [ref=e82]:
+              - listitem [ref=e83] [cursor=pointer]:
+                - generic [ref=e84]:
+                  - generic [ref=e85]:
+                    - img [ref=e87]
+                    - text: 内容管理
+                  - generic [ref=e89]: 
+            - option "内容数据 " [ref=e90]:
+              - listitem [ref=e91] [cursor=pointer]:
+                - generic [ref=e92]:
+                  - generic [ref=e93]:
+                    - img [ref=e95]
+                    - text: 内容数据
+                  - generic [ref=e97]: 
+            - option "规则及学院 " [ref=e98]:
+              - listitem [ref=e99] [cursor=pointer]:
+                - generic [ref=e100]:
+                  - generic [ref=e101]:
+                    - img [ref=e103]
+                    - text: 规则及学院
+                  - generic [ref=e105]: 
+            - option "账号资产 " [ref=e106]:
+              - listitem [ref=e107] [cursor=pointer]:
+                - generic [ref=e108]:
+                  - generic [ref=e109]:
+                    - img [ref=e111]
+                    - text: 账号资产
+                  - generic [ref=e113]: 
+          - paragraph [ref=e115]:
+            - text: Copyright
+            - text: © Alibaba Group
+      - iframe [active] [ref=e123]:
+        - generic [active] [ref=f16e1]:
+          - generic [ref=f16e8]:
+            - generic [ref=f16e9]: 发布视频
+            - generic [ref=f16e10]:
+              - generic [ref=f16e18]:
+                - application [ref=f16e20]:
+                  - generic [ref=f16e21]:
+                    - img [ref=f16e23]
+                    - generic [ref=f16e25]: 点击上传视频，或将视频拖放到此处
+                    - generic [ref=f16e26]: 上传视频
+                - generic [ref=f16e27]:
+                  - generic "视频格式推荐使用mp4" [ref=f16e28]:
+                    - img [ref=f16e30]
+                    - generic "视频格式推荐使用mp4" [ref=f16e32]
+                  - generic [ref=f16e33]:
+                    - img [ref=f16e35]
+                    - generic "视频比例推荐9:16竖版视频" [ref=f16e37]
+                  - generic "清晰度建议1080P及以上" [ref=f16e38]:
+                    - img [ref=f16e40]
+                    - generic [ref=f16e42]: 清晰度建议1080P及以上
+                  - generic "时长30分钟以下，文件最大1.5GB" [ref=f16e43]:
+                    - img [ref=f16e45]
+                    - generic [ref=f16e47]: 时长30分钟以下，文件最大1.5GB
+              - generic [ref=f16e48]:
+                - generic [ref=f16e49]:
+                  - generic [ref=f16e50]:
+                    - img [ref=f16e52]
+                    - generic [ref=f16e54]: 获取流量攻略：选好内容方向，精准获取多场域流量
+                    - generic [ref=f16e55] [cursor=pointer]: 点击查看详情
+                  - generic [ref=f16e56]:
+                    - generic [ref=f16e57]: 视频封面*
+                    - generic [ref=f16e61]: 等待视频上传...
+                  - generic [ref=f16e62]: 视频描述
+                  - generic [ref=f16e63]:
+                    - generic [ref=f16e65]:
+                      - textbox "加个标题让内容更吸引人" [ref=f16e66]
+                      - generic [ref=f16e68]: 0/30
+                    - generic [ref=f16e70]:
+                      - generic [ref=f16e71]: "推荐标题:"
+                      - generic [ref=f16e72]: 上传视频后将自动生成
+                  - generic [ref=f16e75]:
+                    - generic [ref=f16e81]: 展开说说，你写的文字我们都喜欢:)
+                    - generic [ref=f16e83]:
+                      - generic [ref=f16e84] [cursor=pointer]:
+                        - img [ref=f16e86]
+                        - generic [ref=f16e88]: 好友
+                      - generic [ref=f16e89] [cursor=pointer]:
+                        - img [ref=f16e91]
+                        - generic [ref=f16e93]: 品牌标签
+                      - generic [ref=f16e94] [cursor=pointer]:
+                        - img [ref=f16e96]
+                        - generic [ref=f16e98]: 店铺
+                      - generic [ref=f16e99] [cursor=pointer]:
+                        - img [ref=f16e101]
+                        - generic [ref=f16e103]: 内容标签
+                      - generic [ref=f16e104]: 0/1000
+                  - generic [ref=f16e107]:
+                    - generic [ref=f16e108]: 参与话题活动
+                    - generic [ref=f16e110] [cursor=pointer]:
+                      - generic [ref=f16e112]: 
+                      - generic [ref=f16e113]:
+                        - generic [ref=f16e114]: 点击添加话题
+                        - generic [ref=f16e115]: 由官方发起的征稿话题，奖励多多
+                  - generic [ref=f16e117]:
+                    - generic [ref=f16e118]:
+                      - generic [ref=f16e119]: 推荐音乐
+                      - generic [ref=f16e120]: 平台提供的音乐库歌曲仅限于手淘公域场景（逛逛、猜你喜欢等）使用
+                      - img [ref=f16e122]
+                    - generic [ref=f16e126] [cursor=pointer]:
+                      - img [ref=f16e129]
+                      - generic [ref=f16e131]:
+                        - generic [ref=f16e132]: 点击添加音乐
+                        - generic [ref=f16e133]: 去选择
+                  - generic [ref=f16e134]:
+                    - generic [ref=f16e135]:
+                      - generic [ref=f16e136]: 关联商品｜关联店铺
+                      - generic [ref=f16e137]: 不支持同时关联商品和店铺
+                    - radiogroup [ref=f16e138]:
+                      - generic [ref=f16e139]:
+                        - radio "商品" [checked] [ref=f16e142] [cursor=pointer]
+                        - text: 商品
+                      - generic [ref=f16e143]:
+                        - radio "店铺" [ref=f16e146] [cursor=pointer]
+                        - text: 店铺
+                    - generic [ref=f16e147]:
+                      - generic [ref=f16e151] [cursor=pointer]:
+                        - generic [ref=f16e152]: 
+                        - generic [ref=f16e153]: 添加商品
+                      - text: 
+                - generic [ref=f16e154]:
+                  - generic [ref=f16e156]:
+                    - generic [ref=f16e157]: 发布设置
+                    - img [ref=f16e159]
+                  - generic [ref=f16e162]:
+                    - generic [ref=f16e164]:
+                      - radio "允许下载" [ref=f16e167] [cursor=pointer]
+                      - text: 允许下载
+                    - generic [ref=f16e168]:
+                      - generic [ref=f16e169]:
+                        - radio [ref=f16e173] [cursor=pointer]
+                        - generic [ref=f16e174]: 定时发布
+                      - generic [ref=f16e177]:
+                        - combobox "请选择日期和时间" [disabled] [ref=f16e178]: 2026/05/28 17:31
+                        - generic [ref=f16e181]: 
+                  - generic [ref=f16e182]:
+                    - generic [ref=f16e183]:
+                      - generic [ref=f16e184]: 创作者声明*
+                      - img [ref=f16e186] [cursor=pointer]
+                    - radiogroup [ref=f16e188]:
+                      - generic [ref=f16e189]:
+                        - radio "内容无需标注" [ref=f16e192] [cursor=pointer]
+                        - text: 内容无需标注
+                      - generic [ref=f16e193]:
+                        - radio "含AI生成内容" [ref=f16e196] [cursor=pointer]
+                        - text: 含AI生成内容
+                      - generic [ref=f16e197]:
+                        - radio "含虚构演绎内容" [ref=f16e200] [cursor=pointer]
+                        - text: 含虚构演绎内容
+                      - generic [ref=f16e201]:
+                        - radio "内容为转载" [ref=f16e204] [cursor=pointer]
+                        - text: 内容为转载
+                      - generic [ref=f16e205]:
+                        - radio "个人观点，仅供参考" [ref=f16e208] [cursor=pointer]
+                        - text: 个人观点，仅供参考
+                      - generic [ref=f16e209]:
+                        - radio "内容含营销信息" [ref=f16e212] [cursor=pointer]
+                        - text: 内容含营销信息
+                  - generic [ref=f16e213]:
+                    - generic [ref=f16e214]:
+                      - generic [ref=f16e215]: AI优化
+                      - generic [ref=f16e216]:
+                        - text: 开启AI优化后，平台将尝试持续优化标题、封面及商品等信息，不占用内容的编辑次数。
+                        - link "点击查看功能说明" [ref=f16e217] [cursor=pointer]:
+                          - /url: https://alidocs.dingtalk.com/i/nodes/93NwLYZXWyxXroNzCOYo94e48kyEqBQm?utm_scene=team_space&utm_medium=dingdoc_doc_plugin_card&utm_source=dingdoc_doc
+                    - switch [ref=f16e218] [cursor=pointer]
+                  - button "立即发布" [ref=f16e222] [cursor=pointer]:
+                    - generic [ref=f16e223]: 立即发布
+          - textbox [ref=f16e225]
+          - dialog "话题选择" [ref=f16e228]:
+            - heading "话题选择" [level=1] [ref=f16e229]
+            - generic [ref=f16e231]:
+              - generic [ref=f16e232]:
+                - textbox "输入关键词搜索" [ref=f16e234]
+                - generic [ref=f16e235]:
+                  - button "搜索" [ref=f16e236] [cursor=pointer]:
+                    - generic [ref=f16e237]: 搜索
+                  - button "重置" [ref=f16e238] [cursor=pointer]:
+                    - generic [ref=f16e239]: 重置
+              - generic [ref=f16e241]:
+                - listbox [ref=f16e243]:
+                  - option "推荐" [ref=f16e244] [cursor=pointer]:
+                    - generic [ref=f16e245]: 推荐
+                  - option "时尚" [ref=f16e246] [cursor=pointer]:
+                    - generic [ref=f16e247]: 时尚
+                  - option "美妆" [ref=f16e248] [cursor=pointer]:
+                    - generic [ref=f16e249]: 美妆
+                  - option "家居" [ref=f16e250] [cursor=pointer]:
+                    - generic [ref=f16e251]: 家居
+                  - option "美食" [ref=f16e252] [cursor=pointer]:
+                    - generic [ref=f16e253]: 美食
+                  - option "宠物" [ref=f16e254] [cursor=pointer]:
+                    - generic [ref=f16e255]: 宠物
+                  - option "数码" [ref=f16e256] [cursor=pointer]:
+                    - generic [ref=f16e257]: 数码
+                  - option "潮玩" [ref=f16e258] [cursor=pointer]:
+                    - generic [ref=f16e259]: 潮玩
+                  - option "文创" [ref=f16e260] [cursor=pointer]:
+                    - generic [ref=f16e261]: 文创
+                  - option "玩乐" [ref=f16e262] [cursor=pointer]:
+                    - generic [ref=f16e263]: 玩乐
+                  - option "运动" [ref=f16e264] [cursor=pointer]:
+                    - generic [ref=f16e265]: 运动
+                  - option "母婴" [ref=f16e266] [cursor=pointer]:
+                    - generic [ref=f16e267]: 母婴
+                  - option "游戏" [ref=f16e268] [cursor=pointer]:
+                    - generic [ref=f16e269]: 游戏
+                  - option "汽车" [ref=f16e270] [cursor=pointer]:
+                    - generic [ref=f16e271]: 汽车
+                  - option "泛生活" [ref=f16e272] [cursor=pointer]:
+                    - generic [ref=f16e273]: 泛生活
+                  - option "泛娱乐" [ref=f16e274] [cursor=pointer]:
+                    - generic [ref=f16e275]: 泛娱乐
+                - generic [ref=f16e276]:
+                  - generic [ref=f16e279]: 参与官方话题投稿，有机会获得额外流量奖励～
+                  - generic [ref=f16e281] [cursor=pointer]:
+                    - generic [ref=f16e282]:
+                      - img [ref=f16e284]
+                      - generic [ref=f16e285]:
+                        - generic [ref=f16e286]:
+                          - generic [ref=f16e287]:
+                            - img [ref=f16e289]
+                            - generic [ref=f16e291]: 618美妆买对不买贵
+                          - generic [ref=f16e292]:
+                            - img "icon" [ref=f16e294]
+                            - generic [ref=f16e295]: 美妆
+                        - generic [ref=f16e296]:
+                          - generic [ref=f16e297]:
+                            - generic [ref=f16e298]: 作品数 53.9万
+                            - generic [ref=f16e300]: 参与数 2.9万
+                          - generic [ref=f16e301]:
+                            - img [ref=f16e302]
+                            - generic [ref=f16e310]: 29577.8万
+                    - generic [ref=f16e312]:
+                      - generic [ref=f16e313]:
+                        - img [ref=f16e315]
+                        - generic [ref=f16e323]: 有奖
+                        - img [ref=f16e324]
+                      - generic [ref=f16e332]: 平台活动
+                      - generic [ref=f16e333]:
+                        - generic [ref=f16e335]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e336]: 04.27 ~ 06.18
+                        - generic [ref=f16e338]: 
+                    - img "icon" [ref=f16e339]
+                  - generic [ref=f16e341] [cursor=pointer]:
+                    - generic [ref=f16e342]:
+                      - img [ref=f16e344]
+                      - generic [ref=f16e345]:
+                        - generic [ref=f16e346]:
+                          - generic [ref=f16e347]:
+                            - img [ref=f16e349]
+                            - generic [ref=f16e351]: 618育儿安心好物
+                          - generic [ref=f16e352]:
+                            - generic [ref=f16e353]: 育儿
+                            - generic [ref=f16e354]: 孕产
+                        - generic [ref=f16e355]:
+                          - generic [ref=f16e356]:
+                            - generic [ref=f16e357]: 作品数 48.3万
+                            - generic [ref=f16e359]: 参与数 2.4万
+                          - generic [ref=f16e360]:
+                            - img [ref=f16e361]
+                            - generic [ref=f16e369]: 15629.1万
+                    - generic [ref=f16e371]:
+                      - generic [ref=f16e372]:
+                        - img [ref=f16e374]
+                        - generic [ref=f16e382]: 有奖
+                        - img [ref=f16e383]
+                      - generic [ref=f16e391]: 平台活动
+                      - generic [ref=f16e392]:
+                        - generic [ref=f16e394]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e395]: 04.27 ~ 06.18
+                        - generic [ref=f16e397]: 
+                    - img "icon" [ref=f16e398]
+                  - generic [ref=f16e400] [cursor=pointer]:
+                    - generic [ref=f16e401]:
+                      - img [ref=f16e403]
+                      - generic [ref=f16e404]:
+                        - generic [ref=f16e405]:
+                          - generic [ref=f16e406]:
+                            - img [ref=f16e408]
+                            - generic [ref=f16e410]: 营养缺口618一键补齐
+                          - generic [ref=f16e411]:
+                            - generic [ref=f16e412]: 健康
+                            - generic [ref=f16e413]: 美食
+                        - generic [ref=f16e414]:
+                          - generic [ref=f16e415]:
+                            - generic [ref=f16e416]: 作品数 7.7万
+                            - generic [ref=f16e418]: 参与数 7941
+                          - generic [ref=f16e419]:
+                            - img [ref=f16e420]
+                            - generic [ref=f16e428]: 10561.0万
+                    - generic [ref=f16e430]:
+                      - generic [ref=f16e431]:
+                        - img [ref=f16e433]
+                        - generic [ref=f16e441]: 有奖
+                        - img [ref=f16e442]
+                      - generic [ref=f16e450]: 平台活动
+                      - generic [ref=f16e451]:
+                        - generic [ref=f16e453]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e454]: 04.27 ~ 06.18
+                        - generic [ref=f16e456]: 
+                    - img "icon" [ref=f16e457]
+                  - generic [ref=f16e459] [cursor=pointer]:
+                    - generic [ref=f16e460]:
+                      - img [ref=f16e462]
+                      - generic [ref=f16e463]:
+                        - generic [ref=f16e464]:
+                          - generic [ref=f16e465]:
+                            - img [ref=f16e467]
+                            - generic [ref=f16e469]: AI带货
+                          - generic [ref=f16e470]:
+                            - img "icon" [ref=f16e472]
+                            - generic [ref=f16e473]: 其它
+                        - generic [ref=f16e474]:
+                          - generic [ref=f16e475]:
+                            - generic [ref=f16e476]: 作品数 2.0万
+                            - generic [ref=f16e478]: 参与数 3813
+                          - generic [ref=f16e479]:
+                            - img [ref=f16e480]
+                            - generic [ref=f16e488]: 652.6万
+                    - generic [ref=f16e490]:
+                      - generic [ref=f16e491]:
+                        - img [ref=f16e493]
+                        - generic [ref=f16e501]: 平台流量
+                        - img [ref=f16e502]
+                      - generic [ref=f16e510]: 品类活动
+                      - generic [ref=f16e511]:
+                        - generic [ref=f16e513]: 无限帧 AI创意内容挑战赛
+                        - generic [ref=f16e514]: 05.15 ~ 06.05
+                        - generic [ref=f16e516]: 
+                    - img "icon" [ref=f16e517]
+                  - generic [ref=f16e519] [cursor=pointer]:
+                    - generic [ref=f16e520]:
+                      - img [ref=f16e522]
+                      - generic [ref=f16e523]:
+                        - generic [ref=f16e524]:
+                          - generic [ref=f16e525]:
+                            - img [ref=f16e527]
+                            - generic [ref=f16e529]: 户外人的618小清单
+                          - generic [ref=f16e530]:
+                            - img "icon" [ref=f16e532]
+                            - generic [ref=f16e533]: 运动
+                            - generic [ref=f16e534]: 户外
+                        - generic [ref=f16e535]:
+                          - generic [ref=f16e536]:
+                            - generic [ref=f16e537]: 作品数 7.2万
+                            - generic [ref=f16e539]: 参与数 7634
+                          - generic [ref=f16e540]:
+                            - img [ref=f16e541]
+                            - generic [ref=f16e549]: 10289.3万
+                    - generic [ref=f16e551]:
+                      - generic [ref=f16e552]:
+                        - img [ref=f16e554]
+                        - generic [ref=f16e562]: 有奖
+                        - img [ref=f16e563]
+                      - generic [ref=f16e571]: 平台活动
+                      - generic [ref=f16e572]:
+                        - generic [ref=f16e574]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e575]: 04.27 ~ 06.18
+                        - generic [ref=f16e577]: 
+                    - img "icon" [ref=f16e578]
+                  - generic [ref=f16e580] [cursor=pointer]:
+                    - generic [ref=f16e581]:
+                      - img [ref=f16e583]
+                      - generic [ref=f16e584]:
+                        - generic [ref=f16e585]:
+                          - generic [ref=f16e586]:
+                            - img [ref=f16e588]
+                            - generic [ref=f16e590]: 焕颜妆造灵感片场
+                          - generic [ref=f16e591]:
+                            - img "icon" [ref=f16e593]
+                            - generic [ref=f16e594]: 美妆
+                        - generic [ref=f16e595]:
+                          - generic [ref=f16e596]:
+                            - generic [ref=f16e597]: 作品数 8.0万
+                            - generic [ref=f16e599]: 参与数 1.2万
+                          - generic [ref=f16e600]:
+                            - img [ref=f16e601]
+                            - generic [ref=f16e609]: 9069.8万
+                    - generic [ref=f16e611]:
+                      - generic [ref=f16e612]:
+                        - img [ref=f16e614]
+                        - generic [ref=f16e622]: 有奖
+                        - img [ref=f16e623]
+                      - generic [ref=f16e631]: 平台活动
+                      - generic [ref=f16e632]:
+                        - generic [ref=f16e634]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e635]: 04.27 ~ 06.18
+                        - generic [ref=f16e637]: 
+                    - img "icon" [ref=f16e638]
+                  - generic [ref=f16e640] [cursor=pointer]:
+                    - generic [ref=f16e641]:
+                      - img [ref=f16e643]
+                      - generic [ref=f16e644]:
+                        - generic [ref=f16e645]:
+                          - generic [ref=f16e646]:
+                            - img [ref=f16e648]
+                            - generic [ref=f16e650]: 科技数码前沿片场
+                          - generic [ref=f16e651]:
+                            - img "icon" [ref=f16e653]
+                            - generic [ref=f16e654]: 科技
+                        - generic [ref=f16e655]:
+                          - generic [ref=f16e656]:
+                            - generic [ref=f16e657]: 作品数 16.5万
+                            - generic [ref=f16e659]: 参与数 1.2万
+                          - generic [ref=f16e660]:
+                            - img [ref=f16e661]
+                            - generic [ref=f16e669]: 8077.6万
+                    - generic [ref=f16e671]:
+                      - generic [ref=f16e672]:
+                        - img [ref=f16e674]
+                        - generic [ref=f16e682]: 有奖
+                        - img [ref=f16e683]
+                      - generic [ref=f16e691]: 平台活动
+                      - generic [ref=f16e692]:
+                        - generic [ref=f16e694]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e695]: 04.27 ~ 06.18
+                        - generic [ref=f16e697]: 
+                    - img "icon" [ref=f16e698]
+                  - generic [ref=f16e700] [cursor=pointer]:
+                    - generic [ref=f16e701]:
+                      - img [ref=f16e703]
+                      - generic [ref=f16e704]:
+                        - generic [ref=f16e705]:
+                          - generic [ref=f16e706]:
+                            - img [ref=f16e708]
+                            - generic [ref=f16e710]: 夏日色彩搭配秘籍
+                          - generic [ref=f16e712]: 时尚
+                        - generic [ref=f16e713]:
+                          - generic [ref=f16e714]:
+                            - generic [ref=f16e715]: 作品数 15.1万
+                            - generic [ref=f16e717]: 参与数 2.4万
+                          - generic [ref=f16e718]:
+                            - img [ref=f16e719]
+                            - generic [ref=f16e727]: 7856.3万
+                    - generic [ref=f16e729]:
+                      - generic [ref=f16e730]:
+                        - img [ref=f16e732]
+                        - generic [ref=f16e740]: 有奖
+                        - img [ref=f16e741]
+                      - generic [ref=f16e749]: 平台活动
+                      - generic [ref=f16e750]:
+                        - generic [ref=f16e752]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e753]: 04.27 ~ 06.18
+                        - generic [ref=f16e755]: 
+                    - img "icon" [ref=f16e756]
+                  - generic [ref=f16e758] [cursor=pointer]:
+                    - generic [ref=f16e759]:
+                      - img [ref=f16e761]
+                      - generic [ref=f16e762]:
+                        - generic [ref=f16e763]:
+                          - generic [ref=f16e764]:
+                            - img [ref=f16e766]
+                            - generic [ref=f16e768]: 618母婴宝藏加购中
+                          - generic [ref=f16e769]:
+                            - img "icon" [ref=f16e771]
+                            - generic [ref=f16e772]: 育儿
+                            - generic [ref=f16e773]: 孕产
+                        - generic [ref=f16e774]:
+                          - generic [ref=f16e775]:
+                            - generic [ref=f16e776]: 作品数 15.5万
+                            - generic [ref=f16e778]: 参与数 1.5万
+                          - generic [ref=f16e779]:
+                            - img [ref=f16e780]
+                            - generic [ref=f16e788]: 7408.3万
+                    - generic [ref=f16e790]:
+                      - generic [ref=f16e791]:
+                        - img [ref=f16e793]
+                        - generic [ref=f16e801]: 有奖
+                        - img [ref=f16e802]
+                      - generic [ref=f16e810]: 平台活动
+                      - generic [ref=f16e811]:
+                        - generic [ref=f16e813]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e814]: 04.27 ~ 06.18
+                        - generic [ref=f16e816]: 
+                    - img "icon" [ref=f16e817]
+                  - generic [ref=f16e819] [cursor=pointer]:
+                    - generic [ref=f16e820]:
+                      - img [ref=f16e822]
+                      - generic [ref=f16e823]:
+                        - generic [ref=f16e824]:
+                          - generic [ref=f16e825]:
+                            - img [ref=f16e827]
+                            - generic [ref=f16e829]: 潮动奔赴活力片场
+                          - generic [ref=f16e830]:
+                            - img "icon" [ref=f16e832]
+                            - generic [ref=f16e833]: 运动
+                            - generic [ref=f16e834]: 户外
+                        - generic [ref=f16e835]:
+                          - generic [ref=f16e836]:
+                            - generic [ref=f16e837]: 作品数 1.6万
+                            - generic [ref=f16e839]: 参与数 3523
+                          - generic [ref=f16e840]:
+                            - img [ref=f16e841]
+                            - generic [ref=f16e849]: 5015.3万
+                    - generic [ref=f16e851]:
+                      - generic [ref=f16e852]:
+                        - img [ref=f16e854]
+                        - generic [ref=f16e862]: 有奖
+                        - img [ref=f16e863]
+                      - generic [ref=f16e871]: 平台活动
+                      - generic [ref=f16e872]:
+                        - generic [ref=f16e874]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e875]: 04.27 ~ 06.18
+                        - generic [ref=f16e877]: 
+                    - img "icon" [ref=f16e878]
+                  - generic [ref=f16e880] [cursor=pointer]:
+                    - generic [ref=f16e881]:
+                      - img [ref=f16e883]
+                      - generic [ref=f16e884]:
+                        - generic [ref=f16e885]:
+                          - generic [ref=f16e886]:
+                            - img [ref=f16e888]
+                            - generic [ref=f16e890]: 装修攻略集结令
+                          - generic [ref=f16e891]:
+                            - img "icon" [ref=f16e893]
+                            - generic [ref=f16e894]: 家居
+                        - generic [ref=f16e895]:
+                          - generic [ref=f16e896]:
+                            - generic [ref=f16e897]: 作品数 194.2万
+                            - generic [ref=f16e899]: 参与数 6.2万
+                          - generic [ref=f16e900]:
+                            - img [ref=f16e901]
+                            - generic [ref=f16e909]: 263521.1万
+                    - img "icon" [ref=f16e910]
+                  - generic [ref=f16e912] [cursor=pointer]:
+                    - generic [ref=f16e913]:
+                      - img [ref=f16e915]
+                      - generic [ref=f16e916]:
+                        - generic [ref=f16e917]:
+                          - generic [ref=f16e918]:
+                            - img [ref=f16e920]
+                            - generic [ref=f16e922]: 618时髦出街清单
+                          - generic [ref=f16e924]: 时尚
+                        - generic [ref=f16e925]:
+                          - generic [ref=f16e926]:
+                            - generic [ref=f16e927]: 作品数 133.8万
+                            - generic [ref=f16e929]: 参与数 8.7万
+                          - generic [ref=f16e930]:
+                            - img [ref=f16e931]
+                            - generic [ref=f16e939]: 75431.7万
+                    - generic [ref=f16e941]:
+                      - generic [ref=f16e942]:
+                        - img [ref=f16e944]
+                        - generic [ref=f16e952]: 有奖
+                        - img [ref=f16e953]
+                      - generic [ref=f16e961]: 平台活动
+                      - generic [ref=f16e962]:
+                        - generic [ref=f16e964]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e965]: 04.27 ~ 06.18
+                        - generic [ref=f16e967]: 
+                    - img "icon" [ref=f16e968]
+                  - generic [ref=f16e970] [cursor=pointer]:
+                    - generic [ref=f16e971]:
+                      - img [ref=f16e973]
+                      - generic [ref=f16e974]:
+                        - generic [ref=f16e975]:
+                          - generic [ref=f16e976]:
+                            - img [ref=f16e978]
+                            - generic [ref=f16e980]: 我入的运动鞋分享
+                          - generic [ref=f16e981]:
+                            - img "icon" [ref=f16e983]
+                            - generic [ref=f16e984]: 时尚
+                            - generic [ref=f16e985]: 户外
+                            - generic [ref=f16e986]: 运动
+                        - generic [ref=f16e987]:
+                          - generic [ref=f16e988]:
+                            - generic [ref=f16e989]: 作品数 75.4万
+                            - generic [ref=f16e991]: 参与数 5.2万
+                          - generic [ref=f16e992]:
+                            - img [ref=f16e993]
+                            - generic [ref=f16e1001]: 62107.3万
+                    - generic [ref=f16e1003]:
+                      - generic [ref=f16e1004]:
+                        - img [ref=f16e1006]
+                        - generic [ref=f16e1014]: 有奖
+                        - img [ref=f16e1015]
+                      - generic [ref=f16e1023]: 平台活动
+                      - generic [ref=f16e1024]:
+                        - generic [ref=f16e1026]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e1027]: 04.27 ~ 06.18
+                        - generic [ref=f16e1029]: 
+                    - img "icon" [ref=f16e1030]
+                  - generic [ref=f16e1032] [cursor=pointer]:
+                    - generic [ref=f16e1033]:
+                      - img [ref=f16e1035]
+                      - generic [ref=f16e1036]:
+                        - generic [ref=f16e1037]:
+                          - generic [ref=f16e1038]:
+                            - img [ref=f16e1040]
+                            - generic [ref=f16e1042]: 618养宠必备清单
+                          - generic [ref=f16e1043]:
+                            - img "icon" [ref=f16e1045]
+                            - generic [ref=f16e1046]: 宠物
+                        - generic [ref=f16e1047]:
+                          - generic [ref=f16e1048]:
+                            - generic [ref=f16e1049]: 作品数 17.5万
+                            - generic [ref=f16e1051]: 参与数 8395
+                          - generic [ref=f16e1052]:
+                            - img [ref=f16e1053]
+                            - generic [ref=f16e1061]: 5499.9万
+                    - generic [ref=f16e1063]:
+                      - generic [ref=f16e1064]:
+                        - img [ref=f16e1066]
+                        - generic [ref=f16e1074]: 有奖
+                        - img [ref=f16e1075]
+                      - generic [ref=f16e1083]: 平台活动
+                      - generic [ref=f16e1084]:
+                        - generic [ref=f16e1086]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e1087]: 04.27 ~ 06.18
+                        - generic [ref=f16e1089]: 
+                    - img "icon" [ref=f16e1090]
+                  - generic [ref=f16e1092] [cursor=pointer]:
+                    - generic [ref=f16e1093]:
+                      - img [ref=f16e1095]
+                      - generic [ref=f16e1096]:
+                        - generic [ref=f16e1097]:
+                          - generic [ref=f16e1098]:
+                            - img [ref=f16e1100]
+                            - generic [ref=f16e1102]: 618数码新品大测评
+                          - generic [ref=f16e1103]:
+                            - img "icon" [ref=f16e1105]
+                            - generic [ref=f16e1106]: 科技
+                        - generic [ref=f16e1107]:
+                          - generic [ref=f16e1108]:
+                            - generic [ref=f16e1109]: 作品数 6.6万
+                            - generic [ref=f16e1111]: 参与数 5503
+                          - generic [ref=f16e1112]:
+                            - img [ref=f16e1113]
+                            - generic [ref=f16e1121]: 3881.3万
+                    - generic [ref=f16e1123]:
+                      - generic [ref=f16e1124]:
+                        - img [ref=f16e1126]
+                        - generic [ref=f16e1134]: 有奖
+                        - img [ref=f16e1135]
+                      - generic [ref=f16e1143]: 平台活动
+                      - generic [ref=f16e1144]:
+                        - generic [ref=f16e1146]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e1147]: 04.27 ~ 06.18
+                        - generic [ref=f16e1149]: 
+                    - img "icon" [ref=f16e1150]
+                  - generic [ref=f16e1152] [cursor=pointer]:
+                    - generic [ref=f16e1153]:
+                      - img [ref=f16e1155]
+                      - generic [ref=f16e1156]:
+                        - generic [ref=f16e1157]:
+                          - generic [ref=f16e1158]:
+                            - img [ref=f16e1160]
+                            - generic [ref=f16e1162]: 618夏日美裙大赏
+                          - generic [ref=f16e1164]: 时尚
+                        - generic [ref=f16e1165]:
+                          - generic [ref=f16e1166]:
+                            - generic [ref=f16e1167]: 作品数 3.6万
+                            - generic [ref=f16e1169]: 参与数 8047
+                          - generic [ref=f16e1170]:
+                            - img [ref=f16e1171]
+                            - generic [ref=f16e1179]: 2586.0万
+                    - generic [ref=f16e1181]:
+                      - generic [ref=f16e1182]:
+                        - img [ref=f16e1184]
+                        - generic [ref=f16e1192]: 有奖
+                        - img [ref=f16e1193]
+                      - generic [ref=f16e1201]: 平台活动
+                      - generic [ref=f16e1202]:
+                        - generic [ref=f16e1204]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e1205]: 04.27 ~ 06.18
+                        - generic [ref=f16e1207]: 
+                    - img "icon" [ref=f16e1208]
+                  - generic [ref=f16e1210] [cursor=pointer]:
+                    - generic [ref=f16e1211]:
+                      - img [ref=f16e1213]
+                      - generic [ref=f16e1214]:
+                        - generic [ref=f16e1215]:
+                          - generic [ref=f16e1216]:
+                            - img [ref=f16e1218]
+                            - generic [ref=f16e1220]: 优惠数码提前购攻略
+                          - generic [ref=f16e1221]:
+                            - img "icon" [ref=f16e1223]
+                            - generic [ref=f16e1224]: 科技
+                        - generic [ref=f16e1225]:
+                          - generic [ref=f16e1226]:
+                            - generic [ref=f16e1227]: 作品数 1.4万
+                            - generic [ref=f16e1229]: 参与数 2953
+                          - generic [ref=f16e1230]:
+                            - img [ref=f16e1231]
+                            - generic [ref=f16e1239]: 1824.3万
+                    - generic [ref=f16e1241]:
+                      - generic [ref=f16e1242]:
+                        - img [ref=f16e1244]
+                        - generic [ref=f16e1252]: 有奖
+                        - img [ref=f16e1253]
+                      - generic [ref=f16e1261]: 平台活动
+                      - generic [ref=f16e1262]:
+                        - generic [ref=f16e1264]: 618好物灵感场 | 生活开始发生
+                        - generic [ref=f16e1265]: 04.27 ~ 06.18
+                        - generic [ref=f16e1267]: 
+                    - img "icon" [ref=f16e1268]
+                  - generic [ref=f16e1270] [cursor=pointer]:
+                    - generic [ref=f16e1271]:
+                      - img [ref=f16e1273]
+                      - generic [ref=f16e1274]:
+                        - generic [ref=f16e1275]:
+                          - generic [ref=f16e1276]:
+                            - img [ref=f16e1278]
+                            - generic [ref=f16e1280]: AI创意好物
+                          - generic [ref=f16e1281]:
+                            - img "icon" [ref=f16e1283]
+                            - generic [ref=f16e1284]: 其它
+                        - generic [ref=f16e1285]:
+                          - generic [ref=f16e1286]:
+                            - generic [ref=f16e1287]: 作品数 4237
+                            - generic [ref=f16e1289]: 参与数 1038
+                          - generic [ref=f16e1290]:
+                            - img [ref=f16e1291]
+                            - generic [ref=f16e1299]: 301.7万
+                    - generic [ref=f16e1301]:
+                      - generic [ref=f16e1302]:
+                        - img [ref=f16e1304]
+                        - generic [ref=f16e1312]: 平台流量
+                        - img [ref=f16e1313]
+                      - generic [ref=f16e1321]: 品类活动
+                      - generic [ref=f16e1322]:
+                        - generic [ref=f16e1324]: 无限帧 AI创意内容挑战赛
+                        - generic [ref=f16e1325]: 05.15 ~ 06.05
+                        - generic [ref=f16e1327]: 
+                    - img "icon" [ref=f16e1328]
+                  - generic [ref=f16e1330] [cursor=pointer]:
+                    - generic [ref=f16e1331]:
+                      - img [ref=f16e1333]
+                      - generic [ref=f16e1334]:
+                        - generic [ref=f16e1335]:
+                          - generic [ref=f16e1336]:
+                            - img [ref=f16e1338]
+                            - generic [ref=f16e1340]: 高颜值家电美学展
+                          - generic [ref=f16e1341]:
+                            - generic [ref=f16e1342]: 家居
+                            - generic [ref=f16e1343]: 泛生活
+                            - generic [ref=f16e1344]: 其它
+                        - generic [ref=f16e1345]:
+                          - generic [ref=f16e1346]:
+                            - generic [ref=f16e1347]: 作品数 12.8万
+                            - generic [ref=f16e1349]: 参与数 2.3万
+                          - generic [ref=f16e1350]:
+                            - img [ref=f16e1351]
+                            - generic [ref=f16e1359]: 18435.5万
+                    - img "icon" [ref=f16e1360]
+                  - generic [ref=f16e1362] [cursor=pointer]:
+                    - generic [ref=f16e1363]:
+                      - img [ref=f16e1365]
+                      - generic [ref=f16e1366]:
+                        - generic [ref=f16e1367]:
+                          - generic [ref=f16e1368]:
+                            - img [ref=f16e1370]
+                            - generic [ref=f16e1372]: 运动穿搭跟我买
+                          - generic [ref=f16e1373]:
+                            - generic [ref=f16e1374]: 时尚
+                            - generic [ref=f16e1375]: 户外
+                            - generic [ref=f16e1376]: 运动
+                        - generic [ref=f16e1377]:
+                          - generic [ref=f16e1378]:
+                            - generic [ref=f16e1379]: 作品数 11.4万
+                            - generic [ref=f16e1381]: 参与数 2.3万
+                          - generic [ref=f16e1382]:
+                            - img [ref=f16e1383]
+                            - generic [ref=f16e1391]: 14167.9万
+                    - img "icon" [ref=f16e1392]
+                  - generic [ref=f16e1393] [cursor=pointer]:
+                    - text: 查看更多
+                    - generic [ref=f16e1394]: 
+            - generic [ref=f16e1398]:
+              - button "确认提交" [ref=f16e1399] [cursor=pointer]:
+                - generic [ref=f16e1400]: 确认提交
+              - button "取消" [ref=f16e1401] [cursor=pointer]:
+                - generic [ref=f16e1402]: 取消
+            - button "关闭" [ref=f16e1403] [cursor=pointer]:
+              - generic [ref=f16e1404]: 
+  - generic [ref=e124]:
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - generic [ref=e126] [cursor=pointer]:
+              - img [ref=e127]
+              - generic [ref=e128]: 客服
+            - generic [ref=e130] [cursor=pointer]:
+              - img [ref=e132]
+              - generic [ref=e133]: 账号处于异常状态

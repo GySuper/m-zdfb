@@ -461,6 +461,7 @@ def _publish_one_body(
         video_original = video.original_claim
         user_data_dir = Path(account.user_data_dir)
         account_id = account.id  # 风控触发时用
+        task_platform = task.platform
 
     result = PublishResult(task_id=task_id, ok=False, dry_run=dry_run)
     last_step = "init"
@@ -709,6 +710,7 @@ def _publish_one_body(
                         task_id=task_id,
                         account_id=account_id,
                         account_display_name=display_name,
+                        platform=task_platform,
                     ),
                     session=session,
                     settings=settings,

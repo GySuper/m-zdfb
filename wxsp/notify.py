@@ -33,6 +33,9 @@ class NotifyEvent:
 
     account_display_name:运营在飞书 / Web UI 看到的中文名(如"美食号")。
     渲染时优先用它替代 account_id(英文 ID 对运营无意义)。发起方按需填。
+
+    platform:发送该事件的平台 key,用于渲染平台标签(如 "[视频号]" / "[淘宝光合]")
+    以及查对应平台的 monitoring.notify_on 白名单。
     """
 
     type: str
@@ -43,6 +46,7 @@ class NotifyEvent:
     task_id: int | None = None
     account_id: str | None = None
     account_display_name: str | None = None
+    platform: str = "tencent_channel"
 
 
 # 通知里出现的英文术语 → 中文映射。运营看的全中文,且与 UI 侧 api.i18n 不依赖
@@ -143,17 +147,20 @@ class WecomNotifier:
         return True
 
 
-_PLATFORM_TAG = "视频号"
+def _platform_tag(platform: str | None) -> str:
+    """平台 key → 中文标签,用于通知 markdown 头部。"""
+    return {"tencent_channel": "视频号", "taobao_guanghe": "淘宝光合"}.get(platform or "", "视频号")
 
 
 def _format_markdown(event: NotifyEvent) -> str:
     """渲染 Markdown:平台标识 + 中文 level 标签 + title + 正文 + 可选 任务编号/账号/上下文。
 
-    平台标识 `[视频号]` 写死;后续多平台(小红书/抖音)接入时改成按 settings 取。
+    平台标识按 event.platform 取中文名(如"[视频号]" / "[淘宝光合]")。
     全中文输出 —— 运营收到企微推送一眼看明白,不出现英文 level / 字段名 / 账号 ID。
     """
+    platform_label = _platform_tag(event.platform)
     tag = {"info": "[信息]", "warn": "[警告]", "error": "[错误]"}.get(event.level, "[通知]")
-    lines = [f"## [{_PLATFORM_TAG}] {tag} {event.title}", "", event.content]
+    lines = [f"## [{platform_label}] {tag} {event.title}", "", event.content]
     if event.task_id is not None:
         lines.append(f"> 任务编号:{event.task_id}")
     if event.account_id is not None:
@@ -167,14 +174,18 @@ def _format_markdown(event: NotifyEvent) -> str:
     return "\n".join(lines)
 
 
-def build_notifiers_from_settings(settings: Settings) -> list[Notifier]:
-    """从 Settings.monitoring.notifiers 构造 enabled notifier 列表。
+def build_notifiers_from_settings(
+    settings: Settings, *, platform: str = "tencent_channel"
+) -> list[Notifier]:
+    """从平台 monitoring 配置构造 enabled notifier 列表。
 
+    使用 settings.get_monitoring_config(platform) 取对应平台的 notifiers 配置。
     第一版只有 wecom;接入飞书/钉钉时在此 append 即可。
     """
+    monitoring_cfg = settings.get_monitoring_config(platform)
     notifiers: list[Notifier] = []
-    if settings.monitoring.notifiers.wecom.enabled:
-        notifiers.append(WecomNotifier(webhook=settings.monitoring.notifiers.wecom.webhook))
+    if monitoring_cfg is not None and monitoring_cfg.notifiers.wecom.enabled:
+        notifiers.append(WecomNotifier(webhook=monitoring_cfg.notifiers.wecom.webhook))
     return notifiers
 
 
@@ -183,12 +194,20 @@ def notify(
     *,
     session: Session,
     settings: Settings,
+    platform: str = "tencent_channel",
     notifiers: list[Notifier] | None = None,
 ) -> None:
     """统一入口:写 Event 审计 + 按 notify_on 过滤后派发到外部渠道。
 
     任何渠道异常 / 写 Event 异常都只 log,不抛给调用方(避免告警链路打挂主流程)。
+
+    platform 用于查对应平台的 monitoring.notify_on 白名单;当 event 已有 platform
+    字段时优先使用 event.platform(否则用参数兜底)。
     """
+    effective_platform = event.platform or platform
+    monitoring_cfg = settings.get_monitoring_config(effective_platform)
+    notify_on: list[str] = monitoring_cfg.notify_on if monitoring_cfg is not None else []
+
     # ① Event 表落地(无论 type 是否在 notify_on)
     try:
         ev = Event(
@@ -205,10 +224,10 @@ def notify(
         logger.exception(f"[notify] 写 Event 表失败 type={event.type}: {exc}")
 
     # ② 派发外部渠道(白名单 + 单渠道失败不影响其它)
-    if event.type not in settings.monitoring.notify_on:
+    if event.type not in notify_on:
         return
     if notifiers is None:
-        notifiers = build_notifiers_from_settings(settings)
+        notifiers = build_notifiers_from_settings(settings, platform=effective_platform)
     for n in notifiers:
         try:
             ok = n.send(event)

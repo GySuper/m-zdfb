@@ -75,19 +75,20 @@ class RunSummary:
     global_halt_reason: str | None = None
 
 
-def queue_today(session: Session, *, today: _date | None = None) -> list[int]:
+def queue_today(
+    session: Session, *, today: _date | None = None, platform: str | None = None
+) -> list[int]:
     """返回今天的 pending task id 列表,按 publish_at 升序。
 
     调用方负责开 session;本函数只读。
+    `platform`:可选过滤,只返回该平台的任务(配合 per-platform cron)。
     """
     if today is None:
         today = _date.today()
-    stmt = (
-        select(Task)
-        .where(Task.execute_date == today)
-        .where(Task.status == TASK_STATUS_PENDING)
-        .order_by(col(Task.publish_at).asc())
-    )
+    stmt = select(Task).where(Task.execute_date == today).where(Task.status == TASK_STATUS_PENDING)
+    if platform is not None:
+        stmt = stmt.where(Task.platform == platform)
+    stmt = stmt.order_by(col(Task.publish_at).asc())
     return [task.id for task in session.exec(stmt) if task.id is not None]
 
 
@@ -113,10 +114,12 @@ _BACKLOG_COOLDOWN = timedelta(hours=24)
 _BACKLOG_NOTIFY_LOCK = threading.Lock()
 
 
-def maybe_warn_backlog(settings: Settings, *, session: Session) -> int:
+def maybe_warn_backlog(
+    settings: Settings, *, session: Session, platform: str = "tencent_channel"
+) -> int:
     """积压超阈值 → 推一条 backlog_high 通知(企微 + Event 表)。返回当前积压数。
 
-    阈值 = `monitoring.backlog_warn_threshold`(默认 20)。
+    阈值 = `monitoring.backlog_warn_threshold`(默认 20),按平台独立配置。
 
     24h 冷却:查 Event 表最近 24h 有没有 backlog_high,有就跳(同时不写 Event)。
     daemon 反复重启 / 09:00 cron 多次触发都不会刷屏。运营修完积压自然进入下一轮。
@@ -126,8 +129,10 @@ def maybe_warn_backlog(settings: Settings, *, session: Session) -> int:
     未 commit 的写)。生产唯一调用方是 daemon 启动 1 次 + run_today_pending 中调
     用,本来就在 session_scope 里、调用前没未提交写,提早 commit 无副作用。
     """
+    monitoring_cfg = settings.get_monitoring_config(platform)
+    threshold = monitoring_cfg.backlog_warn_threshold if monitoring_cfg is not None else 20
     backlog = count_backlog(session)
-    if backlog <= settings.monitoring.backlog_warn_threshold:
+    if backlog <= threshold:
         return backlog
 
     with _BACKLOG_NOTIFY_LOCK:
@@ -149,10 +154,11 @@ def maybe_warn_backlog(settings: Settings, *, session: Session) -> int:
                 title=f"历史积压 {backlog} 条",
                 content=(
                     f"今天之前还有 {backlog} 条任务没跑完(待发布或已中断),"
-                    f"超过阈值 {settings.monitoring.backlog_warn_threshold}。"
+                    f"超过阈值 {threshold}。"
                     "建议到管理后台的「历史积压」视图里逐条处理。"
                 ),
                 context={"积压条数": backlog},
+                platform=platform,
             ),
             session=session,
             settings=settings,
@@ -206,7 +212,11 @@ def _short_failure_reason(task: Task) -> str:
 
 
 def _emit_run_summary(
-    settings: Settings, *, summary: RunSummary, failed_task_ids: list[int]
+    settings: Settings,
+    *,
+    summary: RunSummary,
+    failed_task_ids: list[int],
+    platform: str = "tencent_channel",
 ) -> None:
     """跑完后推一条 run_summary。
 
@@ -280,7 +290,10 @@ def _emit_run_summary(
     needs_attention = summary.failed > 0 or summary.global_halt_reason is not None or has_halt
     level = "warn" if needs_attention else "info"
     title_prefix = "⚠" if needs_attention else "✓"
-    title = f"{title_prefix} 视频号发布完成"
+    from wxsp.notify import _platform_tag
+
+    plat_tag = _platform_tag(platform)
+    title = f"{title_prefix} {plat_tag}发布完成"
     with session_scope(engine) as session:
         notify(
             NotifyEvent(
@@ -294,25 +307,31 @@ def _emit_run_summary(
                     "失败": summary.failed,
                     "暂停跳过": summary.skipped_paused,
                 },
+                platform=platform,
             ),
             session=session,
             settings=settings,
         )
 
 
-def run_today_pending(settings: Settings, *, do_sync: bool = True) -> RunSummary:
+def run_today_pending(
+    settings: Settings, *, do_sync: bool = True, platform: str | None = None
+) -> RunSummary:
     """worker 入口:① sync_now()(可选)② queue_today() ③ 串行跑(跳过 paused 账号)。
 
     do_sync=False 时假设调用方(如 Web UI 路由)已经做过 sync_now 校验过结果。
     do_sync=True 时(09:00 cron 默认路径)sync_now 失败只 warn 不打断,
     保证已入库的还能继续跑。
 
+    platform=None 时跑所有平台(兼容旧版命令行 `wxsp run --today`);
+    platform="tencent_channel" 时只跑视频号任务(per-platform cron 路径)。
+
     任何一条 task 失败 / 抛 AlreadyClaimed 都不阻断后面的;细节走 publish 自己的回写。
     跑完后推一条 run_summary 汇总通知(attempted=0 时静默)。
     """
     if do_sync:
         try:
-            sync_now(settings)
+            sync_now(settings, platform=platform or "tencent_channel")
         except Exception as exc:
             logger.warning(f"[scheduler] sync_now 失败,继续跑已入库的: {exc}")
 
@@ -321,16 +340,20 @@ def run_today_pending(settings: Settings, *, do_sync: bool = True) -> RunSummary
     engine = get_engine()
     init_db(engine)
     now = datetime.now()
+    effective_platform = platform or "tencent_channel"
 
     # 一次性把 (task_id, account_id) 读出来,后面循环里不再持 session 跑长 publish
     with Session(engine) as session:
-        task_ids = queue_today(session)
+        task_ids = queue_today(session, platform=platform)
         if not task_ids:
             return summary
         plan: list[tuple[int, str]] = []
         for tid in task_ids:
             t = session.get(Task, tid)
             if t is None:
+                continue
+            # Per-platform:skip tasks not matching the target platform
+            if platform is not None and t.platform != platform:
                 continue
             plan.append((tid, t.account_id))
         # 一次性拿账号快照:paused_until + cookie_status,避免发布时才发现 cookie 没登录
@@ -339,6 +362,11 @@ def run_today_pending(settings: Settings, *, do_sync: bool = True) -> RunSummary
         for acc_id in {acc for _, acc in plan}:
             acc = session.get(Account, acc_id)
             if acc is None:
+                continue
+            # Per-platform:skip accounts not belonging to this platform
+            if platform is not None and acc.platform != platform:
+                # This shouldn't happen normally (task platform == account platform),
+                # but handle defensively.
                 continue
             if acc.paused_until is not None and acc.paused_until > now:
                 paused_accounts.add(acc_id)
@@ -437,19 +465,45 @@ def run_today_pending(settings: Settings, *, do_sync: bool = True) -> RunSummary
                 )
 
     try:
-        _emit_run_summary(settings, summary=summary, failed_task_ids=failed_task_ids)
+        _emit_run_summary(
+            settings, summary=summary, failed_task_ids=failed_task_ids, platform=effective_platform
+        )
     except Exception as exc:
         logger.warning(f"[scheduler] 推送 run_summary 失败,忽略: {exc}")
 
     return summary
 
 
-def make_scheduler(settings: Settings, *, blocking: bool = False) -> BaseScheduler:
-    """构造 APScheduler;`scheduler.enabled=true` 时注册"每日 cron job"。
+def _daily_cron(platform: str, settings: Settings) -> None:
+    """Per-platform daily cron:tick → sync → run.
 
-    `enabled=false`:返回空 scheduler(无 job),daemon 仍可启动,手动入口照旧。
-    blocking=True 用于 daemon 进程(主线程 .start() 阻塞);
-    blocking=False(默认)用于测试 / 后台模式。**调用方负责 shutdown**。
+    隔离在独立函数里方便 cron 注册;内部任何异常只 log 不抛(apscheduler 会吞,
+    但显式 catch 方便在日志里记账)。
+    """
+    logger.info(f"[scheduler] [{platform}] daily cron triggered")
+    try:
+        from wxsp.archive import install_file_sink
+
+        monitoring_cfg = settings.get_monitoring_config(platform)
+        retention = monitoring_cfg.log_retention_days if monitoring_cfg is not None else 30
+        install_file_sink(
+            logs_dir=settings.app.logs_dir,
+            retention_days=retention,
+        )
+    except Exception as exc:
+        logger.warning(f"[scheduler] 装日志 sink 失败,继续走 stderr: {exc}")
+    try:
+        sync_now(settings, platform=platform)
+    except Exception as exc:
+        logger.exception(f"[scheduler] [{platform}] sync 失败: {exc}")
+    run_today_pending(settings, platform=platform)
+
+
+def make_scheduler(settings: Settings, *, blocking: bool = False) -> BaseScheduler:
+    """构造 APScheduler;per-platform cron job 由 start_daemon() 注册。
+
+    `blocking=True` 用于 daemon 进程(主线程 .start() 阻塞);
+    `blocking=False`(默认)用于测试 / 后台模式。**调用方负责 shutdown**。
     """
     scheduler: BaseScheduler
     if blocking:
@@ -458,24 +512,12 @@ def make_scheduler(settings: Settings, *, blocking: bool = False) -> BaseSchedul
         scheduler = BackgroundScheduler(timezone=settings.app.timezone)
     if not settings.scheduler.enabled:
         logger.info("[scheduler] scheduler.enabled=false,跳过注册每日 cron(手动入口仍可用)")
-        return scheduler
-    scheduler.add_job(
-        run_today_pending,
-        trigger=CronTrigger(
-            hour=settings.scheduler.daily_cron_hour,
-            minute=settings.scheduler.daily_cron_minute,
-            timezone=settings.app.timezone,
-        ),
-        args=[settings],
-        id="daily_run_today_pending",
-        replace_existing=True,
-    )
     return scheduler
 
 
 def start_daemon(settings: Settings) -> None:
     """daemon 入口:启动时 (1) 标 interrupted (2) 清过期日志/截图 (3) 积压告警判定
-    (4) 起 blocking scheduler。
+    (4) 起 blocking scheduler + 注册 per-platform cron job。
 
     `BlockingScheduler.start()` 会阻塞当前线程,直到 SIGINT/SIGTERM。
     """
@@ -514,12 +556,33 @@ def start_daemon(settings: Settings) -> None:
             logger.warning(f"[scheduler] 启动积压检查失败,忽略: {exc}")
 
     scheduler = make_scheduler(settings, blocking=True)
-    if settings.scheduler.enabled:
-        logger.info(
-            f"[scheduler] daemon 启动:每日 "
-            f"{settings.scheduler.daily_cron_hour:02d}:{settings.scheduler.daily_cron_minute:02d} "
-            f"({settings.app.timezone}) 跑 run_today_pending"
+
+    # 按平台注册 cron job
+    platform_keys = list(settings.platforms.keys())
+    if not platform_keys:
+        # Backward compat: no platforms configured → use old single scheduler config
+        if settings.scheduler.enabled:
+            logger.info(
+                f"[scheduler] daemon 启动:每日 "
+                f"{settings.scheduler.daily_cron_hour:02d}:{settings.scheduler.daily_cron_minute:02d} "
+                f"({settings.app.timezone}) 跑 run_today_pending(无反平台配置)"
+            )
+    for platform_key in platform_keys:
+        sched_cfg = settings.get_scheduler_config(platform_key)
+        scheduler.add_job(
+            lambda p=platform_key: _daily_cron(p, settings),
+            CronTrigger(
+                hour=sched_cfg.daily_cron_hour,
+                minute=sched_cfg.daily_cron_minute,
+                timezone=settings.app.timezone,
+            ),
+            id=f"daily_{platform_key}",
+            name=f"[{platform_key}] daily sync + run",
         )
-    else:
-        logger.info("[scheduler] daemon 启动:定时任务已关闭,只服务手动入口")
+        logger.info(
+            f"[scheduler] 平台 [{platform_key}] cron:每日 "
+            f"{sched_cfg.daily_cron_hour:02d}:{sched_cfg.daily_cron_minute:02d} "
+            f"({settings.app.timezone}) sync + run_today_pending"
+        )
+
     scheduler.start()  # 阻塞

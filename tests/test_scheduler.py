@@ -7,7 +7,6 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from apscheduler.triggers.cron import CronTrigger
 from sqlmodel import Session, select
 
 from tests.conftest import make_settings
@@ -628,27 +627,24 @@ def test_run_today_pending_continues_after_a_publish_failure(
     assert summary.failed == 1
 
 
-def test_make_scheduler_registers_daily_cron_with_configured_time(
+def test_make_scheduler_creates_scheduler_with_correct_timezone(
     tmp_path: Path,
 ) -> None:
+    """make_scheduler() no longer registers cron jobs (that moved to start_daemon).
+    It should still create a properly configured scheduler with the right timezone.
+    """
     settings = make_settings(tmp_path, tmp_path)
-    settings.scheduler.daily_cron_hour = 9
-    settings.scheduler.daily_cron_minute = 0
     settings.app.timezone = "Asia/Shanghai"
 
     sched = make_scheduler(settings)
     # 构造后未 start,APScheduler 不让 shutdown 一个 stopped scheduler;
-    # 测试只断言 job 配置,无需 start。
+    # 测试只断言调度器配置。
     jobs = sched.get_jobs()
-    assert len(jobs) == 1
-    trigger = jobs[0].trigger
-    assert isinstance(trigger, CronTrigger)
-    field_values = {f.name: str(f) for f in trigger.fields}
-    assert field_values["hour"] == "9"
-    assert field_values["minute"] == "0"
+    assert len(jobs) == 0  # jobs now registered in start_daemon()
+    assert str(sched.timezone) == "Asia/Shanghai"
 
 
-def test_make_scheduler_registers_no_job_when_disabled(tmp_path: Path) -> None:
+def test_make_scheduler_no_jobs_when_disabled(tmp_path: Path) -> None:
     settings = make_settings(tmp_path, tmp_path)
     settings.scheduler.enabled = False
 
@@ -792,7 +788,9 @@ def test_maybe_warn_backlog_serializes_concurrent_calls(
 
     # 用真 notify(它会写 Event),但禁用外部 notifier(避免起企微 HTTP)
     monkeypatch.setattr(sched_mod, "notify", real_notify)
-    monkeypatch.setattr("wxsp.notify.build_notifiers_from_settings", lambda s: [])
+    monkeypatch.setattr(
+        "wxsp.notify.build_notifiers_from_settings", lambda s, *, platform="tencent_channel": []
+    )
 
     barrier = threading.Barrier(2)
 

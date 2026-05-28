@@ -195,6 +195,8 @@ class PlatformMonitoringConfig(BaseModel):
     cookie_warn_days: float = 1.5
     notifiers: NotifiersConfig
     notify_on: list[str] = Field(default_factory=list)
+    backlog_warn_threshold: int = 20
+    log_retention_days: int = 30
 
 
 class PlatformConfig(BaseModel):
@@ -294,7 +296,13 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def _resolve_platform_configs(self) -> Settings:
-        """If platforms dict is empty, derive tencent_channel platform from old flat fields."""
+        """If platforms dict is empty, derive tencent_channel platform from old flat fields.
+
+        monitoring config is intentionally NOT copied into the auto-derived PlatformConfig.
+        get_monitoring_config() will construct PlatformMonitoringConfig from the live
+        flat self.monitoring on each call, so runtime modifications to self.monitoring
+        (e.g. in tests) are always reflected.
+        """
         if self.platforms:
             return self
         # Backward compat: old config.yaml without platforms key
@@ -319,11 +327,7 @@ class Settings(BaseModel):
                         field_map=self.feishu.field_map,
                         sync=self.feishu.sync,
                     ),
-                    monitoring=PlatformMonitoringConfig(
-                        cookie_warn_days=self.monitoring.cookie_warn_days,
-                        notifiers=self.monitoring.notifiers,
-                        notify_on=self.monitoring.notify_on,
-                    ),
+                    # monitoring=None: derived live from flat self.monitoring in get_monitoring_config()
                 )
             }
         return self
@@ -341,7 +345,22 @@ class Settings(BaseModel):
         return self.get_platform_config(platform).feishu
 
     def get_monitoring_config(self, platform: str) -> PlatformMonitoringConfig | None:
-        return self.get_platform_config(platform).monitoring
+        """Return per-platform monitoring config if explicitly configured,
+        otherwise derive live from flat self.monitoring (backward compat).
+        """
+        plat_cfg = self.platforms.get(platform)
+        if plat_cfg is not None and plat_cfg.monitoring is not None:
+            return plat_cfg.monitoring
+        # Backward compat: auto-derived platform without explicit monitoring,
+        # or platform not in platforms dict at all. Derive from flat settings
+        # so runtime modifications (e.g. in tests) are reflected.
+        return PlatformMonitoringConfig(
+            cookie_warn_days=self.monitoring.cookie_warn_days,
+            notifiers=self.monitoring.notifiers,
+            notify_on=self.monitoring.notify_on,
+            backlog_warn_threshold=self.monitoring.backlog_warn_threshold,
+            log_retention_days=self.monitoring.log_retention_days,
+        )
 
     def get_publisher_config(self, platform: str) -> PlatformPublisherConfig:
         return self.get_platform_config(platform).publisher

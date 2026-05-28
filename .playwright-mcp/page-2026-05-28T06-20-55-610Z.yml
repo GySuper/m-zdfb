@@ -1,0 +1,69 @@
+- generic [active] [ref=e1]:
+  - link "When a blind user enters the intelligent blind lane, press the shortcut key Ctrl + Alt + R; To read the detailed operation instructions, press the shortcut key Ctrl + Alt + question mark":
+    - /url: javascript:void(0)
+  - generic [ref=e2]:
+    - generic [ref=e4]:
+      - heading "淘宝网" [level=1] [ref=e5]:
+        - link "淘宝网" [ref=e6] [cursor=pointer]:
+          - /url: //www.taobao.com
+      - generic [ref=e7]:
+        - link "网站无障碍" [ref=e8] [cursor=pointer]:
+          - /url: javascript:void(0)
+        - link " \"登录页面\"改进建议" [ref=e9] [cursor=pointer]:
+          - /url: https://survey.taobao.com/apps/zhiliao/rWq00C2IB
+    - generic [ref=e14]:
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - link "密码登录" [ref=e18] [cursor=pointer]:
+            - /url: javascript:void(0);
+          - link "短信登录" [ref=e19] [cursor=pointer]:
+            - /url: javascript:void(0);
+        - generic [ref=e20]:
+          - generic [ref=e21]:
+            - generic: 
+            - textbox "账号名/邮箱/手机号" [ref=e23]
+          - generic [ref=e24]:
+            - generic: 
+            - generic [ref=e25]:
+              - textbox "请输入登录密码" [ref=e26]
+              - generic [ref=e27] [cursor=pointer]: 忘记密码
+          - button "登录" [ref=e29] [cursor=pointer]
+          - generic [ref=e30]:
+            - generic [ref=e32]:
+              - link "支付宝登录" [ref=e33] [cursor=pointer]:
+                - /url: javascript:;
+              - link "钉钉登录" [ref=e34] [cursor=pointer]:
+                - /url: javascript:;
+            - link "忘记账号" [ref=e35] [cursor=pointer]:
+              - /url: https://passport.taobao.com/ac/nick_find.htm?from_site=0&lang=zh_CN&app_name=tb
+            - link "免费注册" [ref=e36] [cursor=pointer]:
+              - /url: https://reg.taobao.com/havanaone/register/register.htm?bizEntrance=person_pc&bizName=taobao&regBizSource=login
+          - generic [ref=e38]:
+            - checkbox "* 已阅读并同意以下协议淘宝平台服务协议、隐私权政策、法律声明、支付宝及客户端服务协议" [ref=e39]
+            - generic [ref=e40]:
+              - generic [ref=e41]: "*"
+              - generic [ref=e42]:
+                - text: 已阅读并同意以下协议
+                - link "淘宝平台服务协议" [ref=e43] [cursor=pointer]:
+                  - /url: https://terms.alicdn.com/legal-agreement/terms/TD/TD201609301342_19559.html?spm=a2145.7268393.0.0.f9aa5d7cyFvg2j
+                - text: 、
+                - link "隐私权政策" [ref=e44] [cursor=pointer]:
+                  - /url: https://terms.alicdn.com/legal-agreement/terms/suit_bu1_taobao/suit_bu1_taobao201703241622_61002.html?spm=a2145.7268393.0.0.4b1c0162AoKvHi
+                - text: 、
+                - link "法律声明" [ref=e45] [cursor=pointer]:
+                  - /url: https://terms.alicdn.com/legal-agreement/terms/suit_bu1_taobao/suit_bu1_taobao201811121436_80276.html
+                - text: 、
+                - link "支付宝及客户端服务协议" [ref=e46] [cursor=pointer]:
+                  - /url: https://render.alipay.com/p/f/fd-jm7jym6r/alipay/multi-agreement.html
+      - generic [ref=e48]:
+        - generic [ref=e49]: 手机扫码登录
+        - generic [ref=e50]:
+          - img [ref=e53]
+          - generic [ref=e54]:
+            - text: 
+            - paragraph [ref=e55]:
+              - generic [ref=e56]: 打开
+              - generic [ref=e57]:
+                - generic [ref=e58]: 淘宝APP
+                - text: —点击左上角扫一扫
+          - generic [ref=e59] [cursor=pointer]: 怎么扫码登录?

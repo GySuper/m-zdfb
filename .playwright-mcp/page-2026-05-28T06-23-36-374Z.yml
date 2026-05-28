@@ -1,0 +1,440 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - img "home" [ref=e6] [cursor=pointer]
+      - generic [ref=e9]:
+        - generic [ref=e10]:
+          - list [ref=e15]:
+            - generic [ref=e17] [cursor=pointer]: 你新增了0个粉丝
+            - listitem [ref=e18]:
+              - generic [ref=e19] [cursor=pointer]: 已为您总结上周全域内容表现情况
+            - listitem [ref=e20]:
+              - generic [ref=e21] [cursor=pointer]: 你发布的内容新增100条评论
+            - listitem [ref=e22]:
+              - generic [ref=e23] [cursor=pointer]: 你发布的内容新增15451个赞/收藏
+            - listitem [ref=e24]:
+              - generic [ref=e25] [cursor=pointer]: 你新增了0个粉丝
+            - generic [ref=e27] [cursor=pointer]: 已为您总结上周全域内容表现情况
+          - generic [ref=e28] [cursor=pointer]:
+            - generic "15889" [ref=e30]:
+              - img [ref=e32]
+              - superscript [ref=e34]: 99+
+            - generic [ref=e35]: 消息
+        - generic [ref=e37]:
+          - generic [ref=e39] [cursor=pointer]:
+            - generic [ref=e40]: 创作者服务
+            - generic [ref=e42]: 
+          - img "avatar" [ref=e43]
+    - generic [ref=e44]:
+      - complementary [ref=e45]:
+        - generic [ref=e47]:
+          - generic [ref=e49] [cursor=pointer]:
+            - generic [ref=e50]: 
+            - text: 发布作品
+          - listbox "global navigation" [ref=e51]:
+            - option "首页" [ref=e52] [cursor=pointer]:
+              - generic [ref=e54]:
+                - img [ref=e56]
+                - text: 首页
+            - option "内容灵感 " [ref=e58]:
+              - listitem [ref=e59] [cursor=pointer]:
+                - generic [ref=e60]:
+                  - generic [ref=e61]:
+                    - img [ref=e63]
+                    - text: 内容灵感
+                  - generic [ref=e65]: 
+            - option "内容创作 " [ref=e66]:
+              - listitem [ref=e67] [cursor=pointer]:
+                - generic [ref=e68]:
+                  - generic [ref=e69]:
+                    - img [ref=e71]
+                    - text: 内容创作
+                  - generic [ref=e73]: 
+            - option "内容合作 " [ref=e74]:
+              - listitem [ref=e75] [cursor=pointer]:
+                - generic [ref=e76]:
+                  - generic [ref=e77]:
+                    - img [ref=e79]
+                    - text: 内容合作
+                  - generic [ref=e81]: 
+            - option "内容管理 " [ref=e82]:
+              - listitem [ref=e83] [cursor=pointer]:
+                - generic [ref=e84]:
+                  - generic [ref=e85]:
+                    - img [ref=e87]
+                    - text: 内容管理
+                  - generic [ref=e89]: 
+            - option "内容数据 " [ref=e90]:
+              - listitem [ref=e91] [cursor=pointer]:
+                - generic [ref=e92]:
+                  - generic [ref=e93]:
+                    - img [ref=e95]
+                    - text: 内容数据
+                  - generic [ref=e97]: 
+            - option "规则及学院 " [ref=e98]:
+              - listitem [ref=e99] [cursor=pointer]:
+                - generic [ref=e100]:
+                  - generic [ref=e101]:
+                    - img [ref=e103]
+                    - text: 规则及学院
+                  - generic [ref=e105]: 
+            - option "账号资产 " [ref=e106]:
+              - listitem [ref=e107] [cursor=pointer]:
+                - generic [ref=e108]:
+                  - generic [ref=e109]:
+                    - img [ref=e111]
+                    - text: 账号资产
+                  - generic [ref=e113]: 
+          - paragraph [ref=e115]:
+            - text: Copyright
+            - text: © Alibaba Group
+      - iframe [active] [ref=e123]:
+        - generic [ref=f4e1]:
+          - generic [ref=f4e8]:
+            - generic [ref=f4e9]: 发布视频
+            - generic [ref=f4e10]:
+              - generic [ref=f4e18]:
+                - application [ref=f4e20]:
+                  - generic [ref=f4e21]:
+                    - img [ref=f4e23]
+                    - generic [ref=f4e25]: 点击上传视频，或将视频拖放到此处
+                    - generic [ref=f4e26]: 上传视频
+                - generic [ref=f4e27]:
+                  - generic "视频格式推荐使用mp4" [ref=f4e28]:
+                    - img [ref=f4e30]
+                    - generic "视频格式推荐使用mp4" [ref=f4e32]
+                  - generic [ref=f4e33]:
+                    - img [ref=f4e35]
+                    - generic "视频比例推荐9:16竖版视频" [ref=f4e37]
+                  - generic "清晰度建议1080P及以上" [ref=f4e38]:
+                    - img [ref=f4e40]
+                    - generic [ref=f4e42]: 清晰度建议1080P及以上
+                  - generic "时长30分钟以下，文件最大1.5GB" [ref=f4e43]:
+                    - img [ref=f4e45]
+                    - generic [ref=f4e47]: 时长30分钟以下，文件最大1.5GB
+              - generic [ref=f4e48]:
+                - generic [ref=f4e49]:
+                  - generic [ref=f4e50]:
+                    - img [ref=f4e52]
+                    - generic [ref=f4e54]: 获取流量攻略：选好内容方向，精准获取多场域流量
+                    - generic [ref=f4e55] [cursor=pointer]: 点击查看详情
+                  - generic [ref=f4e56]:
+                    - generic [ref=f4e57]: 视频封面*
+                    - generic [ref=f4e61]: 等待视频上传...
+                  - generic [ref=f4e62]: 视频描述
+                  - generic [ref=f4e63]:
+                    - generic [ref=f4e65]:
+                      - textbox "加个标题让内容更吸引人" [ref=f4e66]
+                      - generic [ref=f4e68]: 0/30
+                    - generic [ref=f4e70]:
+                      - generic [ref=f4e71]: "推荐标题:"
+                      - generic [ref=f4e72]: 上传视频后将自动生成
+                  - generic [ref=f4e75]:
+                    - generic [ref=f4e81]: 展开说说，你写的文字我们都喜欢:)
+                    - generic [ref=f4e83]:
+                      - generic [ref=f4e84] [cursor=pointer]:
+                        - img [ref=f4e86]
+                        - generic [ref=f4e88]: 好友
+                      - generic [ref=f4e89] [cursor=pointer]:
+                        - img [ref=f4e91]
+                        - generic [ref=f4e93]: 品牌标签
+                      - generic [ref=f4e94] [cursor=pointer]:
+                        - img [ref=f4e96]
+                        - generic [ref=f4e98]: 店铺
+                      - generic [ref=f4e99] [cursor=pointer]:
+                        - img [ref=f4e101]
+                        - generic [ref=f4e103]: 内容标签
+                      - generic [ref=f4e104]: 0/1000
+                  - generic [ref=f4e107]:
+                    - generic [ref=f4e108]: 参与话题活动
+                    - generic [ref=f4e110] [cursor=pointer]:
+                      - generic [ref=f4e112]: 
+                      - generic [ref=f4e113]:
+                        - generic [ref=f4e114]: 点击添加话题
+                        - generic [ref=f4e115]: 由官方发起的征稿话题，奖励多多
+                  - generic [ref=f4e117]:
+                    - generic [ref=f4e118]:
+                      - generic [ref=f4e119]: 推荐音乐
+                      - generic [ref=f4e120]: 平台提供的音乐库歌曲仅限于手淘公域场景（逛逛、猜你喜欢等）使用
+                      - img [ref=f4e122]
+                    - generic [ref=f4e126] [cursor=pointer]:
+                      - img [ref=f4e129]
+                      - generic [ref=f4e131]:
+                        - generic [ref=f4e132]: 点击添加音乐
+                        - generic [ref=f4e133]: 去选择
+                  - generic [ref=f4e134]:
+                    - generic [ref=f4e135]:
+                      - generic [ref=f4e136]: 关联商品｜关联店铺
+                      - generic [ref=f4e137]: 不支持同时关联商品和店铺
+                    - radiogroup [ref=f4e138]:
+                      - generic [ref=f4e139]:
+                        - radio "商品" [checked] [ref=f4e142] [cursor=pointer]
+                        - text: 商品
+                      - generic [ref=f4e143]:
+                        - radio "店铺" [ref=f4e146] [cursor=pointer]
+                        - text: 店铺
+                    - generic [ref=f4e147]:
+                      - generic [ref=f4e151] [cursor=pointer]:
+                        - generic [ref=f4e152]: 
+                        - generic [ref=f4e153]: 添加商品
+                      - text: 
+                - generic [ref=f4e154]:
+                  - generic [ref=f4e156]:
+                    - generic [ref=f4e157]: 发布设置
+                    - img [ref=f4e159]
+                  - generic [ref=f4e162]:
+                    - generic [ref=f4e164]:
+                      - radio "允许下载" [ref=f4e167] [cursor=pointer]
+                      - text: 允许下载
+                    - generic [ref=f4e168]:
+                      - generic [ref=f4e169]:
+                        - radio [checked] [ref=f4e173] [cursor=pointer]
+                        - generic [ref=f4e174]: 定时发布
+                      - generic [ref=f4e177]:
+                        - combobox "请选择日期和时间" [active] [ref=f4e178]: 2026/05/28 17:23
+                        - generic [ref=f4e181]: 
+                  - generic [ref=f4e182]:
+                    - generic [ref=f4e183]:
+                      - generic [ref=f4e184]: 创作者声明*
+                      - img [ref=f4e186] [cursor=pointer]
+                    - radiogroup [ref=f4e188]:
+                      - generic [ref=f4e189]:
+                        - radio "内容无需标注" [ref=f4e192] [cursor=pointer]
+                        - text: 内容无需标注
+                      - generic [ref=f4e193]:
+                        - radio "含AI生成内容" [ref=f4e196] [cursor=pointer]
+                        - text: 含AI生成内容
+                      - generic [ref=f4e197]:
+                        - radio "含虚构演绎内容" [ref=f4e200] [cursor=pointer]
+                        - text: 含虚构演绎内容
+                      - generic [ref=f4e201]:
+                        - radio "内容为转载" [ref=f4e204] [cursor=pointer]
+                        - text: 内容为转载
+                      - generic [ref=f4e205]:
+                        - radio "个人观点，仅供参考" [ref=f4e208] [cursor=pointer]
+                        - text: 个人观点，仅供参考
+                      - generic [ref=f4e209]:
+                        - radio "内容含营销信息" [ref=f4e212] [cursor=pointer]
+                        - text: 内容含营销信息
+                  - generic [ref=f4e213]:
+                    - generic [ref=f4e214]:
+                      - generic [ref=f4e215]: AI优化
+                      - generic [ref=f4e216]:
+                        - text: 开启AI优化后，平台将尝试持续优化标题、封面及商品等信息，不占用内容的编辑次数。
+                        - link "点击查看功能说明" [ref=f4e217] [cursor=pointer]:
+                          - /url: https://alidocs.dingtalk.com/i/nodes/93NwLYZXWyxXroNzCOYo94e48kyEqBQm?utm_scene=team_space&utm_medium=dingdoc_doc_plugin_card&utm_source=dingdoc_doc
+                    - switch [ref=f4e218] [cursor=pointer]
+                  - button "定时发布" [ref=f4e226] [cursor=pointer]:
+                    - generic [ref=f4e223]: 定时发布
+          - textbox [ref=f4e225]
+          - dialog "关联商品" [ref=f4e354]:
+            - heading "关联商品" [level=1] [ref=f4e355]
+            - generic [ref=f4e360]:
+              - tablist [ref=f4e365]:
+                - tab "本店商品" [selected] [ref=f4e366]:
+                  - generic [ref=f4e368] [cursor=pointer]:
+                    - text: 本店商品
+                    - img [ref=f4e370]
+                - tab "本店推荐" [ref=f4e372]:
+                  - generic [ref=f4e374] [cursor=pointer]:
+                    - text: 本店推荐
+                    - img [ref=f4e376]
+              - tabpanel [ref=f4e379]:
+                - generic [ref=f4e380]:
+                  - generic [ref=f4e381]:
+                    - generic [ref=f4e384]:
+                      - generic [ref=f4e385]:
+                        - generic [ref=f4e386]:
+                          - generic [ref=f4e388]: 
+                          - checkbox " 筛选近14天最常添加的商品" [ref=f4e389] [cursor=pointer]
+                        - generic [ref=f4e390]: 筛选近14天最常添加的商品
+                      - img [ref=f4e392]
+                    - generic [ref=f4e397]:
+                      - searchbox "搜索" [ref=f4e398]
+                      - button "搜索" [ref=f4e400] [cursor=pointer]: 
+                  - generic [ref=f4e406]:
+                    - generic [ref=f4e407] [cursor=pointer]:
+                      - img [ref=f4e408]
+                      - generic [ref=f4e409]:
+                        - link "九阳豆浆廿四植五指毛桃乌梅苹果三豆饮三伏天独立包装植萃轻养" [ref=f4e411]:
+                          - /url: https://item.taobao.com/item.htm?id=1054831281135
+                          - img [ref=f4e412]
+                          - text: 九阳豆浆廿四植五指毛桃乌梅苹果三豆饮三伏天独立包装植萃轻养
+                        - generic [ref=f4e414]: ¥18.90
+                      - generic [ref=f4e416]:
+                        - generic [ref=f4e418]: 
+                        - checkbox "" [ref=f4e419]
+                    - generic [ref=f4e420] [cursor=pointer]:
+                      - img [ref=f4e421]
+                      - generic [ref=f4e422]:
+                        - link "【胡可推荐】九阳豆浆轻食豆花粉纯净原味豆腐花即冲豆腐脑豆浆" [ref=f4e424]:
+                          - /url: https://item.taobao.com/item.htm?id=1054296565225
+                          - img [ref=f4e425]
+                          - text: 【胡可推荐】九阳豆浆轻食豆花粉纯净原味豆腐花即冲豆腐脑豆浆
+                        - generic [ref=f4e427]: ¥69.90
+                      - generic [ref=f4e429]:
+                        - generic [ref=f4e431]: 
+                        - checkbox "" [ref=f4e432]
+                    - generic [ref=f4e433] [cursor=pointer]:
+                      - img [ref=f4e434]
+                      - generic [ref=f4e435]:
+                        - link "九阳豆浆纯豆浆粉5条装*20g高植物蛋白0添加糖营养" [ref=f4e437]:
+                          - /url: https://item.taobao.com/item.htm?id=1054039756253
+                          - img [ref=f4e438]
+                          - text: 九阳豆浆纯豆浆粉5条装*20g高植物蛋白0添加糖营养
+                        - generic [ref=f4e440]: ¥7.90
+                      - generic [ref=f4e442]:
+                        - generic [ref=f4e444]: 
+                        - checkbox "" [ref=f4e445]
+                    - generic [ref=f4e446] [cursor=pointer]:
+                      - img [ref=f4e447]
+                      - generic [ref=f4e448]:
+                        - link "【赠品】九阳豆浆啵啵玻璃吸管杯（樱花粉）720ml+2条尝鲜装" [ref=f4e450]:
+                          - /url: https://item.taobao.com/item.htm?id=1053869704722
+                        - generic [ref=f4e452]: ¥89.90
+                      - generic [ref=f4e454]:
+                        - generic [ref=f4e456]: 
+                        - checkbox "" [ref=f4e457]
+                    - generic [ref=f4e458] [cursor=pointer]:
+                      - img [ref=f4e459]
+                      - generic [ref=f4e460]:
+                        - link "九阳豆浆早餐红枣豆浆粉学生营养低甜豆浆粉早餐" [ref=f4e462]:
+                          - /url: https://item.taobao.com/item.htm?id=1051969586559
+                          - img [ref=f4e463]
+                          - text: 九阳豆浆早餐红枣豆浆粉学生营养低甜豆浆粉早餐
+                        - generic [ref=f4e465]: ¥19.90
+                      - generic [ref=f4e467]:
+                        - generic [ref=f4e469]: 
+                        - checkbox "" [ref=f4e470]
+                    - generic [ref=f4e471] [cursor=pointer]:
+                      - img [ref=f4e472]
+                      - generic [ref=f4e473]:
+                        - link "Onecup白桃乌龙茶风味固体饮料500g*1袋" [ref=f4e475]:
+                          - /url: https://item.taobao.com/item.htm?id=1051458989110
+                        - generic [ref=f4e477]: ¥46.50
+                      - generic [ref=f4e479]:
+                        - generic [ref=f4e481]: 
+                        - checkbox "" [ref=f4e482]
+                    - generic [ref=f4e483] [cursor=pointer]:
+                      - img [ref=f4e484]
+                      - generic [ref=f4e485]:
+                        - link "【所有女生直播间】九阳豆浆黑豆纯豆浆粉早餐高蛋白" [ref=f4e487]:
+                          - /url: https://item.taobao.com/item.htm?id=1050968714909
+                          - img [ref=f4e488]
+                          - text: 【所有女生直播间】九阳豆浆黑豆纯豆浆粉早餐高蛋白
+                        - generic [ref=f4e490]: ¥64.90
+                      - generic [ref=f4e492]:
+                        - generic [ref=f4e494]: 
+                        - checkbox "" [ref=f4e495]
+                    - generic [ref=f4e496] [cursor=pointer]:
+                      - img [ref=f4e497]
+                      - generic [ref=f4e498]:
+                        - link "【赠品】九阳豆浆粉色吸管杯650ml*1个" [ref=f4e500]:
+                          - /url: https://item.taobao.com/item.htm?id=1050888842865
+                        - generic [ref=f4e502]: ¥79.90
+                      - generic [ref=f4e504]:
+                        - generic [ref=f4e506]: 
+                        - checkbox "" [ref=f4e507]
+                    - generic [ref=f4e508] [cursor=pointer]:
+                      - img [ref=f4e509]
+                      - generic [ref=f4e510]:
+                        - link "【吉杰618】九阳豆浆羽衣甘蓝西梅芭乐奇亚籽豆浆粉健身饱腹代餐" [ref=f4e512]:
+                          - /url: https://item.taobao.com/item.htm?id=1050744617291
+                        - generic [ref=f4e514]: ¥69.90
+                      - generic [ref=f4e516]:
+                        - generic [ref=f4e518]: 
+                        - checkbox "" [ref=f4e519]
+                    - generic [ref=f4e520] [cursor=pointer]:
+                      - img [ref=f4e521]
+                      - generic [ref=f4e522]:
+                        - link "【喵逐鱼 九阳豆浆×劲仔联名礼盒】哈基米南北红豆浆劲仔小鱼" [ref=f4e524]:
+                          - /url: https://item.taobao.com/item.htm?id=1050705131662
+                          - img [ref=f4e525]
+                          - text: 【喵逐鱼 九阳豆浆×劲仔联名礼盒】哈基米南北红豆浆劲仔小鱼
+                        - generic [ref=f4e527]: ¥69.90
+                      - generic [ref=f4e529]:
+                        - generic [ref=f4e531]: 
+                        - checkbox "" [ref=f4e532]
+                    - generic [ref=f4e533] [cursor=pointer]:
+                      - img [ref=f4e534]
+                      - generic [ref=f4e535]:
+                        - link "【赠品】奈娃叠叠马克杯250ml*1只（颜色随机发货）" [ref=f4e537]:
+                          - /url: https://item.taobao.com/item.htm?id=1050397033318
+                        - generic [ref=f4e539]: ¥0.01
+                      - generic [ref=f4e541]:
+                        - generic [ref=f4e543]: 
+                        - checkbox "" [ref=f4e544]
+                    - generic [ref=f4e545] [cursor=pointer]:
+                      - img [ref=f4e546]
+                      - generic [ref=f4e547]:
+                        - link "【九阳豆浆哈基米金银花吉利柚子汁】早餐方便即饮150g*10袋" [ref=f4e549]:
+                          - /url: https://item.taobao.com/item.htm?id=1050332464857
+                          - img [ref=f4e550]
+                          - text: 【九阳豆浆哈基米金银花吉利柚子汁】早餐方便即饮150g*10袋
+                        - generic [ref=f4e552]: ¥14.90
+                      - generic [ref=f4e554]:
+                        - generic [ref=f4e556]: 
+                        - checkbox "" [ref=f4e557]
+                    - generic [ref=f4e558] [cursor=pointer]:
+                      - img [ref=f4e559]
+                      - generic [ref=f4e560]:
+                        - link "【所有女生直播间】九阳豆浆西梅芭乐羽衣甘蓝豆浆粉" [ref=f4e562]:
+                          - /url: https://item.taobao.com/item.htm?id=1050206591485
+                          - img [ref=f4e563]
+                          - text: 【所有女生直播间】九阳豆浆西梅芭乐羽衣甘蓝豆浆粉
+                        - generic [ref=f4e565]: ¥79.90
+                      - generic [ref=f4e567]:
+                        - generic [ref=f4e569]: 
+                        - checkbox "" [ref=f4e570]
+                    - generic [ref=f4e571] [cursor=pointer]:
+                      - img [ref=f4e572]
+                      - generic [ref=f4e573]:
+                        - link "【U先试用】九阳豆浆哈基米快乐水柠檬水枇杷汁柚子汁150g*3袋" [ref=f4e575]:
+                          - /url: https://item.taobao.com/item.htm?id=1049924989764
+                          - img [ref=f4e576]
+                          - text: 【U先试用】九阳豆浆哈基米快乐水柠檬水枇杷汁柚子汁150g*3袋
+                        - generic [ref=f4e578]: ¥9.90
+                      - generic [ref=f4e580]:
+                        - generic [ref=f4e582]: 
+                        - checkbox "" [ref=f4e583]
+                    - generic [ref=f4e584] [cursor=pointer]:
+                      - img [ref=f4e585]
+                      - generic [ref=f4e586]:
+                        - link "【吉杰618】九阳豆浆纯豆浆粉低嘌呤原味豆浆高蛋白营养早餐" [ref=f4e588]:
+                          - /url: https://item.taobao.com/item.htm?id=1049777190560
+                          - img [ref=f4e589]
+                          - text: 【吉杰618】九阳豆浆纯豆浆粉低嘌呤原味豆浆高蛋白营养早餐
+                        - generic [ref=f4e591]: ¥69.90
+                      - generic [ref=f4e593]:
+                        - generic [ref=f4e595]: 
+                        - checkbox "" [ref=f4e596]
+                  - generic [ref=f4e597] [cursor=pointer]:
+                    - generic [ref=f4e598]: 加载更多
+                    - generic [ref=f4e599]: 
+            - generic [ref=f4e601]:
+              - generic [ref=f4e603]:
+                - button "已选商品" [ref=f4e605] [cursor=pointer]:
+                  - generic [ref=f4e606]: 已选商品
+                - generic [ref=f4e607]: 最多添加6个商品
+              - generic [ref=f4e608]:
+                - button "确定" [ref=f4e609] [cursor=pointer]:
+                  - generic [ref=f4e610]: 确定
+                - button "取消" [ref=f4e611] [cursor=pointer]:
+                  - generic [ref=f4e612]: 取消
+            - button "关闭" [ref=f4e613] [cursor=pointer]:
+              - generic [ref=f4e614]: 
+  - generic:
+    - button "Choose File"
+  - generic [ref=e124]:
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - generic [ref=e127] [cursor=pointer]:
+              - img [ref=e128]
+              - generic [ref=e129]: 客服
+            - generic:
+              - generic:
+                - generic:
+                  - img
+                - generic: 逛逛作品审核不通过

@@ -1,0 +1,244 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - img "home" [ref=e6] [cursor=pointer]
+      - generic [ref=e9]:
+        - generic [ref=e10]:
+          - list [ref=e15]:
+            - generic [ref=e17] [cursor=pointer]: 你新增了0个粉丝
+            - listitem [ref=e18]:
+              - generic [ref=e19] [cursor=pointer]: 已为您总结上周全域内容表现情况
+            - listitem [ref=e20]:
+              - generic [ref=e21] [cursor=pointer]: 你发布的内容新增100条评论
+            - listitem [ref=e22]:
+              - generic [ref=e23] [cursor=pointer]: 你发布的内容新增15451个赞/收藏
+            - listitem [ref=e24]:
+              - generic [ref=e25] [cursor=pointer]: 你新增了0个粉丝
+            - generic [ref=e27] [cursor=pointer]: 已为您总结上周全域内容表现情况
+          - generic [ref=e28] [cursor=pointer]:
+            - generic "15889" [ref=e30]:
+              - img [ref=e32]
+              - superscript [ref=e34]: 99+
+            - generic [ref=e35]: 消息
+        - generic [ref=e37]:
+          - generic [ref=e39] [cursor=pointer]:
+            - generic [ref=e40]: 创作者服务
+            - generic [ref=e42]: 
+          - img "avatar" [ref=e43]
+    - generic [ref=e44]:
+      - complementary [ref=e45]:
+        - generic [ref=e47]:
+          - generic [ref=e49] [cursor=pointer]:
+            - generic [ref=e50]: 
+            - text: 发布作品
+          - listbox "global navigation" [ref=e51]:
+            - option "首页" [ref=e52] [cursor=pointer]:
+              - generic [ref=e54]:
+                - img [ref=e56]
+                - text: 首页
+            - option "内容灵感 " [ref=e58]:
+              - listitem [ref=e59] [cursor=pointer]:
+                - generic [ref=e60]:
+                  - generic [ref=e61]:
+                    - img [ref=e63]
+                    - text: 内容灵感
+                  - generic [ref=e65]: 
+            - option "内容创作 " [ref=e66]:
+              - listitem [ref=e67] [cursor=pointer]:
+                - generic [ref=e68]:
+                  - generic [ref=e69]:
+                    - img [ref=e71]
+                    - text: 内容创作
+                  - generic [ref=e73]: 
+            - option "内容合作 " [ref=e74]:
+              - listitem [ref=e75] [cursor=pointer]:
+                - generic [ref=e76]:
+                  - generic [ref=e77]:
+                    - img [ref=e79]
+                    - text: 内容合作
+                  - generic [ref=e81]: 
+            - option "内容管理 " [ref=e82]:
+              - listitem [ref=e83] [cursor=pointer]:
+                - generic [ref=e84]:
+                  - generic [ref=e85]:
+                    - img [ref=e87]
+                    - text: 内容管理
+                  - generic [ref=e89]: 
+            - option "内容数据 " [ref=e90]:
+              - listitem [ref=e91] [cursor=pointer]:
+                - generic [ref=e92]:
+                  - generic [ref=e93]:
+                    - img [ref=e95]
+                    - text: 内容数据
+                  - generic [ref=e97]: 
+            - option "规则及学院 " [ref=e98]:
+              - listitem [ref=e99] [cursor=pointer]:
+                - generic [ref=e100]:
+                  - generic [ref=e101]:
+                    - img [ref=e103]
+                    - text: 规则及学院
+                  - generic [ref=e105]: 
+            - option "账号资产 " [ref=e106]:
+              - listitem [ref=e107] [cursor=pointer]:
+                - generic [ref=e108]:
+                  - generic [ref=e109]:
+                    - img [ref=e111]
+                    - text: 账号资产
+                  - generic [ref=e113]: 
+          - paragraph [ref=e115]:
+            - text: Copyright
+            - text: © Alibaba Group
+      - iframe [active] [ref=e123]:
+        - generic [ref=f4e1]:
+          - generic [ref=f4e8]:
+            - generic [ref=f4e9]: 发布视频
+            - generic [ref=f4e10]:
+              - generic [ref=f4e18]:
+                - application [ref=f4e20]:
+                  - generic [ref=f4e21]:
+                    - img [ref=f4e23]
+                    - generic [ref=f4e25]: 点击上传视频，或将视频拖放到此处
+                    - generic [ref=f4e26]: 上传视频
+                - generic [ref=f4e27]:
+                  - generic "视频格式推荐使用mp4" [ref=f4e28]:
+                    - img [ref=f4e30]
+                    - generic "视频格式推荐使用mp4" [ref=f4e32]
+                  - generic [ref=f4e33]:
+                    - img [ref=f4e35]
+                    - generic "视频比例推荐9:16竖版视频" [ref=f4e37]
+                  - generic "清晰度建议1080P及以上" [ref=f4e38]:
+                    - img [ref=f4e40]
+                    - generic [ref=f4e42]: 清晰度建议1080P及以上
+                  - generic "时长30分钟以下，文件最大1.5GB" [ref=f4e43]:
+                    - img [ref=f4e45]
+                    - generic [ref=f4e47]: 时长30分钟以下，文件最大1.5GB
+              - generic [ref=f4e48]:
+                - generic [ref=f4e49]:
+                  - generic [ref=f4e50]:
+                    - img [ref=f4e52]
+                    - generic [ref=f4e54]: 获取流量攻略：选好内容方向，精准获取多场域流量
+                    - generic [ref=f4e55] [cursor=pointer]: 点击查看详情
+                  - generic [ref=f4e56]:
+                    - generic [ref=f4e57]: 视频封面*
+                    - generic [ref=f4e61]: 等待视频上传...
+                  - generic [ref=f4e62]: 视频描述
+                  - generic [ref=f4e63]:
+                    - generic [ref=f4e65]:
+                      - textbox "加个标题让内容更吸引人" [ref=f4e66]
+                      - generic [ref=f4e68]: 0/30
+                    - generic [ref=f4e70]:
+                      - generic [ref=f4e71]: "推荐标题:"
+                      - generic [ref=f4e72]: 上传视频后将自动生成
+                  - generic [ref=f4e75]:
+                    - generic [ref=f4e81]: 展开说说，你写的文字我们都喜欢:)
+                    - generic [ref=f4e83]:
+                      - generic [ref=f4e84] [cursor=pointer]:
+                        - img [ref=f4e86]
+                        - generic [ref=f4e88]: 好友
+                      - generic [ref=f4e89] [cursor=pointer]:
+                        - img [ref=f4e91]
+                        - generic [ref=f4e93]: 品牌标签
+                      - generic [ref=f4e94] [cursor=pointer]:
+                        - img [ref=f4e96]
+                        - generic [ref=f4e98]: 店铺
+                      - generic [ref=f4e99] [cursor=pointer]:
+                        - img [ref=f4e101]
+                        - generic [ref=f4e103]: 内容标签
+                      - generic [ref=f4e104]: 0/1000
+                  - generic [ref=f4e107]:
+                    - generic [ref=f4e108]: 参与话题活动
+                    - generic [ref=f4e110] [cursor=pointer]:
+                      - generic [ref=f4e112]: 
+                      - generic [ref=f4e113]:
+                        - generic [ref=f4e114]: 点击添加话题
+                        - generic [ref=f4e115]: 由官方发起的征稿话题，奖励多多
+                  - generic [ref=f4e117]:
+                    - generic [ref=f4e118]:
+                      - generic [ref=f4e119]: 推荐音乐
+                      - generic [ref=f4e120]: 平台提供的音乐库歌曲仅限于手淘公域场景（逛逛、猜你喜欢等）使用
+                      - img [ref=f4e122]
+                    - generic [ref=f4e126] [cursor=pointer]:
+                      - img [ref=f4e129]
+                      - generic [ref=f4e131]:
+                        - generic [ref=f4e132]: 点击添加音乐
+                        - generic [ref=f4e133]: 去选择
+                  - generic [ref=f4e134]:
+                    - generic [ref=f4e135]:
+                      - generic [ref=f4e136]: 关联商品｜关联店铺
+                      - generic [ref=f4e137]: 不支持同时关联商品和店铺
+                    - radiogroup [ref=f4e138]:
+                      - generic [ref=f4e139]:
+                        - radio "商品" [checked] [ref=f4e142] [cursor=pointer]
+                        - text: 商品
+                      - generic [ref=f4e143]:
+                        - radio "店铺" [ref=f4e146] [cursor=pointer]
+                        - text: 店铺
+                    - generic [ref=f4e147]:
+                      - generic [ref=f4e151] [cursor=pointer]:
+                        - generic [ref=f4e152]: 
+                        - generic [ref=f4e153]: 添加商品
+                      - text: 
+                - generic [ref=f4e154]:
+                  - generic [ref=f4e156]:
+                    - generic [ref=f4e157]: 发布设置
+                    - img [ref=f4e159]
+                  - generic [ref=f4e162]:
+                    - generic [ref=f4e164]:
+                      - radio "允许下载" [ref=f4e167] [cursor=pointer]
+                      - text: 允许下载
+                    - generic [ref=f4e168]:
+                      - generic [ref=f4e169]:
+                        - radio [checked] [active] [ref=f4e173] [cursor=pointer]
+                        - generic [ref=f4e174]: 定时发布
+                      - generic [ref=f4e177]:
+                        - combobox "请选择日期和时间" [ref=f4e178]: 2026/05/28 17:23
+                        - generic [ref=f4e181]: 
+                  - generic [ref=f4e182]:
+                    - generic [ref=f4e183]:
+                      - generic [ref=f4e184]: 创作者声明*
+                      - img [ref=f4e186] [cursor=pointer]
+                    - radiogroup [ref=f4e188]:
+                      - generic [ref=f4e189]:
+                        - radio "内容无需标注" [ref=f4e192] [cursor=pointer]
+                        - text: 内容无需标注
+                      - generic [ref=f4e193]:
+                        - radio "含AI生成内容" [ref=f4e196] [cursor=pointer]
+                        - text: 含AI生成内容
+                      - generic [ref=f4e197]:
+                        - radio "含虚构演绎内容" [ref=f4e200] [cursor=pointer]
+                        - text: 含虚构演绎内容
+                      - generic [ref=f4e201]:
+                        - radio "内容为转载" [ref=f4e204] [cursor=pointer]
+                        - text: 内容为转载
+                      - generic [ref=f4e205]:
+                        - radio "个人观点，仅供参考" [ref=f4e208] [cursor=pointer]
+                        - text: 个人观点，仅供参考
+                      - generic [ref=f4e209]:
+                        - radio "内容含营销信息" [ref=f4e212] [cursor=pointer]
+                        - text: 内容含营销信息
+                  - generic [ref=f4e213]:
+                    - generic [ref=f4e214]:
+                      - generic [ref=f4e215]: AI优化
+                      - generic [ref=f4e216]:
+                        - text: 开启AI优化后，平台将尝试持续优化标题、封面及商品等信息，不占用内容的编辑次数。
+                        - link "点击查看功能说明" [ref=f4e217] [cursor=pointer]:
+                          - /url: https://alidocs.dingtalk.com/i/nodes/93NwLYZXWyxXroNzCOYo94e48kyEqBQm?utm_scene=team_space&utm_medium=dingdoc_doc_plugin_card&utm_source=dingdoc_doc
+                    - switch [ref=f4e218] [cursor=pointer]
+                  - button "定时发布" [ref=f4e226] [cursor=pointer]:
+                    - generic [ref=f4e223]: 定时发布
+          - textbox [ref=f4e225]
+  - generic:
+    - button "Choose File"
+  - generic [ref=e124]:
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - generic [ref=e127] [cursor=pointer]:
+              - img [ref=e128]
+              - generic [ref=e129]: 客服
+            - generic:
+              - generic:
+                - generic:
+                  - img
+                - generic: 作品审核不通过

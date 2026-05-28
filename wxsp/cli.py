@@ -233,6 +233,7 @@ def doctor() -> None:
                         ),
                         session=session,
                         settings=settings,
+                        platform="tencent_channel",
                     )
                 elif row.status != "ok":
                     cookie_failed = True

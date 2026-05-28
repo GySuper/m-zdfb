@@ -54,13 +54,13 @@
             {% if task.last_error_type == "cookie_expired" %}
               账号登录已失效。请到 <a href="/accounts">账号</a> 页面重新扫码登录后再重试。
             {% elif task.last_error_type == "risk_control" %}
-              触发了视频号风控,该账号已自动暂停 24 小时。期间不要再尝试发布。
+              触发了平台风控,该账号已自动暂停 24 小时。期间不要再尝试发布。
             {% elif task.last_error_type == "nas_unreachable" %}
               NAS 不可达。检查网络/挂载,然后点"立即重试"。
             {% elif task.last_error_type == "video_invalid" %}
               视频文件损坏或格式不支持。需要在飞书表里换一个文件,无法重试。
             {% elif task.last_error_type == "element_not_found" %}
-              页面元素找不到,可能视频号改版了。看截图确认,需要时修改 selectors.py 后重试。
+              页面元素找不到,可能平台改版了。看截图确认,需要时修改 selectors.py 后重试。
             {% elif task.last_error_type == "upload_failed" %}
               视频上传中断。点"立即重试"再试一次,持续失败可能是网络或视频问题。
             {% elif task.last_error_type == "network" %}

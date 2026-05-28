@@ -39,7 +39,7 @@
       <section id="sec-accounts" class="cfg-section">
         <div class="cfg-section-head">
           <h2>账号管理</h2>
-          <p class="cfg-section-desc">每个视频号账号单独配置。Chrome 浏览器档案目录由系统按 ID 自动管理。</p>
+          <p class="cfg-section-desc">每个账号单独配置。Chrome 浏览器档案目录由系统按 ID 自动管理。</p>
         </div>
 
         <div class="card">
@@ -90,7 +90,7 @@
       <section id="sec-publisher" class="cfg-section">
         <div class="cfg-section-head">
           <h2>发布规则</h2>
-          <p class="cfg-section-desc">浏览器自动化的行为参数。除非了解视频号风控,否则保持默认。</p>
+          <p class="cfg-section-desc">浏览器自动化的行为参数。除非了解平台风控规则,否则保持默认。</p>
         </div>
         <form method="post" action="/config/section/publisher" class="cfg-form" data-section="publisher">
           <div class="card">
@@ -100,7 +100,7 @@
                 <div class="cfg-control">
                   <label class="switch"><input type="checkbox" name="pub_headless" {% if vm.pub_headless %}checked{% endif %}><span class="slider"></span></label>
                 </div>
-                <span class="cfg-hint"><strong style="color: var(--color-error);">不要勾选</strong>。视频号风控敏感,headless 几乎一定被识别为机器人</span>
+                <span class="cfg-hint"><strong style="color: var(--color-error);">不要勾选</strong>。平台风控敏感,headless 几乎一定被识别为机器人</span>
               </div>
               <div class="cfg-row">
                 <label>上传超时</label>
@@ -513,7 +513,7 @@
           <div class="cfg-control">
             <input type="number" name="daily_limit" value="20" min="1" max="200" style="width: 120px;">
           </div>
-          <span class="cfg-hint">视频号建议 ≤ 20 条,过多易触发风控</span>
+          <span class="cfg-hint">建议 ≤ 20 条/天,过多易触发风控</span>
         </div>
         <div class="cfg-row">
           <label>视频检索根</label>

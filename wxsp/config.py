@@ -51,6 +51,41 @@ _PLATFORM_LABELS: dict[str, str] = {
 ALL_PLATFORMS = list(_PLATFORM_LABELS)
 
 
+# ---------------------------------------------------------------------------
+# global default platform (shared across all platform configs)
+# ---------------------------------------------------------------------------
+
+
+def _default_platform_path() -> Path:
+    """Shared file for the global default_platform setting."""
+    if is_packaged():
+        return Path(_platform_user_data_dir("wxsp")) / "default_platform"
+    return Path("./data/default_platform").resolve()
+
+
+def get_default_platform() -> str:
+    """Read the global default platform from the shared file.
+    Falls back to the first configured platform, then to tencent_channel.
+    """
+    path = _default_platform_path()
+    if path.exists():
+        val = path.read_text(encoding="utf-8").strip()
+        if val in _PLATFORM_LABELS:
+            return val
+    # Fallback: first platform with a config file
+    for p in ALL_PLATFORMS:
+        if get_config_path(p).exists():
+            return p
+    return "tencent_channel"
+
+
+def set_default_platform(platform: str) -> None:
+    """Persist the global default platform setting."""
+    path = _default_platform_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(platform, encoding="utf-8")
+
+
 def platform_label(key: str) -> str:
     return _PLATFORM_LABELS.get(key, key)
 

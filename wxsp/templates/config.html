@@ -429,6 +429,19 @@
                 </div>
                 <span class="cfg-hint">daemon 启动后自动打开浏览器到 Web UI</span>
               </div>
+              <div class="cfg-row">
+                <label>默认平台</label>
+                <div class="cfg-control" style="display:flex;align-items:center;gap:8px;">
+                  <form method="post" action="/config/default-platform" style="display:flex;align-items:center;gap:8px;margin:0;">
+                  <select name="default_platform" onchange="this.form.submit()">
+                    {% for p in all_platforms %}
+                    <option value="{{ p }}" {% if vm.webui_default_platform == p %}selected{% endif %}>{{ platform_cn(p) }}</option>
+                    {% endfor %}
+                  </select>
+                  </form>
+                </div>
+                <span class="cfg-hint">打开 Web UI 时默认显示的平台(选择即保存)</span>
+              </div>
             </div>
             <div class="cfg-foot">
               <span class="cfg-foot-status" data-role="status"></span>

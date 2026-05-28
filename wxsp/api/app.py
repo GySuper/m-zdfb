@@ -22,7 +22,13 @@ from wxsp.api.routes_plans import router as plans_router
 from wxsp.api.routes_setup import router as setup_router
 from wxsp.api.routes_tasks import router as tasks_router
 from wxsp.archive import cleanup_old_files
-from wxsp.config import ALL_PLATFORMS, get_config_path, load_settings, platform_label
+from wxsp.config import (
+    ALL_PLATFORMS,
+    get_config_path,
+    get_default_platform,
+    load_settings,
+    platform_label,
+)
 from wxsp.db import get_engine, init_db, session_scope
 from wxsp.scheduler import (
     make_scheduler,
@@ -121,15 +127,14 @@ def create_app() -> FastAPI:
     async def platform_context(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        """Discover available platforms from config_*.yaml files, inject into request.state."""
+        """Inject current platform into request.state. Redirect if missing ?platform=."""
         path = request.url.path
         if not path.startswith(_SETUP_PREFIX) and not path.startswith(_STATIC_PREFIX):
-            # Discover available platforms by globbing config files
+            # Build platform list
             platforms = {}
             for pkey in ALL_PLATFORMS:
                 try:
-                    cfg_path = get_config_path(pkey)
-                    configured = cfg_path.exists()
+                    configured = get_config_path(pkey).exists()
                 except Exception:
                     configured = False
                 platforms[pkey] = {
@@ -137,9 +142,20 @@ def create_app() -> FastAPI:
                     "label": platform_label(pkey),
                     "configured": configured,
                 }
-            current = request.query_params.get("platform", "tencent_channel")
-            if current not in platforms:
-                current = "tencent_channel"
+            # Resolve current platform
+            default_p = get_default_platform()
+            current = request.query_params.get("platform")
+            if current and current in platforms:
+                pass  # explicit ?platform= in URL
+            else:
+                # No valid platform in URL -> redirect to add it
+                from fastapi.responses import RedirectResponse as _Redir
+
+                qp = dict(request.query_params)
+                qp["platform"] = default_p
+                qs = "&".join(f"{k}={v}" for k, v in qp.items())
+                target = f"{path}?{qs}" if qs else f"{path}?platform={default_p}"
+                return _Redir(url=target, status_code=302)
             request.state.platforms = platforms
             request.state.current_platform = current
             request.state.has_multiple_platforms = len(platforms) > 1

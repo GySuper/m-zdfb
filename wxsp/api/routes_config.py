@@ -30,7 +30,14 @@ from pydantic import ValidationError
 from sqlmodel import Session
 
 from wxsp.api.deps import get_session, templates
-from wxsp.config import Settings, _expand_env_vars, get_config_path
+from wxsp.config import (
+    ALL_PLATFORMS,
+    Settings,
+    _expand_env_vars,
+    get_config_path,
+    get_default_platform,
+    set_default_platform,
+)
 from wxsp.config import platform_label as _platform_label
 from wxsp.models import Account
 
@@ -247,6 +254,7 @@ def _view_model(data: dict[str, Any], *, platform: str | None = None) -> dict[st
         "webui_host": webui.get("host", "127.0.0.1"),
         "webui_port": webui.get("port", 8765),
         "webui_open_browser": bool(webui.get("open_browser_on_start", True)),
+        "webui_default_platform": get_default_platform(),
         # accounts(每条多了 video/cover_search_root)
         "accounts": data.get("accounts", {}) or {},
     }
@@ -278,6 +286,7 @@ def _render_config(
             "field_map_keys": _field_map_keys(platform or "tencent_channel"),
             "edit_account_id": edit_account_id,
             "platform_label": p_label,
+            "all_platforms": ALL_PLATFORMS,
         },
         status_code=status_code,
     )
@@ -822,6 +831,14 @@ def save_system(
         }
 
     return _apply_and_save("✓ 系统设置已保存", apply)
+
+
+@router.post("/config/default-platform")
+def save_default_platform(
+    default_platform: str = Form(...),
+) -> RedirectResponse:
+    set_default_platform(default_platform)
+    return RedirectResponse("/config?flash=✓ 默认平台已更新", status_code=303)
 
 
 @router.post("/config/section/fieldmap")

@@ -215,6 +215,7 @@ def notify(
             level=event.level,
             task_id=event.task_id,
             account_id=event.account_id,
+            platform=effective_platform,
             type=event.type,
             message=f"{event.title}\n{event.content}",
             context_json=json.dumps(event.context, ensure_ascii=False, default=str),

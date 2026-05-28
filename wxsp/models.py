@@ -99,6 +99,7 @@ class Event(SQLModel, table=True):
     level: str
     task_id: int | None = Field(default=None, foreign_key="task.id", index=True)
     account_id: str | None = Field(default=None, foreign_key="account.id", index=True)
+    platform: str = Field(default="tencent_channel", index=True)
     type: str
     message: str
     context_json: str = "{}"

@@ -61,10 +61,10 @@ def dashboard(
         )
     )
 
-    # 最近 10 个事件 — 跨平台可见(全局事件 account_id 可能为 NULL)
+    # 最近 10 个事件 — 只显示当前平台
     recent_events = list(
         session.exec(
-            select(Event).order_by(Event.id.desc()).limit(10)  # type: ignore[union-attr]
+            select(Event).where(Event.platform == platform).order_by(Event.id.desc()).limit(10)  # type: ignore[union-attr]
         ).all()
     )
 

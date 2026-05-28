@@ -32,10 +32,15 @@ COOKIE_STATUS_WARN = "warn"  # 预留:M7 接 cookie_warn_days 阈值后启用
 COOKIE_STATUS_EXPIRED = "expired"
 COOKIE_STATUS_UNKNOWN = "unknown"
 
+# 平台标识
+PLATFORM_TENCENT_CHANNEL = "tencent_channel"
+PLATFORM_TAOBAO_GUANGHE = "taobao_guanghe"
+
 
 class Account(SQLModel, table=True):
     id: str = Field(primary_key=True)
     display_name: str
+    platform: str = "tencent_channel"
     user_data_dir: str  # 存为 str(SQLite 限制);M2 browser.py 取用时 Path(value) 包一层
     daily_limit: int = 20
     is_active: bool = True
@@ -63,6 +68,7 @@ class Task(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     video_id: str = Field(foreign_key="video.id", index=True)
     account_id: str = Field(foreign_key="account.id", index=True)
+    platform: str = Field(default="tencent_channel", index=True)
     execute_date: date = Field(index=True)
     publish_at: datetime
     status: str = Field(index=True)

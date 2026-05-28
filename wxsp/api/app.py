@@ -114,6 +114,49 @@ def create_app() -> FastAPI:
     log_stream.emit_for_test("Web UI 启动,日志流就绪。任务运行时会自动推送 logger 输出。")
 
     @app.middleware("http")
+    async def platform_context(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Inject platform list + current into request.state for sidebar cross-page switching."""
+        path = request.url.path
+        if not path.startswith(_SETUP_PREFIX) and not path.startswith(_STATIC_PREFIX):
+            try:
+                settings = load_settings()
+            except Exception:
+                settings = None
+            if settings is not None:
+                # 所有已知平台(无论是否已配置)
+                all_platforms = {
+                    "tencent_channel": "视频号",
+                    "taobao_guanghe": "淘宝光合",
+                }
+                platforms = {}
+                for pkey, plabel in all_platforms.items():
+                    cfg_exists = pkey in settings.platforms
+                    accts = [
+                        a
+                        for a in settings.accounts.values()
+                        if getattr(a, "platform", "tencent_channel") == pkey
+                    ]
+                    platforms[pkey] = {
+                        "key": pkey,
+                        "label": plabel,
+                        "configured": cfg_exists,
+                        "accounts": len(accts),
+                    }
+                current = request.query_params.get("platform", "tencent_channel")
+                if current not in platforms:
+                    current = "tencent_channel"
+                request.state.platforms = platforms
+                request.state.current_platform = current
+                request.state.has_multiple_platforms = len(platforms) > 1
+            else:
+                request.state.platforms = {}
+                request.state.current_platform = "tencent_channel"
+                request.state.has_multiple_platforms = False
+        return await call_next(request)
+
+    @app.middleware("http")
     async def setup_redirect(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:

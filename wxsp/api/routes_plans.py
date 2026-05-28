@@ -26,6 +26,7 @@ router = APIRouter()
 def plans_page(
     request: Request,
     date: str | None = None,
+    platform: str = "tencent_channel",
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     parsed = _parse_date(date) if date else _date.today()
@@ -33,7 +34,7 @@ def plans_page(
     stmt = (
         select(Task, Video)
         .join(Video, Task.video_id == Video.id)  # type: ignore[arg-type]
-        .where(Task.execute_date == parsed)
+        .where(Task.execute_date == parsed, Task.platform == platform)
         .order_by(Task.account_id, Task.publish_at.asc())  # type: ignore[attr-defined]
     )
     pairs = list(session.exec(stmt).all())

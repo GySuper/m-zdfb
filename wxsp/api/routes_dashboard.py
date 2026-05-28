@@ -19,16 +19,21 @@ router = APIRouter()
 @router.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
+    platform: str = "tencent_channel",
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
     today = date.today()
 
-    accounts = list(session.exec(select(Account)).all())
+    accounts = list(session.exec(select(Account).where(Account.platform == platform)).all())
     accounts_by_id = {a.id: a for a in accounts}
 
-    # 今日任务计数(按状态)
-    today_tasks = list(session.exec(select(Task).where(Task.execute_date == today)).all())
+    # 今日任务计数(按状态) — 只统计当前平台
+    today_tasks = list(
+        session.exec(
+            select(Task).where(Task.execute_date == today, Task.platform == platform)
+        ).all()
+    )
     counts: dict[str, int] = {
         "pending": 0,
         "running": 0,
@@ -43,28 +48,33 @@ def dashboard(
         bucket = per_account.setdefault(t.account_id, dict.fromkeys(counts, 0))
         bucket[t.status] = bucket.get(t.status, 0) + 1
 
-    # 历史积压:execute_date < today 且 status ∈ {pending, interrupted}
-    # spec §5.6:pending(还没跑)+ interrupted(跑了一半挂了)都算积压;
-    # failed/success/skipped 不计(需要走重试或已经走完了)。
+    # 历史积压 — 只统计当前平台
     backlog = len(
         list(
             session.exec(
                 select(Task).where(
                     Task.execute_date < today,
+                    Task.platform == platform,
                     col(Task.status).in_([TASK_STATUS_PENDING, TASK_STATUS_INTERRUPTED]),
                 )
             ).all()
         )
     )
 
-    # 最近 10 个事件(倒序)
-    recent_events = list(
-        session.exec(select(Event).order_by(Event.id.desc()).limit(10)).all()  # type: ignore[union-attr]
-    )
+    # 最近 10 个事件 — 只统计当前平台账号
+    account_ids_for_platform = [a.id for a in accounts]
+    recent_events_query = select(Event).order_by(Event.id.desc()).limit(10)  # type: ignore[union-attr]
+    if account_ids_for_platform:
+        recent_events_query = recent_events_query.where(
+            col(Event.account_id).in_(account_ids_for_platform)
+        )
+    recent_events = list(session.exec(recent_events_query).all())
 
-    # 把账号 + 当日计数 + 配置里的 daily_limit 合并
+    # 账号卡片 — 只包含当前平台的配置
     account_cards: list[dict[str, Any]] = []
     for aid, cfg in settings.accounts.items():
+        if getattr(cfg, "platform", "tencent_channel") != platform:
+            continue
         a = accounts_by_id.get(aid)
         bucket = per_account.get(aid, dict.fromkeys(counts, 0))
         account_cards.append(

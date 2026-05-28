@@ -637,52 +637,48 @@
         <div class="brand-title">自动发布平台</div>
       </div>
 
+      {% set cur = request.state.current_platform %}
+      {% set plats = request.state.platforms or {} %}
       <div class="platform-switcher" id="platformSwitcher">
         <div class="platform-switcher-label">
           <span>当前平台</span>
-          <span style="color: var(--color-text-faint);">· 点击切换</span>
+          {% if plats|length > 1 %}<span style="color: var(--color-text-faint);">· 点击切换</span>{% endif %}
         </div>
-        <button class="platform-current" type="button" onclick="document.getElementById('platformSwitcher').classList.toggle('open')">
+        <button class="platform-current" type="button"
+                {% if plats|length > 1 %}onclick="document.getElementById('platformSwitcher').classList.toggle('open')"{% else %}style="cursor:default"{% endif %}>
           <span class="platform-dot"></span>
-          <span>视频号</span>
-          <span class="chevron">▼</span>
+          <span>{{ plats[cur].label if plats.get(cur) else '视频号' }}</span>
+          {% if plats|length > 1 %}<span class="chevron">▼</span>{% endif %}
         </button>
         <div class="platform-dropdown">
-          <div class="platform-item active">
-            <span class="platform-dot"></span>
-            <span>视频号</span>
-            <span class="check">✓</span>
+          {% for pk, pi in plats.items() %}
+          <div class="platform-item {% if pk == cur %}active{% endif %}"
+               onclick="window.location.href='{{ request.url.path }}?platform={{ pk }}'">
+            <span class="platform-dot {% if pk != cur %}mute{% endif %}"></span>
+            <span>{{ pi.label }}</span>
+            {% if pk == cur %}<span class="check">✓</span>{% endif %}
           </div>
-          <div class="platform-item disabled" title="即将上线">
-            <span class="platform-dot mute"></span>
-            <span>小红书</span>
-            <span class="soon">即将上线</span>
-          </div>
-          <div class="platform-item disabled" title="即将上线">
-            <span class="platform-dot mute"></span>
-            <span>抖音</span>
-            <span class="soon">即将上线</span>
-          </div>
+          {% endfor %}
         </div>
       </div>
 
       <nav class="nav">
-        <a href="/" class="{% if active=='dashboard' %}active{% endif %}">
+        <a href="/?platform={{ cur }}" class="{% if active=='dashboard' %}active{% endif %}">
           <span class="nav-icon">⌂</span><span>总览</span>
         </a>
-        <a href="/accounts" class="{% if active=='accounts' %}active{% endif %}">
+        <a href="/accounts?platform={{ cur }}" class="{% if active=='accounts' %}active{% endif %}">
           <span class="nav-icon">○</span><span>账号</span>
         </a>
-        <a href="/tasks" class="{% if active=='tasks' %}active{% endif %}">
+        <a href="/tasks?platform={{ cur }}" class="{% if active=='tasks' %}active{% endif %}">
           <span class="nav-icon">☰</span><span>任务</span>
         </a>
-        <a href="/plans" class="{% if active=='plans' %}active{% endif %}">
+        <a href="/plans?platform={{ cur }}" class="{% if active=='plans' %}active{% endif %}">
           <span class="nav-icon">▢</span><span>计划</span>
         </a>
-        <a href="/logs" class="{% if active=='logs' %}active{% endif %}">
+        <a href="/logs?platform={{ cur }}" class="{% if active=='logs' %}active{% endif %}">
           <span class="nav-icon">≡</span><span>日志</span>
         </a>
-        <a href="/config" class="{% if active=='config' %}active{% endif %}">
+        <a href="/config?platform={{ cur }}" class="{% if active=='config' %}active{% endif %}">
           <span class="nav-icon">⚙</span><span>配置</span>
         </a>
       </nav>

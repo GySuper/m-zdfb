@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 from pydantic import ValidationError
@@ -37,12 +37,12 @@ router = APIRouter()
 _config_lock = threading.Lock()
 
 
-def _config_path() -> Path:
-    return get_config_path()
+def _config_path(platform: str = "tencent_channel") -> Path:
+    return get_config_path(platform)
 
 
-def _backup_path() -> Path:
-    return get_config_path().with_suffix(".yaml.bak")
+def _backup_path(platform: str = "tencent_channel") -> Path:
+    return get_config_path(platform).with_suffix(".yaml.bak")
 
 
 NOTIFY_ON_OPTIONS: list[tuple[str, str]] = [
@@ -90,10 +90,11 @@ def _generate_account_id(existing: dict[str, Any]) -> str:
     raise RuntimeError("account_id 生成 100 次都碰撞,几乎不可能;检查 secrets/RNG 是否异常")
 
 
-def _load_raw_yaml() -> dict[str, Any]:
-    if not _config_path().exists():
+def _load_raw_yaml(platform: str = "tencent_channel") -> dict[str, Any]:
+    path = _config_path(platform)
+    if not path.exists():
         return {}
-    text = _config_path().read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
     data = yaml.safe_load(text) or {}
     return data if isinstance(data, dict) else {}
 
@@ -123,12 +124,13 @@ def _validate_dict(data: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _save_yaml(data: dict[str, Any]) -> None:
+def _save_yaml(data: dict[str, Any], *, platform: str = "tencent_channel") -> None:
     """备份 + 原子写。"""
-    if _config_path().exists():
-        shutil.copy2(_config_path(), _backup_path())
+    cfg = _config_path(platform)
+    if cfg.exists():
+        shutil.copy2(cfg, _backup_path(platform))
     text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
-    _atomic_write(_config_path(), text)
+    _atomic_write(cfg, text)
 
 
 def _display_secret(value: str) -> str:
@@ -241,14 +243,15 @@ def _render_config(
     platform: str | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
-    platform_options = sorted((data.get("platforms") or {}).keys())
+    platform_options = sorted({"tencent_channel": "视频号", "taobao_guanghe": "淘宝光合"}.keys())
+    cfg_path = _config_path(platform or "tencent_channel")
     return templates.TemplateResponse(
         request,
         "config.html",
         {
             "active": "config",
-            "abs_path": str(_config_path().resolve()),
-            "exists": _config_path().exists(),
+            "abs_path": str(cfg_path.resolve()),
+            "exists": cfg_path.exists(),
             "flash": flash,
             "errors": errors or [],
             "vm": _view_model(data, platform=platform),
@@ -276,13 +279,18 @@ def config_page(
     platform 参数:选择要编辑的平台配置(如 tencent_channel / taobao_guanghe)。
     """
     return _render_config(
-        request, data=_load_raw_yaml(), flash=flash, edit_account_id=edit, platform=platform
+        request,
+        data=_load_raw_yaml(platform or "tencent_channel"),
+        flash=flash,
+        edit_account_id=edit,
+        platform=platform,
     )
 
 
 @router.post("/config", response_class=HTMLResponse)
 def config_save(
     request: Request,
+    platform: str = Query("tencent_channel"),
     # app
     app_data_dir: str = Form(...),
     app_logs_dir: str = Form(...),
@@ -335,7 +343,7 @@ def config_save(
     webui_open_browser: bool = Form(False),
 ) -> HTMLResponse:
     with _config_lock:
-        old = _load_raw_yaml()
+        old = _load_raw_yaml(platform)
         old_feishu = old.get("feishu", {})
         old_wecom = old.get("monitoring", {}).get("notifiers", {}).get("wecom", {})
         # legacy 整体 POST 没 path_aliases 字段,保留旧值避免被 nas_root 边吹掉
@@ -414,8 +422,10 @@ def config_save(
         if errors:
             return _render_config(request, data=new_data, errors=errors, status_code=400)
 
-        _save_yaml(new_data)
-    return _render_config(request, data=new_data, flash=f"已保存,旧版本备份在 {_backup_path()}")
+        _save_yaml(new_data, platform=platform)
+    return _render_config(
+        request, data=new_data, flash=f"已保存,旧版本备份在 {_backup_path(platform)}"
+    )
 
 
 # ---------- 账号 CRUD ----------
@@ -463,7 +473,7 @@ def add_account(
     if not display_name:
         return RedirectResponse("/config?flash=新增失败:显示名不能为空", status_code=303)
     with _config_lock:
-        data = _load_raw_yaml()
+        data = _load_raw_yaml(platform or "tencent_channel")
         accounts = data.setdefault("accounts", {}) or {}
         # 提前查重:display_name 必须唯一(Settings 也会兜底,但那里报错带 pydantic
         # 包装 + 暴露 generated ID,运营看了一头雾水;这里给清爽错误)
@@ -488,7 +498,7 @@ def add_account(
         errors = _validate_dict(data)
         if errors:
             return RedirectResponse(f"/config?flash=新增失败: {errors[0]}", status_code=303)
-        _save_yaml(data)
+        _save_yaml(data, platform=platform)
         if session.get(Account, aid) is None:
             session.add(
                 Account(
@@ -580,7 +590,7 @@ def update_account(
             f"/config?flash=保存失败:显示名不能为空&edit={account_id}", status_code=303
         )
     with _config_lock:
-        data = _load_raw_yaml()
+        data = _load_raw_yaml(platform or "tencent_channel")
         accounts = data.get("accounts", {}) or {}
         if account_id not in accounts:
             return RedirectResponse(
@@ -610,14 +620,14 @@ def update_account(
             return RedirectResponse(
                 f"/config?flash=保存失败: {errors[0]}&edit={account_id}", status_code=303
             )
-        _save_yaml(data)
+        _save_yaml(data, platform=platform)
     return RedirectResponse(f"/config?flash=已更新账号 {account_id}", status_code=303)
 
 
 @router.post("/config/accounts/{account_id}/delete")
-def delete_account(account_id: str) -> RedirectResponse:
+def delete_account(account_id: str, platform: str = "tencent_channel") -> RedirectResponse:
     with _config_lock:
-        data = _load_raw_yaml()
+        data = _load_raw_yaml(platform or "tencent_channel")
         accounts = data.get("accounts", {}) or {}
         if account_id not in accounts:
             return RedirectResponse(
@@ -628,7 +638,7 @@ def delete_account(account_id: str) -> RedirectResponse:
         errors = _validate_dict(data)
         if errors:
             return RedirectResponse(f"/config?flash=删除失败: {errors[0]}", status_code=303)
-        _save_yaml(data)
+        _save_yaml(data, platform=platform)
     return RedirectResponse(f"/config?flash=已删除账号 {account_id}", status_code=303)
 
 
@@ -638,16 +648,18 @@ def delete_account(account_id: str) -> RedirectResponse:
 # 老的 POST /config 端点保留作兼容兜底,新 UI 不再使用。
 
 
-def _apply_and_save(flash_ok: str, apply_fn: Callable[[dict[str, Any]], None]) -> RedirectResponse:
+def _apply_and_save(
+    flash_ok: str, apply_fn: Callable[[dict[str, Any]], None], *, platform: str = "tencent_channel"
+) -> RedirectResponse:
     """读 config.yaml → apply_fn(data) 改 → 校验 → 写盘,全程持锁,杜绝竞态条件。"""
     with _config_lock:
-        data = _load_raw_yaml()
+        data = _load_raw_yaml(platform)
         apply_fn(data)
         errors = _validate_dict(data)
         if errors:
             msg = f"保存失败: {'; '.join(errors)}"
             return RedirectResponse(f"/config?flash={msg}", status_code=303)
-        _save_yaml(data)
+        _save_yaml(data, platform=platform)
     return RedirectResponse(f"/config?flash={flash_ok}", status_code=303)
 
 

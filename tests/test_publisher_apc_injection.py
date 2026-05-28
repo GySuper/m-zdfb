@@ -116,11 +116,11 @@ def test_publish_apc_pass_runs_full_pipeline(
     )
 
     with (
-        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx()),
-        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.publisher.cleanup_tmp"),
-        patch("wxsp.publisher.screenshot", return_value=tmp_path / "shot.png"),
-        patch.multiple("wxsp.publisher", **overrides),
+        patch("wxsp.platforms.tencent_channel.browser_context", return_value=_fake_browser_ctx()),
+        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.tencent_channel.screenshot", return_value=tmp_path / "shot.png"),
+        patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
         result = publish(task_id, dry_run=False, settings=settings)
 
@@ -138,8 +138,8 @@ def test_publish_apc_deny_injects_element_not_found(
 
     monkeypatch.setattr("wxsp.apc.check_pass", lambda: False)
     # 跳过真实 45-75s 等待
-    monkeypatch.setattr("wxsp.publisher.time.sleep", lambda _s: None)
-    monkeypatch.setattr("wxsp.publisher.random.uniform", lambda a, b: 0.0)
+    monkeypatch.setattr("wxsp.platforms.tencent_channel.time.sleep", lambda _s: None)
+    monkeypatch.setattr("wxsp.platforms.tencent_channel.random.uniform", lambda a, b: 0.0)
 
     upload_calls: list[bool] = []
     title_calls: list[bool] = []
@@ -157,11 +157,11 @@ def test_publish_apc_deny_injects_element_not_found(
     )
 
     with (
-        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx()),
-        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.publisher.cleanup_tmp"),
-        patch("wxsp.publisher.screenshot", side_effect=fake_screenshot),
-        patch.multiple("wxsp.publisher", **overrides),
+        patch("wxsp.platforms.tencent_channel.browser_context", return_value=_fake_browser_ctx()),
+        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.tencent_channel.screenshot", side_effect=fake_screenshot),
+        patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
         result = publish(task_id, dry_run=False, settings=settings)
 
@@ -192,11 +192,11 @@ def test_publish_dev_mode_no_apc_call(
         extract_remote_video_id_and_url=lambda page: ("rid", "https://channels/x"),
     )
     with (
-        patch("wxsp.publisher.browser_context", return_value=_fake_browser_ctx()),
-        patch("wxsp.publisher.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.publisher.cleanup_tmp"),
-        patch("wxsp.publisher.screenshot", return_value=tmp_path / "shot.png"),
-        patch.multiple("wxsp.publisher", **overrides),
+        patch("wxsp.platforms.tencent_channel.browser_context", return_value=_fake_browser_ctx()),
+        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.tencent_channel.screenshot", return_value=tmp_path / "shot.png"),
+        patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
         result = publish(task_id, dry_run=False, settings=settings)
 

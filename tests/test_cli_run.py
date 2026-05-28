@@ -79,7 +79,7 @@ def test_run_today_invokes_run_today_pending_and_echoes_summary(tmp_path, monkey
 
     captured: dict[str, object] = {}
 
-    def fake_run(settings):
+    def fake_run(settings, **kwargs):
         captured["called"] = True
         return RunSummary(attempted=3, succeeded=2, failed=1, skipped_paused=0)
 

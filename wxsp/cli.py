@@ -73,23 +73,35 @@ def _open_session() -> Iterator[Session]:
 @app.command("login")
 def login(account_id: str = typer.Argument(..., help="账号 ID")) -> None:
     """扫码登录指定账号,刷新 Cookie。打开浏览器后扫描页面上的二维码即可。"""
-    # 1. 拿 user_data_dir,session 立刻关闭(浏览器扫码可能开 5 分钟,不能持 session)
+    # 1. 拿 user_data_dir + platform,session 立刻关闭(浏览器扫码可能开 5 分钟,不能持 session)
     with _open_session() as session:
         account = session.get(Account, account_id)
         if account is None:
             typer.echo(f"[wxsp] 账号 {account_id!r} 不存在。先 `wxsp accounts add`。")
             raise typer.Exit(code=1)
         user_data_dir = Path(account.user_data_dir)
+        account_platform: str = getattr(account, "platform", "tencent_channel")
 
     # 2. 启浏览器,等扫码 / 等已登录标记可见(最长 5 分钟)
-    typer.echo(f"[wxsp] 打开浏览器,请在弹出窗口中扫码登录 {account_id}(最长 5 分钟)...")
-    try:
-        is_logged_in: bool | None = check_cookie(
-            user_data_dir, timeout_ms=300_000, account_id=account_id
-        )
-    except Exception as exc:
-        typer.echo(f"[wxsp] 浏览器启动失败:{exc}")
-        is_logged_in = None
+    is_logged_in: bool | None
+    if account_platform == "taobao_guanghe":
+        from wxsp.platforms.taobao_guanghe import TaobaoGuanghePublisher
+
+        typer.echo(f"[wxsp] 打开浏览器,请在弹出窗口中登录淘宝光合 {account_id}(最长 5 分钟)...")
+        settings = load_settings()
+        pub = TaobaoGuanghePublisher()
+        try:
+            is_logged_in = pub.login(account, settings)
+        except Exception as exc:
+            typer.echo(f"[wxsp] 浏览器启动失败:{exc}")
+            is_logged_in = None
+    else:
+        typer.echo(f"[wxsp] 打开浏览器,请在弹出窗口中扫码登录 {account_id}(最长 5 分钟)...")
+        try:
+            is_logged_in = check_cookie(user_data_dir, timeout_ms=300_000, account_id=account_id)
+        except Exception as exc:
+            typer.echo(f"[wxsp] 浏览器启动失败:{exc}")
+            is_logged_in = None
 
     # 3. 回写 DB
     now = datetime.now()
@@ -114,6 +126,9 @@ def accounts_add(
         ..., "--user-data-dir", help="Chrome profile 目录,每账号独立"
     ),
     daily_limit: int = typer.Option(20, "--daily-limit", help="每日发布上限"),
+    platform: str = typer.Option(
+        "tencent_channel", "--platform", help="平台: tencent_channel | taobao_guanghe"
+    ),
 ) -> None:
     """新增账号到 DB。"""
     with _open_session() as session:
@@ -127,6 +142,7 @@ def accounts_add(
                 display_name=display_name,
                 user_data_dir=user_data_dir,
                 daily_limit=daily_limit,
+                platform=platform,
             )
         )
         try:
@@ -296,24 +312,28 @@ def doctor() -> None:
 @app.command("sync")
 def sync(
     dry_run: bool = typer.Option(False, "--dry-run", help="走完流程但不写 DB 不回写飞书"),
+    platform: str = typer.Option(
+        "tencent_channel", "--platform", help="平台: tencent_channel | taobao_guanghe"
+    ),
 ) -> None:
     """立即拉一次飞书 Bitable,执行入库 / 错误回写。"""
     settings = load_settings()
-    if not settings.feishu.enabled:
-        typer.echo("[wxsp] 飞书未启用,跳过 sync。")
+    feishu_cfg = settings.get_feishu_config(platform)
+    if feishu_cfg is None or not feishu_cfg.enabled:
+        typer.echo(f"[wxsp] 平台 {platform} 飞书未启用,跳过 sync。")
         return
 
     typer.echo(
-        f"[wxsp] 飞书同步开始: app_token={settings.feishu.bitable.app_token} "
-        f"table_id={settings.feishu.bitable.table_id}"
+        f"[wxsp] 飞书同步开始({platform}): app_token={feishu_cfg.bitable.app_token} "
+        f"table_id={feishu_cfg.bitable.table_id}"
     )
     try:
-        result = sync_now(settings, dry_run=dry_run)
+        result = sync_now(settings, dry_run=dry_run, platform=platform)
     except FeishuApiError as exc:
         typer.echo(f"[wxsp] 飞书 API 持续失败: {exc}")
         raise typer.Exit(code=70) from exc
 
-    typer.echo("[wxsp] 飞书同步完成")
+    typer.echo(f"[wxsp] 飞书同步完成({platform})")
     typer.echo(f"  拉取: {result.pulled}")
     typer.echo(f"  入库: {result.accepted}{' (dry-run)' if dry_run else ''}")
     typer.echo(f"  拒绝: {result.rejected}{' (已回写)' if not dry_run else ''}")
@@ -326,6 +346,9 @@ def run(
     today: bool = typer.Option(False, "--today", help="立即跑今天所有 pending 任务"),
     task_id: int | None = typer.Option(None, "--task-id", help="跑指定单条任务"),
     dry_run: bool = typer.Option(False, "--dry-run", help="发布步骤跑到点'发布'前停下"),
+    platform: str | None = typer.Option(
+        None, "--platform", help="平台: tencent_channel | taobao_guanghe(仅 --today 时可选)"
+    ),
 ) -> None:
     """执行任务。三选一:--task-id 单条 / --today 跑今天 / --daemon 起 cron。"""
     settings = load_settings()
@@ -350,8 +373,9 @@ def run(
         raise typer.Exit(code=1)
 
     if today:
-        typer.echo("[wxsp] 跑今天所有 pending 任务...")
-        summary = run_today_pending(settings)
+        plat_label = f"({platform})" if platform else ""
+        typer.echo(f"[wxsp] 跑今天所有 pending 任务{plat_label}...")
+        summary = run_today_pending(settings, platform=platform)
         typer.echo(
             f"[wxsp] 完成: attempted={summary.attempted} succeeded={summary.succeeded} "
             f"failed={summary.failed} skipped_paused={summary.skipped_paused}"

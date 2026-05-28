@@ -54,6 +54,16 @@ accounts:
     video_search_root: "{nas_root}/videos/account_d"
     cover_search_root: "{nas_root}/covers/account_d"
 
+  # ---------- 淘宝光合平台账号 ----------
+  taobao_a1:
+    platform: taobao_guanghe
+    display_name: "淘宝号A"
+    enabled: true
+    daily_limit: 10
+    user_data_dir: ./data/chrome-profiles/taobao_a1
+    video_search_root: "{nas_root}/videos/taobao_a"
+    cover_search_root: "{nas_root}/covers/taobao_a"
+
 # ============== 调度 ==============
 scheduler:
   enabled: true                       # false 时关闭每日 09:00 定时任务,daemon 仍启动,手动入口可用
@@ -115,6 +125,108 @@ monitoring:
   screenshot_retention_days: 90
   # 历史积压(execute_date<today + pending/interrupted)超此数推 backlog_high 告警
   backlog_warn_threshold: 20
+
+# ============== 多平台配置(推荐) ==============
+# 使用 platforms 块时,scheduler/publisher/feishu/monitoring 的顶层字段会自动
+# 从 tencent_channel 平台块中提取(向后兼容)。新增平台只需加一个平台块即可。
+platforms:
+  # ---------- 视频号 ----------
+  tencent_channel:
+    scheduler:
+      daily_cron_hour: 9
+      daily_cron_minute: 0
+    publisher:
+      headless: false
+      upload_timeout_seconds: 600
+      step_pause_seconds: [1, 3]
+      max_concurrent_accounts: 1
+    feishu:
+      enabled: true
+      app_id: cli_xxxxxxxxxx
+      app_secret: ${FEISHU_APP_SECRET}
+      bitable:
+        app_token: xxxxxxxxxxxx
+        table_id: tblxxxxxxxx
+      field_map:
+        video_file: "视频文件"
+        title: "标题"
+        description: "描述"
+        tags: "标签"
+        cover: "封面文件"
+        topic: "合集"
+        original_claim: "原创"
+        account: "账号"
+        execute_date: "执行日期"
+        publish_at: "定时发布时间"
+        status: "状态"
+        remote_url: "已发布链接"
+        error_message: "错误信息"
+      sync:
+        write_back_enabled: true
+    monitoring:
+      cookie_warn_days: 1.5
+      notifiers:
+        wecom:
+          enabled: true
+          webhook: ${WECOM_BOT_WEBHOOK}
+      notify_on:
+        - cookie_expired
+        - cookie_warning
+        - risk_control
+        - task_failed
+        - element_not_found
+        - nas_unreachable
+        - backlog_high
+        - run_summary
+      log_retention_days: 30
+      screenshot_retention_days: 90
+      backlog_warn_threshold: 20
+
+  # ---------- 淘宝光合 ----------
+  taobao_guanghe:
+    scheduler:
+      daily_cron_hour: 10
+      daily_cron_minute: 0
+    publisher:
+      headless: false
+      upload_timeout_seconds: 600
+      step_pause_seconds: [1, 3]
+      max_concurrent_accounts: 1
+    feishu:
+      enabled: true
+      app_id: cli_yyyyyyyyyy
+      app_secret: ${FEISHU_APP_SECRET_TAOBAO}
+      bitable:
+        app_token: yyyyyyyyyyyy
+        table_id: tbl_yyyyyyyy
+      field_map:
+        video_file: "视频文件"
+        title: "标题"
+        description: "描述"
+        topic: "话题活动"
+        product_ids: "商品ID"
+        execute_date: "执行日期"
+        publish_at: "定时发布时间"
+        declaration: "创作者声明"
+        ai_optimize: "AI优化"
+        account: "账号"
+        status: "状态"
+        remote_url: "已发布链接"
+        error_message: "错误信息"
+    monitoring:
+      cookie_warn_days: 1.5
+      notifiers:
+        wecom:
+          enabled: true
+          webhook: ${WECOM_BOT_WEBHOOK_TAOBAO}
+      notify_on:
+        - cookie_expired
+        - risk_control
+        - task_failed
+        - element_not_found
+        - nas_unreachable
+      backlog_warn_threshold: 20
+      log_retention_days: 30
 
 # ============== Web UI ==============
 webui:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import random
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -33,6 +32,7 @@ from wxsp.feishu import FeishuApiError, make_client, writeback_row
 from wxsp.models import Account, Task, Video
 from wxsp.nas import cleanup_tmp, stage_to_tmp
 from wxsp.notify import NotifyEvent, error_type_cn, notify, step_cn
+from wxsp.platforms.base import PublishResult
 
 # error_type → (notify type, level, 中文标题)
 _NOTIFY_BY_ERROR: dict[str, tuple[str, str, str]] = {
@@ -45,18 +45,6 @@ _NOTIFY_BY_ERROR: dict[str, tuple[str, str, str]] = {
 
 class AlreadyClaimed(Exception):
     """task 已被其它 worker 占用 / 不在可执行状态 —— claim_task 返回 False。"""
-
-
-@dataclass
-class PublishResult:
-    task_id: int
-    ok: bool
-    dry_run: bool
-    remote_url: str | None = None
-    remote_video_id: str | None = None
-    error_type: str | None = None
-    error_msg: str | None = None
-    screenshots: list[str] = field(default_factory=list)
 
 
 def screenshot(

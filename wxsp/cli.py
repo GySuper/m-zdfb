@@ -88,7 +88,7 @@ def login(account_id: str = typer.Argument(..., help="账号 ID")) -> None:
         from wxsp.platforms.taobao_guanghe import TaobaoGuanghePublisher
 
         typer.echo(f"[wxsp] 打开浏览器,请在弹出窗口中登录淘宝光合 {account_id}(最长 5 分钟)...")
-        settings = load_settings()
+        settings = load_settings(platform=account_platform)
         pub = TaobaoGuanghePublisher()
         try:
             is_logged_in = pub.login(account, settings)
@@ -201,7 +201,9 @@ def accounts_resume(account_id: str = typer.Argument(..., help="账号 ID")) -> 
 
 
 @app.command("doctor")
-def doctor() -> None:
+def doctor(
+    platform: str = typer.Option("tencent_channel", "--platform", "-p", help="目标平台"),
+) -> None:
     """健康检查:账号 / Cookie + NAS + 飞书 API。"""
 
     # cookie_checker 注入点:生产用 wxsp.browser.check_cookie(打开浏览器);测试可 monkeypatch
@@ -210,7 +212,7 @@ def doctor() -> None:
     def cookie_checker(account_id: str, user_data_dir: Path) -> bool:
         return check_cookie(user_data_dir, timeout_ms=15_000, account_id=account_id)
 
-    settings = load_settings()
+    settings = load_settings(platform=platform)
     warn_threshold = timedelta(days=settings.monitoring.cookie_warn_days)
     cookie_failed = False
 
@@ -317,7 +319,7 @@ def sync(
     ),
 ) -> None:
     """立即拉一次飞书 Bitable,执行入库 / 错误回写。"""
-    settings = load_settings()
+    settings = load_settings(platform=platform)
     feishu_cfg = settings.feishu
     if feishu_cfg is None or not feishu_cfg.enabled:
         typer.echo(f"[wxsp] 平台 {platform} 飞书未启用,跳过 sync。")
@@ -351,7 +353,7 @@ def run(
     ),
 ) -> None:
     """执行任务。三选一:--task-id 单条 / --today 跑今天 / --daemon 起 cron。"""
-    settings = load_settings()
+    settings = load_settings(platform=platform or "tencent_channel")
 
     if task_id is not None:
         typer.echo(f"[wxsp] 跑 task {task_id}{' (dry-run)' if dry_run else ''}...")

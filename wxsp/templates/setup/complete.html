@@ -4,6 +4,7 @@
 <p>检查下面的摘要,确认无误后点完成。</p>
 
 <div class="summary-list" style="margin: 20px 0;">
+  <div><strong>平台:</strong> {{ summary.platform }}</div>
   <div><strong>飞书 app_id:</strong> {{ summary.feishu_app_id_masked }}</div>
   <div><strong>NAS 根:</strong> {{ summary.nas_root }}</div>
   <div><strong>企微告警:</strong> {{ '启用' if summary.wecom_enabled else '未启用' }}</div>

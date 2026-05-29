@@ -51,20 +51,18 @@
             {% if vm.accounts %}
               <table class="account-cfg-table">
                 <thead>
-                  <tr><th>账号 ID</th><th>显示名</th><th>平台</th><th>状态</th><th>日上限</th><th>视频检索根</th><th>操作</th></tr>
+                  <tr><th>账号 ID</th><th>显示名</th><th>状态</th><th>日上限</th><th>视频检索根</th><th>操作</th></tr>
                 </thead>
                 <tbody>
                   {% for aid, a in vm.accounts.items() %}
-                    {% set ac_platform = a.get("platform", "tencent_channel") or "tencent_channel" %}
                     <tr>
                       <td><code>{{ aid }}</code></td>
                       <td>{{ a.display_name }}</td>
-                      <td><span class="badge platform-badge">{{ platform_cn(ac_platform) }}</span></td>
                       <td>{% if a.enabled %}<span class="badge ok">启用</span>{% else %}<span class="badge mute">禁用</span>{% endif %}</td>
                       <td class="muted">{{ a.daily_limit }}</td>
                       <td class="text-xs muted" style="max-width: 240px; overflow: hidden; text-overflow: ellipsis;"><code>{{ a.video_search_root }}</code></td>
                       <td class="nowrap">
-                        <button type="button" class="btn-sm" onclick='openAccountModal({{ {"id": aid, "display_name": a.display_name, "enabled": a.enabled, "daily_limit": a.daily_limit, "video_search_root": a.video_search_root, "cover_search_root": a.cover_search_root, "platform": ac_platform} | tojson }})'>编辑</button>
+                        <button type="button" class="btn-sm" onclick='openAccountModal({{ {"id": aid, "display_name": a.display_name, "enabled": a.enabled, "daily_limit": a.daily_limit, "video_search_root": a.video_search_root, "cover_search_root": a.cover_search_root} | tojson }})'>编辑</button>
                         <form method="post" action="/config/accounts/{{ aid }}/delete" style="display:inline;"
                               onsubmit="return confirm('确认删除账号 {{ aid }}?(配置中的条目会被移除,Chrome profile 目录不会自动删除)');">
                           <button class="btn-sm danger" type="submit">删除</button>
@@ -93,6 +91,7 @@
           <p class="cfg-section-desc">浏览器自动化的行为参数。除非了解平台风控规则,否则保持默认。</p>
         </div>
         <form method="post" action="/config/section/publisher" class="cfg-form" data-section="publisher">
+          <input type="hidden" name="platform" value="{{ platform }}">
           <div class="card">
             <div class="card-body">
               <div class="cfg-row">
@@ -150,6 +149,7 @@
           <p class="cfg-section-desc">每天到点自动同步飞书 + 跑当日任务。机器没开会自动跳过这次。</p>
         </div>
         <form method="post" action="/config/section/scheduler" class="cfg-form" data-section="scheduler">
+          <input type="hidden" name="platform" value="{{ platform }}">
           <div class="card">
             <div class="card-body">
               <div class="cfg-row">
@@ -194,6 +194,7 @@
           <p class="cfg-section-desc">飞书 Bitable 提供任务来源,NAS 存放视频。这两个不通,工具就跑不起来。</p>
         </div>
         <form method="post" action="/config/section/feishu" class="cfg-form" data-section="feishu">
+          <input type="hidden" name="platform" value="{{ platform }}">
           <div class="card">
             <div class="card-header"><h2>飞书 Bitable</h2></div>
             <div class="card-body">
@@ -288,6 +289,7 @@
           <p class="cfg-section-desc">出错时往企微推消息。任务成功不通知(80 条/天会刷屏)。</p>
         </div>
         <form method="post" action="/config/section/monitoring" class="cfg-form" data-section="monitoring">
+          <input type="hidden" name="platform" value="{{ platform }}">
           <div class="card">
             <div class="card-body">
               <div class="cfg-row">
@@ -313,7 +315,7 @@
                   </div>
                   <button type="button" class="btn-sm"
                           hx-post="/config/test-wecom"
-                          hx-include="[name='mon_wecom_webhook']"
+                          hx-include="[name='mon_wecom_webhook'], [name='platform']"
                           hx-target="#wecom-test-result"
                           hx-swap="innerHTML"
                           hx-indicator="#wecom-test-spinner">测试推送</button>
@@ -379,6 +381,7 @@
           <p class="cfg-section-desc">数据/日志目录、时区、Web UI 端口等基础设置,日常不需要改。</p>
         </div>
         <form method="post" action="/config/section/system" class="cfg-form" data-section="system">
+          <input type="hidden" name="platform" value="{{ platform }}">
           <div class="card">
             <div class="card-header"><h2>路径 / 时区</h2></div>
             <div class="card-body">
@@ -458,6 +461,7 @@
           <p class="cfg-section-desc">飞书表里的中文字段名 → 工具内部英文标识。99% 用户不需要改。</p>
         </div>
         <form method="post" action="/config/section/fieldmap" class="cfg-form" data-section="fieldmap">
+          <input type="hidden" name="platform" value="{{ platform }}">
           <details class="card">
             <summary class="card-header" style="cursor: pointer; user-select: none;">
               <h2>展开 {{ field_map_keys|length }} 个字段</h2>
@@ -508,16 +512,6 @@
             <label class="switch"><input type="checkbox" name="enabled" checked><span class="slider"></span></label>
           </div>
           <span class="cfg-hint">禁用后,该账号的任务被 worker 跳过</span>
-        </div>
-        <div class="cfg-row">
-          <label>平台</label>
-          <div class="cfg-control">
-            <select name="platform">
-              <option value="tencent_channel">视频号</option>
-              <option value="taobao_guanghe">淘宝光合</option>
-            </select>
-          </div>
-          <span class="cfg-hint">该账号所属的发布平台</span>
         </div>
         <div class="cfg-row">
           <label>日发布上限</label>
@@ -771,22 +765,20 @@
 
     function openAccountModal(data) {
       // data = undefined → 添加(ID 由服务端生成);data = {id, ...} → 编辑
+      const platformParam = new URLSearchParams(window.location.search).get('platform') || 'tencent_channel';
       modalForm.reset();
       if (data) {
         modalTitle.textContent = '编辑账号 · ' + data.id;
-        modalForm.action = '/config/accounts/' + encodeURIComponent(data.id) + '/update';
+        modalForm.action = '/config/accounts/' + encodeURIComponent(data.id) + '/update?platform=' + encodeURIComponent(platformParam);
         modalForm.elements['display_name'].value = data.display_name || '';
         modalForm.elements['enabled'].checked = !!data.enabled;
         modalForm.elements['daily_limit'].value = data.daily_limit ?? 20;
         modalForm.elements['video_search_root'].value = data.video_search_root || '';
         modalForm.elements['cover_search_root'].value = data.cover_search_root || '';
-        if (data.platform && modalForm.elements['platform']) {
-          modalForm.elements['platform'].value = data.platform;
-        }
         submitBtn.textContent = '保存修改';
       } else {
         modalTitle.textContent = '添加账号';
-        modalForm.action = '/config/accounts/add';
+        modalForm.action = '/config/accounts/add?platform=' + encodeURIComponent(platformParam);
         submitBtn.textContent = '添加账号';
       }
       modal.showModal();

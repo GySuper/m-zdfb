@@ -289,7 +289,7 @@ def requeue_task(
 
 
 @router.post("/tasks/run-today", response_class=HTMLResponse)
-def run_today(settings: Settings = Depends(get_settings)) -> HTMLResponse:
+def run_today(request: Request, settings: Settings = Depends(get_settings)) -> HTMLResponse:
     """先在路由内同步飞书(失败弹窗 + 不发布),再 spawn 发布循环异步跑。
 
     设计:
@@ -299,6 +299,7 @@ def run_today(settings: Settings = Depends(get_settings)) -> HTMLResponse:
       失败细节走 publisher 自己的截图/告警,UI 显示"已开始跑"。
     - _run_today_running 防并发触发;sync 还在跑时第二次点会被 lock 拒。
     """
+    platform = getattr(request.state, "current_platform", "tencent_channel") or "tencent_channel"
     global _run_today_running
     with _run_today_lock:
         if _run_today_running:
@@ -309,7 +310,7 @@ def run_today(settings: Settings = Depends(get_settings)) -> HTMLResponse:
         try:
             from wxsp.sync import sync_now
 
-            sync_result = sync_now(settings) if settings.feishu.enabled else None
+            sync_result = sync_now(settings, platform=platform) if settings.feishu.enabled else None
         except Exception as exc:
             logger.exception(f"[web/run-today] sync_now 挂了,放弃发布: {exc}")
             return HTMLResponse(
@@ -324,7 +325,7 @@ def run_today(settings: Settings = Depends(get_settings)) -> HTMLResponse:
         def _run_and_release() -> None:
             global _run_today_running
             try:
-                _run_today_pending(settings)
+                _run_today_pending(settings, platform=platform)
             finally:
                 with _run_today_lock:
                     _run_today_running = False
@@ -367,11 +368,11 @@ def _run_publish(task_id: int, settings: Settings) -> None:
     publish(task_id, settings=settings)
 
 
-def _run_today_pending(settings: Settings) -> None:
+def _run_today_pending(settings: Settings, *, platform: str = "tencent_channel") -> None:
     """发布部分(sync 在路由里已经做过,这里跳过避免重复)。"""
     from wxsp.scheduler import run_today_pending
 
-    run_today_pending(settings, do_sync=False)
+    run_today_pending(settings, do_sync=False, platform=platform)
 
 
 def _parse_date(s: str) -> _date | None:

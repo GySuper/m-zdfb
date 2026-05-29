@@ -176,6 +176,7 @@ class PathsConfig(BaseModel):
 
 class AccountConfig(BaseModel):
     display_name: str
+    platform: str = "tencent_channel"
     enabled: bool = True
     daily_limit: int
     user_data_dir: Path

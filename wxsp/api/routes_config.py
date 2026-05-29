@@ -285,6 +285,7 @@ def _render_config(
             "notify_on_options": NOTIFY_ON_OPTIONS,
             "field_map_keys": _field_map_keys(platform or "tencent_channel"),
             "edit_account_id": edit_account_id,
+            "platform": platform or "tencent_channel",
             "platform_label": p_label,
             "all_platforms": ALL_PLATFORMS,
         },
@@ -485,7 +486,7 @@ def add_account(
     video_search_root: str = Form(...),
     cover_search_root: str = Form(...),
     enabled: bool = Form(True),
-    platform: str = Form("tencent_channel"),
+    platform: str = Query("tencent_channel"),
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
     """account_id / user_data_dir 均由系统自动生成(account_<8-hex> + 对应 profile 目录)。
@@ -608,7 +609,7 @@ def update_account(
     video_search_root: str = Form(...),
     cover_search_root: str = Form(...),
     enabled: bool = Form(False),
-    platform: str = Form("tencent_channel"),
+    platform: str = Query("tencent_channel"),
 ) -> RedirectResponse:
     """编辑账号(account_id 和 user_data_dir 不可改:它们与 chrome profile 强绑定)。"""
     display_name = display_name.strip()
@@ -685,9 +686,9 @@ def _apply_and_save(
         errors = _validate_dict(data)
         if errors:
             msg = f"保存失败: {'; '.join(errors)}"
-            return RedirectResponse(f"/config?flash={msg}", status_code=303)
+            return RedirectResponse(f"/config?flash={msg}&platform={platform}", status_code=303)
         _save_yaml(data, platform=platform)
-    return RedirectResponse(f"/config?flash={flash_ok}", status_code=303)
+    return RedirectResponse(f"/config?flash={flash_ok}&platform={platform}", status_code=303)
 
 
 @router.post("/config/section/publisher")
@@ -698,6 +699,7 @@ def save_publisher(
     pub_step_pause_max: float = Form(...),
     pub_screenshot_on_error: bool = Form(False),
     pub_max_concurrent: int = Form(...),
+    platform: str = Form("tencent_channel"),
 ) -> RedirectResponse:
     def apply(data: dict[str, Any]) -> None:
         data["publisher"] = {
@@ -708,7 +710,7 @@ def save_publisher(
             "max_concurrent_accounts": pub_max_concurrent,
         }
 
-    return _apply_and_save("✓ 发布规则已保存", apply)
+    return _apply_and_save("✓ 发布规则已保存", apply, platform=platform)
 
 
 @router.post("/config/section/scheduler")
@@ -717,6 +719,7 @@ def save_scheduler(
     sched_hour: int = Form(...),
     sched_minute: int = Form(...),
     sched_strategy: str = Form(...),
+    platform: str = Form("tencent_channel"),
 ) -> RedirectResponse:
     def apply(data: dict[str, Any]) -> None:
         data["scheduler"] = {
@@ -726,7 +729,7 @@ def save_scheduler(
             "strategy": sched_strategy,
         }
 
-    return _apply_and_save("✓ 调度时间已保存", apply)
+    return _apply_and_save("✓ 调度时间已保存", apply, platform=platform)
 
 
 @router.post("/config/section/feishu")
@@ -741,6 +744,7 @@ def save_feishu(
     # path_aliases:两个平行 list,zip 后过滤空对(运营点了 + 但没填就提交也不会落进 yaml)
     path_alias_key: list[str] = Form(default_factory=list),
     path_alias_value: list[str] = Form(default_factory=list),
+    platform: str = Form("tencent_channel"),
 ) -> RedirectResponse:
     aliases = _collect_path_aliases(path_alias_key, path_alias_value)
 
@@ -763,7 +767,7 @@ def save_feishu(
             "sync": {"write_back_enabled": feishu_sync_writeback},
         }
 
-    return _apply_and_save("✓ 连接服务已保存", apply)
+    return _apply_and_save("✓ 连接服务已保存", apply, platform=platform)
 
 
 def _collect_path_aliases(keys: list[str], values: list[str]) -> dict[str, str]:
@@ -789,6 +793,7 @@ def save_monitoring(
     mon_log_retention_days: int = Form(30),
     mon_screenshot_retention_days: int = Form(90),
     mon_backlog_warn_threshold: int = Form(20),
+    platform: str = Form("tencent_channel"),
 ) -> RedirectResponse:
     def apply(data: dict[str, Any]) -> None:
         old_wecom = data.get("monitoring", {}).get("notifiers", {}).get("wecom", {})
@@ -806,7 +811,7 @@ def save_monitoring(
             "backlog_warn_threshold": mon_backlog_warn_threshold,
         }
 
-    return _apply_and_save("✓ 通知告警已保存", apply)
+    return _apply_and_save("✓ 通知告警已保存", apply, platform=platform)
 
 
 @router.post("/config/section/system")
@@ -817,6 +822,7 @@ def save_system(
     webui_host: str = Form(...),
     webui_port: int = Form(...),
     webui_open_browser: bool = Form(False),
+    platform: str = Form("tencent_channel"),
 ) -> RedirectResponse:
     def apply(data: dict[str, Any]) -> None:
         data["app"] = {
@@ -830,7 +836,7 @@ def save_system(
             "open_browser_on_start": webui_open_browser,
         }
 
-    return _apply_and_save("✓ 系统设置已保存", apply)
+    return _apply_and_save("✓ 系统设置已保存", apply, platform=platform)
 
 
 @router.post("/config/default-platform")
@@ -859,6 +865,7 @@ def save_fieldmap(
     feishu_fm_status: str = Form(...),
     feishu_fm_remote_url: str = Form(...),
     feishu_fm_error_message: str = Form(...),
+    platform: str = Form("tencent_channel"),
 ) -> RedirectResponse:
     def apply(data: dict[str, Any]) -> None:
         feishu = data.setdefault("feishu", {})
@@ -881,14 +888,16 @@ def save_fieldmap(
             "error_message": feishu_fm_error_message,
         }
 
-    return _apply_and_save("✓ 字段映射已保存", apply)
+    return _apply_and_save("✓ 字段映射已保存", apply, platform=platform)
 
 
 # ---------- 通知告警:测试推送 ----------
 
 
 @router.post("/config/test-wecom", response_class=HTMLResponse)
-def test_wecom(mon_wecom_webhook: str = Form("")) -> HTMLResponse:
+def test_wecom(
+    mon_wecom_webhook: str = Form(""), platform: str = Form("tencent_channel")
+) -> HTMLResponse:
     """企微测试推送:表单 webhook 为空 → 用 config.yaml 已存的;
     支持 ${ENV_VAR} 引用展开;真发一条 markdown 给 webhook;结果以片段返回,inline 展示。
     """
@@ -897,7 +906,7 @@ def test_wecom(mon_wecom_webhook: str = Form("")) -> HTMLResponse:
     submitted = (mon_wecom_webhook or "").strip()
     if not submitted:
         # 用户没改密码框 → 用磁盘里已存的(可能是 ${ENV} 或明文)
-        disk_data = _load_raw_yaml()
+        disk_data = _load_raw_yaml(platform)
         submitted = (
             disk_data.get("monitoring", {}).get("notifiers", {}).get("wecom", {}).get("webhook", "")
             or ""

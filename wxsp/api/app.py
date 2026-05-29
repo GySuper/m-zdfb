@@ -7,8 +7,10 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from urllib.parse import parse_qs, urlparse
 
 from apscheduler.schedulers.base import BaseScheduler  # type: ignore[import-untyped]
+from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-untyped]
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
 from loguru import logger
@@ -96,14 +98,36 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
             try:
                 scheduler = make_scheduler(settings, blocking=False)
-                scheduler.start()
                 if settings.scheduler.enabled:
-                    logger.info(
-                        f"[api] 每日 cron 已注册:"
-                        f"{settings.scheduler.daily_cron_hour:02d}:"
-                        f"{settings.scheduler.daily_cron_minute:02d} "
-                        f"({settings.app.timezone}) 跑 run_today_pending"
-                    )
+                    # 发现所有已配置的平台,注册 per-platform cron job
+                    from wxsp.config import ALL_PLATFORMS
+                    from wxsp.config import load_settings as _load
+                    from wxsp.scheduler import _daily_cron
+
+                    for pkey in ALL_PLATFORMS:
+                        try:
+                            if not get_config_path(pkey).exists():
+                                continue
+                            plat_cfg = _load(platform=pkey)
+                            sched = plat_cfg.scheduler
+                            scheduler.add_job(
+                                lambda p=pkey: _daily_cron(p, _load(platform=p)),
+                                CronTrigger(
+                                    hour=sched.daily_cron_hour,
+                                    minute=sched.daily_cron_minute,
+                                    timezone=plat_cfg.app.timezone,
+                                ),
+                                id=f"daily_{pkey}",
+                                name=f"[{pkey}] daily sync + run",
+                            )
+                            logger.info(
+                                f"[api] 平台 [{pkey}] cron:每日 "
+                                f"{sched.daily_cron_hour:02d}:{sched.daily_cron_minute:02d} "
+                                f"({plat_cfg.app.timezone}) sync + run_today_pending"
+                            )
+                        except Exception as exc:
+                            logger.warning(f"[api] 平台 [{pkey}] cron 注册失败: {exc}")
+                scheduler.start()
             except Exception as exc:
                 logger.error(f"[api] scheduler 启动失败,定时任务将不会触发: {exc}")
                 scheduler = None
@@ -157,9 +181,16 @@ def create_app() -> FastAPI:
                 target = f"{path}?{qs}" if qs else f"{path}?platform={default_p}"
                 return _Redir(url=target, status_code=302)
             else:
-                # POST/DELETE etc: just set the state without redirecting
+                # POST/DELETE etc: try to infer platform from Referer
+                referer = request.headers.get("Referer", "")
+                ref_platform = None
+                if referer and "?" in referer:
+                    ref_qs = parse_qs(urlparse(referer).query)
+                    p_vals = ref_qs.get("platform", [])
+                    if p_vals and p_vals[0] in platforms:
+                        ref_platform = p_vals[0]
                 request.state.platforms = platforms
-                request.state.current_platform = default_p
+                request.state.current_platform = ref_platform or default_p
                 request.state.has_multiple_platforms = len(platforms) > 1
                 return await call_next(request)
             request.state.platforms = platforms

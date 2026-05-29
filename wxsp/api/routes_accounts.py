@@ -187,7 +187,7 @@ def _login_runner(account_id: str, user_data_dir: Path) -> None:
 
 
 @router.post("/accounts/sync", response_class=HTMLResponse)
-def trigger_sync(settings: Settings = Depends(get_settings)) -> HTMLResponse:
+def trigger_sync(request: Request, settings: Settings = Depends(get_settings)) -> HTMLResponse:
     """同步执行飞书 Bitable sync;返回 HTML 片段(HTMX 用)。
 
     设计:
@@ -199,6 +199,7 @@ def trigger_sync(settings: Settings = Depends(get_settings)) -> HTMLResponse:
 
     并发:_sync_lock 串行。抢不到 = 已有同步在跑,返回提示不重做。
     """
+    platform = getattr(request.state, "current_platform", "tencent_channel") or "tencent_channel"
     if not settings.feishu.enabled:
         return HTMLResponse(_fragment("warn", "飞书未启用,跳过同步"))
     if not _sync_lock.acquire(blocking=False):
@@ -206,7 +207,7 @@ def trigger_sync(settings: Settings = Depends(get_settings)) -> HTMLResponse:
     try:
         from wxsp.sync import sync_now
 
-        result = sync_now(settings)
+        result = sync_now(settings, platform=platform)
     except Exception as exc:
         logger.exception(f"[web/feishu-sync] {exc}")
         msg = f"飞书同步失败:{exc}"

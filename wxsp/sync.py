@@ -138,6 +138,7 @@ def sync_now(
             task = Task(
                 video_id=row.record_id,
                 account_id=v_result.account_id or "",
+                platform=platform,
                 execute_date=v_result.execute_date,
                 publish_at=v_result.publish_at,
                 status="pending",

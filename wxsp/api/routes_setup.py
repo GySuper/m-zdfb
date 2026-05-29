@@ -22,6 +22,7 @@ router = APIRouter(prefix="/setup")
 
 _TOTAL_STEPS = 5
 _STEP_KEYS = {
+    1: "platform",
     2: "feishu",
     3: "nas",
     4: "notify",
@@ -67,9 +68,10 @@ def render_step(step: int, request: Request) -> HTMLResponse:
         5: "setup/complete.html",
     }[step]
 
-    # 预填:若向导尚未填飞书但本地已有 config.yaml,用其 feishu 配置做初始值
+    # 预填:若向导尚未填飞书但本地已有对应平台 config,用其 feishu 配置做初始值
     if step == 2 and "feishu" not in data:
-        _prefill_from_existing_config(data)
+        plat = data.get("platform", "tencent_channel")
+        _prefill_from_existing_config(data, platform=plat)
 
     ctx: dict[str, Any] = {
         "step": step,
@@ -77,9 +79,12 @@ def render_step(step: int, request: Request) -> HTMLResponse:
         "data": data,
     }
     if step == 1:
+        from wxsp.config import ALL_PLATFORMS, platform_label
+
         ctx["data_dir"] = str(wxsp_config.get_user_data_dir())
         ctx["logs_dir"] = str(wxsp_config.get_user_logs_dir())
         ctx["self_check"] = _run_self_check()
+        ctx["platforms"] = [{"key": p, "label": platform_label(p)} for p in ALL_PLATFORMS]
     if step == 5:
         ctx["summary"] = _build_summary(data)
     return templates.TemplateResponse(request, template_name, ctx)
@@ -109,9 +114,11 @@ def _run_self_check() -> list[dict[str, Any]]:
     return checks
 
 
-def _prefill_from_existing_config(data: dict[str, Any]) -> None:
-    """若本地已有 config.yaml,将其飞书配置预填到向导,降低重复输入。"""
-    config_path = wxsp_config.get_config_path()
+def _prefill_from_existing_config(
+    data: dict[str, Any], *, platform: str = "tencent_channel"
+) -> None:
+    """若本地已有对应平台 config,将其飞书配置预填到向导,降低重复输入。"""
+    config_path = wxsp_config.get_config_path(platform)
     if not config_path.exists():
         return
     try:
@@ -131,15 +138,25 @@ def _prefill_from_existing_config(data: dict[str, Any]) -> None:
 
 
 def _build_summary(data: dict[str, Any]) -> dict[str, Any]:
+    from wxsp.config import platform_label
+
     feishu = data.get("feishu", {})
     notify = data.get("notify", {})
+    plat = data.get("platform", "tencent_channel")
     return {
+        "platform": platform_label(plat),
         "feishu_app_id_masked": feishu.get("app_id", "")[:6] + "..."
         if feishu.get("app_id")
         else "(未填)",
         "nas_root": data.get("nas", {}).get("nas_root", "(未填)"),
         "wecom_enabled": bool(notify.get("webhook")),
     }
+
+
+@router.post("/step/1", response_model=None)
+def submit_platform(request: Request, platform: str = Form(...)) -> StarletteResponse:
+    _get_wizard_data(request)["platform"] = platform.strip()
+    return RedirectResponse(url="/setup/step/2", status_code=302)
 
 
 @router.post("/step/2", response_model=None)
@@ -209,8 +226,9 @@ def complete(request: Request) -> RedirectResponse:
             url=f"/setup/step/{_last_completed_step(data) + 1}", status_code=302
         )
 
-    config = _render_config(data)
-    config_path = wxsp_config.get_config_path()
+    platform = data.get("platform", "tencent_channel")
+    config = _render_config(data, platform=platform)
+    config_path = wxsp_config.get_config_path(platform)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
@@ -220,13 +238,44 @@ def complete(request: Request) -> RedirectResponse:
     return RedirectResponse(url="/accounts", status_code=302)
 
 
-def _render_config(data: dict[str, Any]) -> dict[str, Any]:
+def _render_config(data: dict[str, Any], *, platform: str = "tencent_channel") -> dict[str, Any]:
     feishu = data["feishu"]
     nas_root = data["nas"]["nas_root"]
     webhook = data.get("notify", {}).get("webhook", "")
 
     data_dir = wxsp_config.get_user_data_dir()
     logs_dir = wxsp_config.get_user_logs_dir()
+
+    # Per-platform field_map
+    field_map = {
+        "video_file": "视频文件",
+        "title": "标题",
+        "description": "描述",
+        "account": "账号",
+        "execute_date": "执行日期",
+        "publish_at": "定时发布时间",
+        "status": "状态",
+        "remote_url": "已发布链接",
+        "error_message": "错误信息",
+    }
+    if platform == "taobao_guanghe":
+        field_map.update(
+            {
+                "topic": "话题活动",
+                "product_ids": "商品ID",
+                "declaration": "创作者声明",
+                "ai_optimize": "AI优化",
+            }
+        )
+    else:
+        field_map.update(
+            {
+                "tags": "标签",
+                "cover": "封面文件",
+                "topic": "合集",
+                "original_claim": "原创",
+            }
+        )
 
     # 账号不在向导里建,留空 dict;运营装完后到 /config 加账号(那里自动生成 ID + 同步飞书)。
     return {
@@ -250,6 +299,7 @@ def _render_config(data: dict[str, Any]) -> dict[str, Any]:
             "app_id": feishu["app_id"],
             "app_secret": feishu["app_secret"],
             "bitable": {"app_token": feishu["app_token"], "table_id": feishu["table_id"]},
+            "field_map": field_map,
             "sync": {"write_back_enabled": True},
         },
         "monitoring": {

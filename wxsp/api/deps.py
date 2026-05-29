@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
+from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session
 
@@ -35,8 +36,9 @@ templates.env.globals.update(
 _db_initialized = False
 
 
-def get_settings() -> Settings:
-    return load_settings(platform="tencent_channel")
+def get_settings(request: Request) -> Settings:
+    platform = getattr(request.state, "current_platform", "tencent_channel") or "tencent_channel"
+    return load_settings(platform=platform)
 
 
 def get_session() -> Iterator[Session]:

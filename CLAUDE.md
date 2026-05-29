@@ -162,7 +162,8 @@ wxsp/platforms/
 
 - `Account.platform` / `Task.platform` / `Event.platform` 标识所属平台
 - Dashboard / Tasks / Accounts / Plans 路由按 `?platform=` 查询参数过滤
-- 中间件 `platform_context` 发现可用平台,对 GET 请求无 `?platform=` 时自动重定向到默认平台
+- 中间件 `platform_context` 发现可用平台,对 GET 请求无 `?platform=` 时自动重定向到默认平台;对 POST 请求从 Referer 头解析当前平台
+- `get_settings(request)` 依赖从 `request.state.current_platform` 读取平台,路由中写 `settings: Settings = Depends(get_settings)` 即可拿到当前平台配置
 - 默认平台存储在 `data/default_platform`(共享文件,全局设置,非 per-platform 配置)
 
 ### Web UI 平台切换
@@ -582,7 +583,7 @@ wxsp web [--port p]                  启动 Web UI(开浏览器),等价于 run -
 3. **Tasks** — 任务列表带筛选(执行日期/账号/状态),点击进详情;**手动触发跑今天**按钮
 4. **TaskDetail** — 单任务全信息,每步耗时,截图缩略图,重试按钮(单条加急 fire)
 5. **Plans** — 任意日期的任务清单(按 execute_date 查询;只读)
-6. **Config** — 编辑 config.yaml(表单 + 高级 YAML 模式),敏感字段掩码;**新增账号**(ID 工具自动生成 + display_name 重名预检 + 自动推送到飞书账号字段);**企微测试推送**按钮(展开 ENV + https-only 校验,实发一条 markdown)
+6. **Config** — 编辑 `config_{platform}.yaml`(表单 + 高级 YAML 模式),敏感字段掩码;**新增账号**(ID 工具自动生成 + display_name 重名预检 + 自动推送到飞书账号字段,账号自动归属当前平台无需手动选);**企微测试推送**按钮(展开 ENV + https-only 校验,实发一条 markdown)
 7. **Logs** — SSE 实时日志流(按账号/任务/级别过滤)
 
 ### HTMX 操作交互约定(本仓库统一)
@@ -824,7 +825,7 @@ M0 脚手架 ──→ M1 数据层 ──┬──→ M2 浏览器+登录 ─�
 | M8 | Web UI | FastAPI + Jinja2 + HTMX:Dashboard / Accounts / Tasks / TaskDetail / Logs(SSE) / Config + 扫码二维码嵌入 + 手动触发按钮 |
 | M9 | 监控 + 归档 | Dashboard 显示积压 + 重新入队按钮 + 日志/截图清理 |
 | M10 | 部署 + 文档 | README |
-| M11 | 安装器 + 设置向导 | Nuitka 编译 + .dmg/.exe 出包 + Web UI **5 页向导**(账号管理放 /config,不进向导) |
+| M11 | 安装器 + 设置向导 | Nuitka 编译 + .dmg/.exe 出包 + Web UI **5 页向导**(第 1 步选平台→按平台生成对应 field_map→账号管理放 /config,不进向导) |
 
 **合计 ~22.5 工作日**。**MVP 截止点 = M7 完成**(端到端跑通:飞书 → 发布 → 通知);M8-M11 是体验/运维优化,生产前不能跳。
 

@@ -85,8 +85,12 @@ class NasFinder(Protocol):
 # 常量
 # ---------------------------------------------------------------------------
 
-_TITLE_MIN = 16
 _TITLE_MAX = 30
+# 视频号要求 16 字以上,淘宝光合无此限制
+_TITLE_MIN_BY_PLATFORM: dict[str, int] = {
+    "tencent_channel": 16,
+    "taobao_guanghe": 1,
+}
 _TAGS_MAX = 5
 _VIDEO_EXTENSIONS = {".mp4", ".mov"}
 _VIDEO_MAX_BYTES = 4 * 1024**3  # 4 GiB
@@ -107,6 +111,7 @@ def validate(
     now: datetime,
     nas_finder: NasFinder,
     active_accounts: dict[str, str],
+    platform: str = "tencent_channel",
 ) -> ValidationResult:
     """逐字段校验,错误全部收集。所有规则独立运行,不在第一个错就 return。
 
@@ -123,7 +128,7 @@ def validate(
 
     errors: list[FieldError] = []
 
-    title = _check_title(row.fields, fm.title, errors)
+    title = _check_title(row.fields, fm.title, errors, platform=platform)
     tags = _check_tags(row.fields, fm.tags, errors)
     description = _get_str(row.fields.get(fm.description))
     topic = _get_str(row.fields.get(fm.topic))
@@ -139,7 +144,7 @@ def validate(
     publish_at = _check_publish_at(row.fields, fm.publish_at, now, execute_date, errors)
 
     # Taobao-specific fields
-    declaration_raw = row.fields.get("declaration", "")
+    declaration_raw = row.fields.get(fm.declaration, "")
     declaration = _get_str(declaration_raw) if declaration_raw else "内容无需标注"
     if not declaration:
         declaration = "内容无需标注"
@@ -155,17 +160,24 @@ def validate(
         errors.append(FieldError("创作者声明", f"'{declaration}' 不在有效选项中"))
         declaration = "内容无需标注"
 
-    ai_str = row.fields.get("ai_optimize", "")
+    ai_str = row.fields.get(fm.ai_optimize, "")
     ai_optimize = (
         str(ai_str).strip().lower() in ("true", "是", "yes", "1", "✓") if ai_str else False
     )
 
     product_ids_str = (
-        _get_str(row.fields.get("product_ids")) if row.fields.get("product_ids") else ""
+        _get_str(row.fields.get(fm.product_ids)) if row.fields.get(fm.product_ids) else ""
     )
     product_ids: list[str] = []
     if product_ids_str:
-        product_ids = [p.strip() for p in product_ids_str.split(",") if p.strip()]
+        product_ids = [
+            p.strip()
+            for p in product_ids_str.replace("，", ",").split(",")  # noqa: RUF001
+            if p.strip()
+        ]
+    if len(product_ids) > 6:
+        errors.append(FieldError("商品ID", f"{len(product_ids)} 个商品(最多 6 个)"))
+        product_ids = product_ids[:6]
 
     if errors:
         return ValidationResult(
@@ -216,16 +228,25 @@ def _is_incomplete(fields: dict[str, Any], fm: Any) -> bool:
     return False
 
 
-def _check_title(fields: dict[str, Any], field_name: str, errors: list[FieldError]) -> str | None:
+def _check_title(
+    fields: dict[str, Any],
+    field_name: str,
+    errors: list[FieldError],
+    *,
+    platform: str = "tencent_channel",
+) -> str | None:
     raw = _get_str(fields.get(field_name))
     if not raw:
         errors.append(FieldError(field=field_name, message="未指定"))
         return None
     n = len(raw)
-    if n < _TITLE_MIN or n > _TITLE_MAX:
-        errors.append(
-            FieldError(field=field_name, message=f"{n} 字(要求 {_TITLE_MIN}-{_TITLE_MAX} 字)")
-        )
+    title_min = _TITLE_MIN_BY_PLATFORM.get(platform, 16)
+    if n < title_min or n > _TITLE_MAX:
+        if title_min > 1:
+            msg = f"{n} 字(要求 {title_min}-{_TITLE_MAX} 字)"
+        else:
+            msg = f"{n} 字(最多 {_TITLE_MAX} 字)"
+        errors.append(FieldError(field=field_name, message=msg))
         return None
     return raw
 

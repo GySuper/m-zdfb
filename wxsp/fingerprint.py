@@ -230,8 +230,11 @@ def generate_fingerprint(account_id: str) -> Fingerprint:
     user_agent = rng.choice(USER_AGENTS)
     chrome_version = _extract_chrome_version(user_agent)
     screen = rng.choice(SCREEN_RESOLUTIONS)
-    # viewport 比 screen 略小,模拟"有任务栏 / 浏览器边框"的真实窗口
-    viewport = {"width": screen["width"], "height": screen["height"] - 100}
+    # viewport 比 screen 略小,模拟"有任务栏 / 浏览器边框"的真实窗口。
+    # 上限 1920 防止大分辨率指纹在小屏幕笔记本上溢出右侧。
+    vp_w = min(screen["width"], 1920)
+    vp_h = min(screen["height"] - 100, 1080)
+    viewport = {"width": vp_w, "height": vp_h}
     webgl_vendor, webgl_renderer = rng.choice(WEBGL_VENDORS)
 
     # canvas_noise:一段 32 字节随机串,后续在 toDataURL 末尾追加 → canvas 哈希唯一

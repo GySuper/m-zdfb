@@ -98,7 +98,12 @@ def login(account_id: str = typer.Argument(..., help="账号 ID")) -> None:
     else:
         typer.echo(f"[wxsp] 打开浏览器,请在弹出窗口中扫码登录 {account_id}(最长 5 分钟)...")
         try:
-            is_logged_in = check_cookie(user_data_dir, timeout_ms=300_000, account_id=account_id)
+            is_logged_in = check_cookie(
+                user_data_dir,
+                timeout_ms=300_000,
+                account_id=account_id,
+                platform=account_platform,
+            )
         except Exception as exc:
             typer.echo(f"[wxsp] 浏览器启动失败:{exc}")
             is_logged_in = None
@@ -210,7 +215,9 @@ def doctor(
     # 注意:必须把 account_id 透传给 check_cookie,否则 doctor 用"无指纹"模式开 profile,
     # 跟 publisher/login 用的"有指纹"模式不一致 → 视频号会判定"异常设备"直接踢登录。
     def cookie_checker(account_id: str, user_data_dir: Path) -> bool:
-        return check_cookie(user_data_dir, timeout_ms=15_000, account_id=account_id)
+        return check_cookie(
+            user_data_dir, timeout_ms=15_000, account_id=account_id, platform=platform
+        )
 
     settings = load_settings(platform=platform)
     warn_threshold = timedelta(days=settings.monitoring.cookie_warn_days)
@@ -450,21 +457,38 @@ def logs(
 
 
 @app.command("cleanup")
-def cleanup() -> None:
+def cleanup(
+    platform: str | None = typer.Option(
+        None, "--platform", help="平台(如 tencent_channel / taobao_guanghe),默认全部"
+    ),
+) -> None:
     """清理过保留期的日志 / 失败截图(M9)。
 
-    保留期来自 config.yaml/monitoring.log_retention_days (默认 30) +
+    保留期来自各平台 config/monitoring.log_retention_days (默认 30) +
     monitoring.screenshot_retention_days (默认 90)。daemon 启动也会自动跑一次。
     """
-    settings = load_settings()
-    report = cleanup_old_files(
-        logs_dir=settings.app.logs_dir,
-        log_retention_days=settings.monitoring.log_retention_days,
-        screenshot_retention_days=settings.monitoring.screenshot_retention_days,
+    from wxsp.config import ALL_PLATFORMS, get_config_path
+
+    platforms = (
+        [platform] if platform else [p for p in ALL_PLATFORMS if get_config_path(p).exists()]
     )
+    total_logs = 0
+    total_screenshots = 0
+    total_bytes = 0
+    for p in platforms:
+        settings = load_settings(platform=p)
+        report = cleanup_old_files(
+            logs_dir=settings.app.logs_dir,
+            log_retention_days=settings.monitoring.log_retention_days,
+            screenshot_retention_days=settings.monitoring.screenshot_retention_days,
+        )
+        total_logs += report.logs_removed
+        total_screenshots += report.screenshots_removed
+        total_bytes += report.bytes_freed
     typer.echo(
-        f"[wxsp] 清理完成: 日志 {report.logs_removed} 个 / 截图 {report.screenshots_removed} 个 "
-        f"/ 释放 {report.bytes_freed} bytes"
+        f"[wxsp] 清理完成({len(platforms)} 平台): "
+        f"日志 {total_logs} 个 / 截图 {total_screenshots} 个 "
+        f"/ 释放 {total_bytes} bytes"
     )
 
 
@@ -491,16 +515,23 @@ def web(
     # 重复 add 不会冲突(各自 sink id),最多多一行重复输出,无害。
     _logger.add(sys.stderr, level="INFO", format="{time:HH:mm:ss} | {level: <5} | {message}")
 
-    # M11 setup mode: config.yaml 不存在时,用默认参数起 Web UI,让向导接管。
+    # M11 setup mode: 无平台配置文件时,用默认参数起 Web UI,让向导接管。
     try:
-        settings = load_settings()
+        from wxsp.config import ALL_PLATFORMS
+        from wxsp.config import get_config_path as _gcp
+
+        active = [p for p in ALL_PLATFORMS if _gcp(p).exists()]
+        settings = load_settings(platform=active[0]) if active else None
+    except Exception:
+        settings = None
+
+    if settings is not None:
         typer.echo(f"[wxsp] logs_dir = {settings.app.logs_dir}")
         try:
             install_file_sink(
                 logs_dir=settings.app.logs_dir,
                 retention_days=settings.monitoring.log_retention_days,
             )
-            # 装完 sink 立刻写一条横幅,验证文件 sink 是否真在工作(frozen 模式诊断用)
             _logger.info(f"[wxsp] sink ready: file={settings.app.logs_dir} + stderr + sse")
             typer.echo(f"[wxsp] 日志已就绪,文件:{settings.app.logs_dir}/wxsp.<日期>.log")
         except Exception as exc:
@@ -508,8 +539,8 @@ def web(
         bind_host = host or settings.webui.host
         bind_port = port or settings.webui.port
         open_browser = settings.webui.open_browser_on_start and not no_browser
-    except FileNotFoundError:
-        typer.echo("[wxsp] 未发现 config.yaml,以 setup 模式启动(浏览器会跳向导)")
+    else:
+        typer.echo("[wxsp] 未发现平台配置文件,以 setup 模式启动(浏览器会跳向导)")
         bind_host = host or "127.0.0.1"
         bind_port = port or 8765
         open_browser = not no_browser

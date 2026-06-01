@@ -61,9 +61,12 @@ _ERROR_TYPE_CN: dict[str, str] = {
     "video_invalid": "视频非法",
     "upload_failed": "上传失败",
     "feishu_api_error": "飞书接口错误",
+    "topic_not_found": "话题未找到",
+    "product_not_found": "商品未找到",
     "unknown": "未知错误",
     "cookie_warning": "登录态即将过期",
     "backlog_high": "历史积压超阈值",
+    "login_required": "需重新登录",
 }
 
 _STEP_CN: dict[str, str] = {

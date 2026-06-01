@@ -113,7 +113,9 @@ def test_login_triggers_background_thread(
     """
     calls: list[tuple[str, Path]] = []
 
-    def fake_run_login(account_id: str, user_data_dir: Path) -> None:
+    def fake_run_login(
+        account_id: str, user_data_dir: Path, *, platform: str = "tencent_channel"
+    ) -> None:
         calls.append((account_id, user_data_dir))
 
     monkeypatch.setattr(routes_accounts, "_run_login", fake_run_login)
@@ -143,7 +145,9 @@ def test_login_dedups_when_already_in_flight(
     start_event = threading.Event()
     release_event = threading.Event()
 
-    def slow_run_login(account_id: str, user_data_dir: Path) -> None:
+    def slow_run_login(
+        account_id: str, user_data_dir: Path, *, platform: str = "tencent_channel"
+    ) -> None:
         start_event.set()
         release_event.wait(timeout=5.0)  # 卡住线程,模拟"还在扫码中"
 

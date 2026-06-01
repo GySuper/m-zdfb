@@ -28,12 +28,12 @@
     </div>
     <div class="page-actions">
       {% if retryable %}
-        <form method="post" action="/tasks/{{ task.id }}/retry" style="margin:0;">
+        <form method="post" action="/tasks/{{ task.id }}/retry?platform={{ request.state.current_platform }}" style="margin:0;">
           <button class="primary" type="submit">立即重试</button>
         </form>
       {% endif %}
       {% if requeueable %}
-        <form method="post" action="/tasks/{{ task.id }}/requeue" style="margin:0;">
+        <form method="post" action="/tasks/{{ task.id }}/requeue?platform={{ request.state.current_platform }}" style="margin:0;">
           <button type="submit" title="把执行日期改成今天,需再点'立即跑今天'才会真跑">入队到今天</button>
         </form>
       {% endif %}
@@ -52,7 +52,7 @@
           <div class="error-title">{{ error_type_cn(task.last_error_type) }}</div>
           <div class="error-hint">
             {% if task.last_error_type == "cookie_expired" %}
-              账号登录已失效。请到 <a href="/accounts">账号</a> 页面重新扫码登录后再重试。
+              账号登录已失效。请到 <a href="/accounts?platform={{ request.state.current_platform }}">账号</a> 页面重新扫码登录后再重试。
             {% elif task.last_error_type == "risk_control" %}
               触发了平台风控,该账号已自动暂停 24 小时。期间不要再尝试发布。
             {% elif task.last_error_type == "nas_unreachable" %}

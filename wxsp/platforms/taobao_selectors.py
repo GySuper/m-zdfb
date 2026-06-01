@@ -12,6 +12,10 @@ PUBLISH_PAGE_URL = "https://creator.guanghe.taobao.com/page/pubNew/video"
 LOGIN_URL_FRAGMENT = "login.taobao.com"
 CREATOR_HOME = "https://creator.guanghe.taobao.com"
 
+# 首页导航:发布作品 hover 后出现的下拉菜单
+PUBLISH_DROPDOWN_TRIGGER = "发布作品"
+PUBLISH_VIDEO_MENU_ITEM = "发视频"
+
 # ============== iframe ==============
 IFRAME_SELECTOR = 'iframe[title="发布器"]'
 
@@ -25,52 +29,49 @@ COVER_WAITING_TEXT = "等待视频上传"
 COVER_READY_INDICATOR = "视频封面"
 
 # ============== [7] 标题 ==============
-TITLE_INPUT = 'textbox[placeholder="加个标题让内容更吸引人"]'
+TITLE_INPUT = 'input[placeholder="加个标题让内容更吸引人"]'
 TITLE_MAX_LENGTH = 30
 
 # ============== [8] 描述 ==============
-DESCRIPTION_EDITOR = '[contenteditable="true"]'
+DESCRIPTION_EDITOR = "[data-cangjie-key]"
 DESCRIPTION_AREA = "text=展开说说"
 
 # ============== [9] 话题活动 ==============
 TOPIC_CLICK_AREA = "text=点击添加话题"
-TOPIC_DIALOG_HEADING = 'heading "话题选择"'
-TOPIC_SEARCH_INPUT = 'textbox[placeholder="输入关键词搜索"]'
-TOPIC_SEARCH_BUTTON = 'button "搜索"'
-TOPIC_CONFIRM_BUTTON = 'button "确认提交"'
-TOPIC_CLOSE_BUTTON = 'button "关闭"'
+TOPIC_DIALOG_HEADING = ".next-dialog-header"
+TOPIC_SEARCH_INPUT = 'input[placeholder*="关键词"]'
+TOPIC_SEARCH_BUTTON = 'button:has-text("搜索")'
+TOPIC_CONFIRM_BUTTON = 'button:has-text("确认提交")'
+TOPIC_CLOSE_BUTTON = 'button:has-text("取消")'
 
 # ============== [10] 关联商品 ==============
 PRODUCT_TRIGGER = "text=添加商品"
-PRODUCT_DIALOG_HEADING = 'heading "关联商品"'
-PRODUCT_SEARCH_INPUT = 'searchbox "搜索"'
-PRODUCT_SEARCH_BUTTON = 'button "搜索"'
-PRODUCT_CONFIRM_BUTTON = 'button "确定"'
-PRODUCT_CLOSE_BUTTON = 'button "关闭"'
+PRODUCT_DIALOG_HEADING = ".next-dialog-header"
+PRODUCT_SEARCH_INPUT = 'input[placeholder*="商品"]'
+PRODUCT_CONFIRM_BUTTON = 'button:has-text("确定")'
+PRODUCT_CLOSE_BUTTON = 'button:has-text("取消")'
 
 # ============== [11] 定时发布 ==============
 SCHEDULE_RADIO = "text=定时发布"
-SCHEDULE_DATE_INPUT = 'textbox "YYYY/MM/DD"'
-SCHEDULE_TIME_INPUT = 'textbox "HH:mm"'
-SCHEDULE_CONFIRM_BUTTON = 'button "确定"'
-SUBMIT_BUTTON_SCHEDULED = 'button "定时发布"'
-SUBMIT_BUTTON_IMMEDIATE = 'button "立即发布"'
+SCHEDULE_COMBOBOX = '[role="combobox"]'
+SUBMIT_BUTTON_SCHEDULED = 'button:has-text("定时发布")'
+SUBMIT_BUTTON_IMMEDIATE = 'button:has-text("立即发布")'
 
 # ============== [12] 创作者声明 ==============
 DECLARATION_RADIO_MAP = {
-    "内容无需标注": 'radio "内容无需标注"',
-    "含AI生成内容": 'radio "含AI生成内容"',
-    "含虚构演绎内容": 'radio "含虚构演绎内容"',
-    "内容为转载": 'radio "内容为转载"',
-    "个人观点，仅供参考": 'radio "个人观点，仅供参考"',
-    "内容含营销信息": 'radio "内容含营销信息"',
+    "内容无需标注": "text=内容无需标注",
+    "含AI生成内容": "text=含AI生成内容",
+    "含虚构演绎内容": "text=含虚构演绎内容",
+    "内容为转载": "text=内容为转载",
+    "个人观点，仅供参考": "text=个人观点，仅供参考",
+    "内容含营销信息": "text=内容含营销信息",
 }
 
 # ============== [13] AI优化 ==============
-AI_TOGGLE_SWITCH = "switch"
+AI_TOGGLE_SWITCH = '[role="switch"]'
 
-# ============== [14] 允许下载 ==============
-DOWNLOAD_CHECKBOX = 'radio "允许下载"'
+# ============== [14] 允许下载(radio,默认选中 → 点一下取消)
+DOWNLOAD_RADIO = "text=允许下载"
 
 # ============== 风控文案 ==============
 RISK_CONTROL_KEYWORDS = (

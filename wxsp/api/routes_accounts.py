@@ -100,13 +100,17 @@ def accounts_page(
     )
 
 
-def _redirect(flash: str) -> RedirectResponse:
-    return RedirectResponse(url=f"/accounts?flash={flash}", status_code=303)
+def _redirect(flash: str, *, platform: str = "") -> RedirectResponse:
+    qs = f"flash={flash}"
+    if platform:
+        qs += f"&platform={platform}"
+    return RedirectResponse(url=f"/accounts?{qs}", status_code=303)
 
 
 @router.post("/accounts/{account_id}/pause")
 def pause_account(
     account_id: str,
+    request: Request,
     hours: int = Form(24),
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
@@ -115,12 +119,14 @@ def pause_account(
         raise HTTPException(status_code=404, detail=f"账号 {account_id} 不存在")
     row.paused_until = datetime.now() + timedelta(hours=hours)
     session.add(row)
-    return _redirect(f"已暂停 {account_id} {hours} 小时")
+    plat = getattr(request.state, "current_platform", "") or ""
+    return _redirect(f"已暂停 {account_id} {hours} 小时", platform=plat)
 
 
 @router.post("/accounts/{account_id}/resume")
 def resume_account(
     account_id: str,
+    request: Request,
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
     row = session.get(Account, account_id)
@@ -128,16 +134,18 @@ def resume_account(
         raise HTTPException(status_code=404, detail=f"账号 {account_id} 不存在")
     row.paused_until = None
     session.add(row)
-    return _redirect(f"已恢复 {account_id}")
+    plat = getattr(request.state, "current_platform", "") or ""
+    return _redirect(f"已恢复 {account_id}", platform=plat)
 
 
 @router.post("/accounts/{account_id}/login")
 def login_account(
     account_id: str,
+    request: Request,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
-    """触发扫码登录:后台线程开 patchright,弹窗里显示视频号二维码。
+    """触发扫码登录:后台线程开 patchright,弹窗里显示平台二维码。
 
     去重:若该账号已有 login 线程在跑,**不再 spawn 第二个**,直接 redirect 提示
     去已弹出的窗口扫。原因:同一个 user_data_dir 不能被两个 chromium 同时打开,
@@ -147,7 +155,6 @@ def login_account(
     cfg = settings.accounts.get(account_id)
     if cfg is None:
         raise HTTPException(status_code=404, detail=f"账号 {account_id} 未配置")
-    # 确保 DB 里有这条记录(扫码完成后写 cookie 状态用)
     if session.get(Account, account_id) is None:
         session.add(
             Account(
@@ -157,30 +164,37 @@ def login_account(
                 daily_limit=cfg.daily_limit,
             )
         )
+    plat = getattr(request.state, "current_platform", "") or ""
+    # plat(请求上下文)优先于 AccountConfig.platform 的 Pydantic 默认值
+    # (默认值 "tencent_channel" 对淘宝账号是错的)
+    account_platform = plat or getattr(cfg, "platform", "") or "tencent_channel"
     with _login_lock:
         existing = _login_in_flight.get(account_id)
         if existing is not None and existing.is_alive():
             return _redirect(
                 f"账号 {account_id} 已在扫码中,请到已弹出的浏览器窗口扫码;"
-                "想取消可手动关掉那个窗口再重试"
+                "想取消可手动关掉那个窗口再重试",
+                platform=plat,
             )
         thread = threading.Thread(
             target=_login_runner,
-            args=(account_id, Path(cfg.user_data_dir)),
+            args=(account_id, Path(cfg.user_data_dir), account_platform),
             daemon=True,
             name=f"web-login-{account_id}",
         )
         _login_in_flight[account_id] = thread
-        thread.start()  # 必须在 lock 内 start,否则下一个请求看到 is_alive()=False 又开一个
-    return _redirect(f"已弹出浏览器,请在窗口中扫码登录 {account_id}(完成后状态自动刷新)")
+        thread.start()
+    return _redirect(
+        f"已弹出浏览器,请在窗口中扫码登录 {account_id}(完成后状态自动刷新)", platform=plat
+    )
 
 
-def _login_runner(account_id: str, user_data_dir: Path) -> None:
+def _login_runner(account_id: str, user_data_dir: Path, platform: str = "tencent_channel") -> None:
     """_run_login 的薄包装:无论成功失败,finally 里把 _login_in_flight 清掉,
     让下次 POST 能起新线程。
     """
     try:
-        _run_login(account_id, user_data_dir)
+        _run_login(account_id, user_data_dir, platform=platform)
     finally:
         with _login_lock:
             _login_in_flight.pop(account_id, None)
@@ -221,12 +235,20 @@ def trigger_sync(request: Request, settings: Settings = Depends(get_settings)) -
         _sync_lock.release()
     parts = [f"新入库 {result.accepted} 条"]
     if result.rejected:
-        parts.append(f"校验失败 {result.rejected} 条(已回写飞书)")
+        wb_note = ""
+        if result.writeback_failed > 0:
+            wb_note = f"(回写失败 {result.writeback_failed} 行,未同步到飞书)"
+        else:
+            wb_note = "(已回写飞书)"
+        parts.append(f"校验失败 {result.rejected} 条{wb_note}")
     if result.skipped_existing:
         parts.append(f"已存在 {result.skipped_existing} 条跳过")
     if result.skipped_incomplete:
         parts.append(f"未填完 {result.skipped_incomplete} 条等下次")
-    return HTMLResponse(_fragment("ok", "飞书同步完成:" + "、".join(parts)))
+    if result.writeback_failed > 0 and result.rejected == 0:
+        parts.append(f"⚠ 回写失败 {result.writeback_failed} 行")
+    level = "warn" if result.writeback_failed > 0 else "ok"
+    return HTMLResponse(_fragment(level, "飞书同步完成:" + "、".join(parts)))
 
 
 def _fragment(level: str, text: str) -> str:
@@ -240,7 +262,7 @@ def _fragment(level: str, text: str) -> str:
 # ---------- 后台 worker(不持任何 request 资源) ----------
 
 
-def _run_login(account_id: str, user_data_dir: Path) -> None:
+def _run_login(account_id: str, user_data_dir: Path, *, platform: str = "tencent_channel") -> None:
     """后台跑扫码:check_cookie 同步阻塞最长 5 分钟,完成后写 DB。"""
     from datetime import datetime as _dt
 
@@ -250,7 +272,7 @@ def _run_login(account_id: str, user_data_dir: Path) -> None:
 
     try:
         is_logged_in: bool | None = check_cookie(
-            user_data_dir, timeout_ms=300_000, account_id=account_id
+            user_data_dir, timeout_ms=300_000, account_id=account_id, platform=platform
         )
     except Exception as exc:
         logger.exception(f"[web/login] {account_id} 浏览器异常: {exc}")

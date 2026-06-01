@@ -112,7 +112,7 @@ def test_doctor_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WXSP_DB_PATH", str(tmp_path / "db.sqlite"))
     from wxsp import cli as cli_module
 
-    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
 
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0

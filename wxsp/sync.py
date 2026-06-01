@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
@@ -31,6 +32,7 @@ class SyncResult:
     skipped_existing: int = 0
     skipped_incomplete: int = 0  # 业务还没填完(4 核心字段任一空)→ 跳过 + 不回写
     rejected_details: list[tuple[str, list[FieldError]]] = field(default_factory=list)
+    writeback_failed: int = 0  # 飞书回写失败的行数
 
 
 class _NasFinderImpl:
@@ -110,6 +112,7 @@ def sync_now(
                 now=now,
                 nas_finder=nas_finder,
                 active_accounts=active_accounts,
+                platform=platform,
             )
             if v_result.incomplete:
                 skipped_incomplete.append(row.record_id)
@@ -160,27 +163,32 @@ def sync_now(
 
     if not dry_run and feishu_cfg.sync.write_back_enabled:
         fm = feishu_cfg.field_map
+        wb_failed = 0
         for record_id in accepted:
-            _safe_writeback(client, feishu_cfg, record_id, {fm.status: "已计划"})
+            if not _safe_writeback(client, feishu_cfg, record_id, {fm.status: "已计划"}):
+                wb_failed += 1
         for record_id, errs in rejected:
-            _safe_writeback(
+            if not _safe_writeback(
                 client,
                 feishu_cfg,
                 record_id,
                 {fm.status: "失败", fm.error_message: _format_errors(errs)},
-            )
+            ):
+                wb_failed += 1
         for record_id in skipped:
-            _safe_writeback(
+            if not _safe_writeback(
                 client,
                 feishu_cfg,
                 record_id,
                 {fm.error_message: "已有历史任务,请在 Web UI 重试"},
-            )
+            ):
+                wb_failed += 1
+        result.writeback_failed = wb_failed
 
     return result
 
 
-def _safe_writeback(client: Any, feishu_cfg: Any, record_id: str, fields: dict[str, Any]) -> None:
+def _safe_writeback(client: Any, feishu_cfg: Any, record_id: str, fields: dict[str, Any]) -> bool:
     try:
         writeback_row(
             client,
@@ -189,8 +197,10 @@ def _safe_writeback(client: Any, feishu_cfg: Any, record_id: str, fields: dict[s
             record_id=record_id,
             fields=fields,
         )
-    except FeishuApiError:
-        pass  # 单行回写失败不打断 sync;由调用方决定要不要 echo
+        return True
+    except FeishuApiError as exc:
+        logger.warning(f"[sync] 飞书回写失败 record={record_id} fields={fields}: {exc}")
+        return False
 
 
 def _format_errors(errs: list[FieldError]) -> str:

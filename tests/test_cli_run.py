@@ -140,7 +140,7 @@ def test_run_daemon_in_packaged_mode_starts_web(monkeypatch) -> None:
     monkeypatch.setattr("uvicorn.run", fake_uvicorn_run)
     monkeypatch.setattr(
         "wxsp.cli.load_settings",
-        lambda: MagicMock(
+        lambda platform=None: MagicMock(
             webui=MagicMock(host="127.0.0.1", port=8765, open_browser_on_start=False),
         ),
     )
@@ -178,7 +178,7 @@ def test_run_daemon_in_dev_mode_does_not_start_web(monkeypatch) -> None:
     monkeypatch.setattr("wxsp.cli.start_daemon", lambda s: None)
     monkeypatch.setattr(
         "wxsp.cli.load_settings",
-        lambda: MagicMock(
+        lambda platform=None: MagicMock(
             webui=MagicMock(host="127.0.0.1", port=8765, open_browser_on_start=True),
         ),
     )

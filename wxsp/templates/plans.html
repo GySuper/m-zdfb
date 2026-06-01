@@ -18,6 +18,7 @@
     </div>
     <div class="page-actions">
       <form method="get" action="/plans" class="date-picker">
+        <input type="hidden" name="platform" value="{{ request.state.current_platform }}">
         <input type="date" name="date" value="{{ filter_date }}" onchange="this.form.submit()">
       </form>
     </div>

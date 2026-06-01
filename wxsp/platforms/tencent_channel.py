@@ -483,6 +483,7 @@ def _publish_one_body(
             user_data_dir,
             headless=settings.publisher.headless,
             account_id=account_id,
+            platform="tencent_channel",
         ) as page:
             try:
                 last_step = "open"
@@ -789,4 +790,5 @@ class TencentChannelPublisher:
             Path(account.user_data_dir),
             timeout_ms=300_000,
             account_id=account.id,
+            platform="tencent_channel",
         )

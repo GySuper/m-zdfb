@@ -18,8 +18,10 @@
 
 from __future__ import annotations
 
+import json as _json
 import os
 import sys
+import time as _time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -30,13 +32,21 @@ from patchright.sync_api import Page, sync_playwright
 
 from wxsp.config import get_user_data_dir, is_packaged
 
-WECHAT_CHANNELS_HOME = "https://channels.weixin.qq.com"
+# 平台登录态检测配置:"url" 模式检查 URL 是否含 fragment,"selector" 模式轮询选择器
+_PLATFORM_LOGIN_META: dict[str, dict[str, Any]] = {
+    "tencent_channel": {
+        "home_url": "https://channels.weixin.qq.com",
+        "mode": "selector",
+        "selector": 'div:has-text("发表视频"), button:has-text("发表"), button:has-text("发布视频")',
+    },
+    "taobao_guanghe": {
+        "home_url": "https://creator.guanghe.taobao.com",
+        "mode": "url",
+        "login_fragment": "login.taobao.com",
+    },
+}
 
-# "已登录"标记:视频号主页/发布页登录后才出现的元素。任一可见 → 视为已登录。
-# 选择器来自 social-auto-upload/uploader/tencent_uploader/main.py 的踩坑成果。
-LOGGED_IN_SELECTOR = (
-    'div:has-text("发表视频"), button:has-text("发表"), button:has-text("发布视频")'
-)
+WECHAT_CHANNELS_HOME = "https://channels.weixin.qq.com"
 
 
 def _chromium_root() -> Path | None:
@@ -67,36 +77,46 @@ def browser_context(
     *,
     headless: bool = False,
     account_id: str | None = None,
+    platform: str = "tencent_channel",
 ) -> Iterator[Page]:
     """打开账号专属 persistent Chrome context。
 
-    - `user_data_dir` 不存在会自动创建(适配 `wxsp accounts add` 后第一次 login)。
-    - `account_id` 传入时,从 `wxsp.fingerprint` 拿/建该账号的指纹,把 UA/viewport
-      /locale/timezone 应用到 context options,并注入 JS init script 覆写
-      navigator / WebGL / Canvas / Audio / Client Hints。**每次开这个 profile 都
-      用同一套指纹**(确定性),避免视频号把它当"同账号换设备"踢登录。
-    - `account_id=None` 时退化为老行为(no_viewport=True,无指纹注入),保留给
-      没拿到账号上下文的调用方做兜底。
-    - persistent context 启动时会有一个默认 page(about:blank),直接复用。
-    - 退出时 close context;cookie 已由 persistent context 写到 user_data_dir。
+    - `user_data_dir` 不存在会自动创建。
+    - 视频号:注入 per-account 指纹(UA/viewport/WebGL/Canvas 等)。
+    - 淘宝等平台:跳过指纹,额外用 cookies.json 做显式持久化(patchright 的
+      persistent context 对 session cookie 落盘不可靠)。
     """
     chromium_root = _chromium_root()
     if chromium_root is not None:
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(chromium_root)
     user_data_dir.mkdir(parents=True, exist_ok=True)
 
+    # 显式 cookie 持久化:patchright 的 persistent context 在关闭时不一定能
+    # 把 session cookie 写入 SQLite,导致淘宝登录后重开丢 cookie。
+    # 这里额外保存/恢复到同目录的 cookies.json(platform 甄别,视频号走 fingerprint 不需要)。
+    _use_explicit_cookies = platform != "tencent_channel"
+    _cookie_file = user_data_dir / "cookies.json"
+
+    if platform == "tencent_channel":
+        _chrome_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--window-position=0,0",
+        ]
+    else:
+        _chrome_args = ["--window-position=0,0"]
+    # DNS stability flags(企业网 / 某些 Windows DNS 配置下 Chromium 内置 DNS 会整段
+    # 失败,ERR_NAME_NOT_RESOLVED 即使系统 nslookup 能解析)。所有平台统一加。
+    _chrome_args.extend(
+        [
+            "--disable-features=AsyncDns,AsyncDnsResolver,DnsOverHttps,SecureDnsForFreshnessCheck",
+            "--dns-prefetch-disable",
+        ]
+    )
+
     launch_kwargs: dict[str, Any] = {
         "user_data_dir": str(user_data_dir),
         "headless": headless,
-        "args": [
-            "--disable-blink-features=AutomationControlled",
-            # Chromium 内置 DNS 路径在企业网 / 某些 Windows DNS 配置下会整段失败
-            # (ERR_NAME_NOT_RESOLVED 即使系统 nslookup 能解析)。把已知 DNS-related
-            # feature 全关,强制走系统 thread-pool getaddrinfo;unknown feature 名
-            # 会被 Chromium 忽略,所以多写几个版本名兼容不同 patchright Chromium 版。
-            "--disable-features=AsyncDns,AsyncDnsResolver,DnsOverHttps,SecureDnsForFreshnessCheck",
-            "--dns-prefetch-disable",
-        ],
+        "args": _chrome_args,
     }
 
     # 诊断 escape hatch:WXSP_DISABLE_FINGERPRINT 接受
@@ -115,7 +135,8 @@ def browser_context(
         )
 
     fp_init_script: str | None = None
-    if account_id is not None and not disable_all:
+    # 指纹只对视频号有效;淘宝等平台跳过(风控机制不同,不需要设备指纹模拟)
+    if account_id is not None and not disable_all and platform == "tencent_channel":
         try:
             from wxsp.fingerprint import (
                 context_options as fp_context_options,
@@ -128,23 +149,44 @@ def browser_context(
             )
 
             fp = get_or_create_fingerprint(account_id, _fingerprint_storage_dir())
+            # init_script 先生成,成功后再应用 context options,避免 HTTP 层指纹
+            # 已注入但 JS 层失败的不一致状态(比没指纹更危险)
+            if not disable_init:
+                fp_init_script = fp_init_script_fn(fp)
             if not disable_context:
                 launch_kwargs.update(fp_context_options(fp))
             else:
-                launch_kwargs["no_viewport"] = True
-            if not disable_init:
-                fp_init_script = fp_init_script_fn(fp)
+                launch_kwargs["viewport"] = {"width": 1280, "height": 720}
         except Exception as exc:
-            # 指纹生成不该阻塞登录/发布;退化到 no_viewport 老路径,记日志告警。
             logger.warning(f"[browser] 指纹注入失败 account={account_id}: {exc};退化到无指纹模式")
-            launch_kwargs["no_viewport"] = True
+            launch_kwargs["viewport"] = {"width": 1280, "height": 720}
     else:
-        launch_kwargs["no_viewport"] = True
+        launch_kwargs["viewport"] = {"width": 1280, "height": 720}
 
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(**launch_kwargs)
         try:
             page = context.pages[0] if context.pages else context.new_page()
+            # 显式恢复 cookie(patchright persistent context 不可靠)
+            if _use_explicit_cookies and _cookie_file.exists():
+                try:
+                    with open(_cookie_file) as f:
+                        saved = _json.load(f)
+                    context.add_cookies(saved)
+                    logger.info(
+                        f"[browser] {platform} 恢复 {len(saved)} 个 cookie" f" from {_cookie_file}"
+                    )
+                except Exception as exc:
+                    logger.warning(f"[browser] 恢复 cookie 失败: {exc}")
+            # 诊断:记录启动时已加载的 cookie 数量
+            try:
+                loaded = context.cookies()
+                logger.info(
+                    f"[browser] {platform} context 启动,"
+                    f" user_data_dir={user_data_dir}, cookies_loaded={len(loaded)}"
+                )
+            except Exception:
+                pass
             if fp_init_script is not None:
                 # patchright 1.59.1 + 当前 Chromium 下,context.add_init_script /
                 # page.add_init_script 一旦调用,后续 navigate 全部 ERR_CONNECTION_CLOSED
@@ -163,25 +205,64 @@ def browser_context(
                 page.on("framenavigated", _inject_on_nav)
             yield page
         finally:
-            context.close()
+            # 显式保存 cookie(淘宝等非视频号平台)
+            if _use_explicit_cookies:
+                try:
+                    all_cookies = context.cookies()
+                    with open(_cookie_file, "w") as f:
+                        _json.dump(all_cookies, f, ensure_ascii=False)
+                    logger.info(
+                        f"[browser] {platform} 保存 {len(all_cookies)} 个 cookie"
+                        f" to {_cookie_file}"
+                    )
+                except Exception as exc:
+                    logger.warning(f"[browser] 保存 cookie 失败: {exc}")
+            # 导到 about:blank 确保当前页面的 cookie 都写入,再关 context
+            try:
+                page.goto("about:blank")
+            except Exception:
+                pass
+            try:
+                context.close()
+            except Exception:
+                pass  # 浏览器可能已经崩溃,close 失败不影响主流程
 
 
-def wait_for_logged_in(page: Page, *, timeout_ms: int) -> bool:
-    """导航到视频号主页,轮询 `LOGGED_IN_SELECTOR` 直到可见或超时。
+def wait_for_logged_in(page: Page, *, timeout_ms: int, platform: str = "tencent_channel") -> bool:
+    """导航到平台首页,等待登录态确认。
 
-    - `timeout_ms` ≥ 视频号页面 DOM ready 时间(经验值:5-15s)+ 扫码等待时间。
-    - login 场景:`timeout_ms=300_000`(5 分钟,够扫码)。
-    - doctor 场景:`timeout_ms=15_000`(已登录的话主页几秒就出按钮)。
+    两种检测模式:
+    - "selector":轮询选择器直到可见(视频号:发表视频按钮)
+    - "url":检查 URL 是否不再含 login fragment(淘宝:login.taobao.com)
 
-    返回 True = 找到登录标记;False = 超时(扫码未完成 / cookie 失效 / 网络问题)。
+    返回 True = 已登录;False = 超时。
     """
-    page.goto(WECHAT_CHANNELS_HOME, wait_until="domcontentloaded")
+    meta = _PLATFORM_LOGIN_META.get(platform, _PLATFORM_LOGIN_META["tencent_channel"])
+    page.goto(meta["home_url"], wait_until="domcontentloaded")
+    if meta["mode"] == "url":
+        login_fragment = meta["login_fragment"]
+        deadline = _time.monotonic() + timeout_ms / 1000.0
+        while _time.monotonic() < deadline:
+            if login_fragment not in page.url:
+                # 登录成功:等足够时间让 cookie 全部落盘
+                page.wait_for_timeout(5000)
+                # 强制触发 cookie flush(写磁盘)
+                try:
+                    cookies = page.context.cookies()
+                    logger.info(
+                        f"[browser] {platform} 登录成功," f" cookies={len(cookies)} url={page.url}"
+                    )
+                except Exception:
+                    pass
+                # 再等 2 秒确保 SQLite WAL 同步到 disk
+                page.wait_for_timeout(2000)
+                return True
+            page.wait_for_timeout(2000)
+        return False
     try:
-        page.wait_for_selector(LOGGED_IN_SELECTOR, timeout=timeout_ms, state="visible")
+        page.wait_for_selector(meta["selector"], timeout=timeout_ms, state="visible")
         return True
     except Exception:
-        # patchright 超时抛 TimeoutError,网络/导航错误抛其它子类。任何异常都视为
-        # "没找到登录标记" —— 真正可补救的错误(网络等)在 M5 publisher 层细分。
         return False
 
 
@@ -190,6 +271,7 @@ def check_cookie(
     *,
     timeout_ms: int = 15_000,
     account_id: str | None = None,
+    platform: str = "tencent_channel",
 ) -> bool:
     """一站式:开浏览器 → 检查登录态 → 关浏览器。
 
@@ -197,7 +279,7 @@ def check_cookie(
     复用。`login` 传 `timeout_ms=300_000` 等扫码完成。
 
     `account_id` 传入时,本次启动会带上该账号的指纹(必须跟登录时的指纹一致,否则
-    视频号会把它当 "异常设备登录" 直接踢);省略时退化到无指纹模式。
+    平台会把它当 "异常设备登录" 直接踢);省略时退化到无指纹模式。
     """
-    with browser_context(user_data_dir, account_id=account_id) as page:
-        return wait_for_logged_in(page, timeout_ms=timeout_ms)
+    with browser_context(user_data_dir, account_id=account_id, platform=platform) as page:
+        return wait_for_logged_in(page, timeout_ms=timeout_ms, platform=platform)

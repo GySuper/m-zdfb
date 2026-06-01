@@ -225,15 +225,17 @@ def task_detail(
 @router.post("/tasks/{task_id}/retry")
 def retry_task(
     task_id: int,
+    request: Request,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
     task = session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} 不存在")
+    plat = getattr(request.state, "current_platform", "") or ""
     if task.status not in RETRYABLE_STATUSES:
         return RedirectResponse(
-            url=f"/tasks/{task_id}?flash={'当前状态不可重试: ' + task.status}",
+            url=f"/tasks/{task_id}?flash={'当前状态不可重试: ' + task.status}&platform={plat}",
             status_code=303,
         )
     # 重置回 pending(claim_task 才会生效)。attempts 保留累加,审计用。
@@ -246,12 +248,15 @@ def retry_task(
     task.last_error_msg = None
     session.add(task)
     _spawn("retry", _run_publish, task_id, settings)
-    return RedirectResponse(url=f"/tasks/{task_id}?flash=已加入队列重试", status_code=303)
+    return RedirectResponse(
+        url=f"/tasks/{task_id}?flash=已加入队列重试&platform={plat}", status_code=303
+    )
 
 
 @router.post("/tasks/{task_id}/requeue")
 def requeue_task(
     task_id: int,
+    request: Request,
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
     """把积压(execute_date<today + pending/interrupted)的 task 改 execute_date=today。
@@ -262,15 +267,16 @@ def requeue_task(
     task = session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} 不存在")
+    plat = getattr(request.state, "current_platform", "") or ""
     today = _date.today()
     if task.status not in REQUEUE_STATUSES:
         return RedirectResponse(
-            url=f"/tasks/{task_id}?flash=当前状态不能重新入队: {task.status}",
+            url=f"/tasks/{task_id}?flash=当前状态不能重新入队: {task.status}&platform={plat}",
             status_code=303,
         )
     if task.execute_date >= today:
         return RedirectResponse(
-            url=f"/tasks/{task_id}?flash=执行日期已是今天或更晚,无需重新入队",
+            url=f"/tasks/{task_id}?flash=执行日期已是今天或更晚,无需重新入队&platform={plat}",
             status_code=303,
         )
     task.execute_date = today
@@ -283,7 +289,7 @@ def requeue_task(
     task.last_error_msg = None
     session.add(task)
     return RedirectResponse(
-        url=f"/tasks/{task_id}?flash=已重新入队到今天(还需点'立即跑今天'才会真跑)",
+        url=f"/tasks/{task_id}?flash=已重新入队到今天(还需点'立即跑今天'才会真跑)&platform={plat}",
         status_code=303,
     )
 

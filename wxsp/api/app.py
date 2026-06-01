@@ -28,7 +28,6 @@ from wxsp.config import (
     ALL_PLATFORMS,
     get_config_path,
     get_default_platform,
-    load_settings,
     platform_label,
 )
 from wxsp.db import get_engine, init_db, session_scope
@@ -61,55 +60,67 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     scheduler: BaseScheduler | None = None
     if _setup_required():
-        logger.info("[api] config.yaml 缺失,跳过 scheduler 启动(走 setup 向导)")
+        logger.info("[api] 无平台配置文件,跳过 scheduler 启动(走 setup 向导)")
     else:
-        try:
-            settings = load_settings()
-        except Exception as exc:
-            logger.warning(f"[api] 加载 settings 失败,跳过 scheduler 启动: {exc}")
-            settings = None
+        # 发现已配置的平台,逐平台加载
+        from wxsp.config import load_settings as _load
+        from wxsp.scheduler import _daily_cron
 
-        if settings is not None:
-            engine = get_engine()
-            init_db(engine)
+        active_platforms = [p for p in ALL_PLATFORMS if get_config_path(p).exists()]
+        if not active_platforms:
+            logger.warning("[api] 没有找到任何平台配置文件,跳过 scheduler")
+        else:
+            # 取第一个可用平台的 settings 做全局 init(DB / archive / backlog)
             try:
-                with session_scope(engine) as session:
-                    touched = mark_stale_running_as_interrupted(session)
-                if touched:
-                    logger.warning(f"[api] 启动时标 interrupted: {touched} 条僵尸 running")
+                first_cfg = _load(platform=active_platforms[0])
             except Exception as exc:
-                logger.warning(f"[api] 启动 mark_stale 失败,忽略: {exc}")
-
-            try:
-                cleanup_old_files(
-                    logs_dir=settings.app.logs_dir,
-                    log_retention_days=settings.monitoring.log_retention_days,
-                    screenshot_retention_days=settings.monitoring.screenshot_retention_days,
+                logger.warning(
+                    f"[api] 加载平台 [{active_platforms[0]}] 配置失败: {exc},跳过 scheduler"
                 )
-            except Exception as exc:
-                logger.warning(f"[api] 启动归档失败,忽略: {exc}")
+                first_cfg = None
 
-            try:
-                with session_scope(engine) as session:
-                    backlog = maybe_warn_backlog(settings, session=session)
-                logger.info(f"[api] 启动时历史积压: {backlog} 条")
-            except Exception as exc:
-                logger.warning(f"[api] 启动积压检查失败,忽略: {exc}")
+            if first_cfg is not None:
+                engine = get_engine()
+                init_db(engine)
+                try:
+                    with session_scope(engine) as session:
+                        touched = mark_stale_running_as_interrupted(session)
+                    if touched:
+                        logger.warning(f"[api] 启动时标 interrupted: {touched} 条僵尸 running")
+                except Exception as exc:
+                    logger.warning(f"[api] 启动 mark_stale 失败,忽略: {exc}")
 
-            try:
-                scheduler = make_scheduler(settings, blocking=False)
-                if settings.scheduler.enabled:
-                    # 发现所有已配置的平台,注册 per-platform cron job
-                    from wxsp.config import ALL_PLATFORMS
-                    from wxsp.config import load_settings as _load
-                    from wxsp.scheduler import _daily_cron
+                try:
+                    cleanup_old_files(
+                        logs_dir=first_cfg.app.logs_dir,
+                        log_retention_days=first_cfg.monitoring.log_retention_days,
+                        screenshot_retention_days=first_cfg.monitoring.screenshot_retention_days,
+                    )
+                except Exception as exc:
+                    logger.warning(f"[api] 启动归档失败,忽略: {exc}")
 
-                    for pkey in ALL_PLATFORMS:
+                try:
+                    with session_scope(engine) as session:
+                        backlog = maybe_warn_backlog(
+                            first_cfg, session=session, platform=active_platforms[0]
+                        )
+                    logger.info(f"[api] 启动时历史积压: {backlog} 条")
+                except Exception as exc:
+                    logger.warning(f"[api] 启动积压检查失败,忽略: {exc}")
+
+                try:
+                    scheduler = make_scheduler(first_cfg, blocking=False)
+                    for pkey in active_platforms:
                         try:
-                            if not get_config_path(pkey).exists():
-                                continue
-                            plat_cfg = _load(platform=pkey)
+                            plat_cfg = (
+                                _load(platform=pkey) if pkey != active_platforms[0] else first_cfg
+                            )
                             sched = plat_cfg.scheduler
+                            if not sched.enabled:
+                                logger.info(
+                                    f"[api] 平台 [{pkey}] scheduler.enabled=false,跳过 cron 注册"
+                                )
+                                continue
                             scheduler.add_job(
                                 lambda p=pkey: _daily_cron(p, _load(platform=p)),
                                 CronTrigger(
@@ -127,10 +138,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                             )
                         except Exception as exc:
                             logger.warning(f"[api] 平台 [{pkey}] cron 注册失败: {exc}")
-                scheduler.start()
-            except Exception as exc:
-                logger.error(f"[api] scheduler 启动失败,定时任务将不会触发: {exc}")
-                scheduler = None
+                    scheduler.start()
+                except Exception as exc:
+                    logger.error(f"[api] scheduler 启动失败,定时任务将不会触发: {exc}")
+                    scheduler = None
     try:
         yield
     finally:

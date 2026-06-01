@@ -30,6 +30,8 @@ from lark_oapi.api.bitable.v1 import (  # type: ignore[import-untyped]
 # 飞书 Bitable 字段类型码:3 = 单选(SingleSelect)。Bitable 文档:
 # https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-field/guide
 _FEISHU_FIELD_TYPE_SINGLE_SELECT = 3
+_FEISHU_FIELD_TYPE_MULTI_SELECT = 4
+_SELECT_FIELD_TYPES = {3, 4}  # 单选和多选都支持加 options
 
 # 指数退避序列:第 1 次失败等 1s,第 2 次等 3s,第 3 次等 10s,第 4 次失败直接抛。
 # 历史 (1.0, 2.0)/3 次 在飞书侧抖动时被实测打穿(运营反馈:一批 task 跑完最后一条
@@ -259,9 +261,9 @@ def add_account_option(
     )
     if field is None:
         raise FeishuApiError(f"找不到字段 {account_field_name!r}(检查 feishu.field_map.account)")
-    if field.type != _FEISHU_FIELD_TYPE_SINGLE_SELECT:
+    if field.type not in _SELECT_FIELD_TYPES:
         raise FeishuApiError(
-            f"字段 {account_field_name!r} 类型不是单选(type={field.type}),拒绝改 options"
+            f"字段 {account_field_name!r} 类型不是单选/多选(type={field.type}),拒绝改 options"
         )
 
     existing_options = _parse_options(field.property)

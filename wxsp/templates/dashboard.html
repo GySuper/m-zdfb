@@ -16,13 +16,13 @@
     <div class="page-actions">
       <span class="op-spinner" id="dash-run-today-spinner">同步飞书中…</span>
       <button class="primary" type="button"
-              hx-post="/tasks/run-today"
+              hx-post="/tasks/run-today?platform={{ request.state.current_platform }}"
               hx-target="#op-status"
               hx-swap="innerHTML"
               hx-indicator="#dash-run-today-spinner">立即跑今天</button>
       <span class="op-spinner" id="dash-sync-spinner">同步中…</span>
       <button type="button"
-              hx-post="/accounts/sync"
+              hx-post="/accounts/sync?platform={{ request.state.current_platform }}"
               hx-target="#op-status"
               hx-swap="innerHTML"
               hx-indicator="#dash-sync-spinner">同步飞书</button>
@@ -75,7 +75,7 @@
               <div class="health-item-text">
                 今日有 <strong>{{ counts.failed }}</strong> 条任务失败,需要查看原因并重试
               </div>
-              <a class="btn btn-sm" href="/tasks?status=failed">查看失败 →</a>
+              <a class="btn btn-sm" href="/tasks?status=failed&platform={{ request.state.current_platform }}">查看失败 →</a>
             </div>
           {% endif %}
 
@@ -84,7 +84,7 @@
               <div class="health-item-text">
                 今日有 <strong>{{ counts.interrupted }}</strong> 条任务被中断(可能是 Ctrl-C 或异常退出)
               </div>
-              <a class="btn btn-sm" href="/tasks?status=interrupted">处理中断 →</a>
+              <a class="btn btn-sm" href="/tasks?status=interrupted&platform={{ request.state.current_platform }}">处理中断 →</a>
             </div>
           {% endif %}
 
@@ -93,7 +93,7 @@
               <div class="health-item-text">
                 历史积压 <strong>{{ backlog }}</strong> 条 — 执行日期早于今天但仍未完成的任务
               </div>
-              <a class="btn btn-sm" href="/tasks?backlog=1">处理积压 →</a>
+              <a class="btn btn-sm" href="/tasks?backlog=1&platform={{ request.state.current_platform }}">处理积压 →</a>
             </div>
           {% endif %}
 

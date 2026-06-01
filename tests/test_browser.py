@@ -19,11 +19,21 @@ def test_wechat_channels_home_constant_is_https():
     assert "channels.weixin.qq.com" in WECHAT_CHANNELS_HOME
 
 
-def test_logged_in_selector_targets_publish_buttons():
-    from wxsp.browser import LOGGED_IN_SELECTOR
+def test_platform_login_meta_has_tencent_channel():
+    from wxsp.browser import _PLATFORM_LOGIN_META
 
-    # The selector must mention a button/text that only appears post-login.
-    assert "发表" in LOGGED_IN_SELECTOR or "发布" in LOGGED_IN_SELECTOR
+    tc = _PLATFORM_LOGIN_META["tencent_channel"]
+    assert tc["mode"] == "selector"
+    # 选择器必须提到仅登录后出现的文本
+    assert "发表" in tc["selector"] or "发布" in tc["selector"]
+
+
+def test_platform_login_meta_has_taobao_guanghe():
+    from wxsp.browser import _PLATFORM_LOGIN_META
+
+    tb = _PLATFORM_LOGIN_META["taobao_guanghe"]
+    assert tb["mode"] == "url"
+    assert "login.taobao.com" in tb["login_fragment"]
 
 
 def test_public_callables_importable():
@@ -51,11 +61,11 @@ def test_check_cookie_passes_user_data_dir_through_to_browser_context(tmp_path, 
     sentinel_page = object()
 
     @contextmanager
-    def fake_context(user_data_dir, *, headless=False, account_id=None):
+    def fake_context(user_data_dir, *, headless=False, account_id=None, platform="tencent_channel"):
         seen_dirs.append(user_data_dir)
         yield sentinel_page
 
-    def fake_wait(page, *, timeout_ms):
+    def fake_wait(page, *, timeout_ms, platform="tencent_channel"):
         assert page is sentinel_page
         seen_timeouts.append(timeout_ms)
         return True
@@ -75,10 +85,10 @@ def test_check_cookie_returns_false_when_wait_returns_false(tmp_path, monkeypatc
     from wxsp import browser as browser_mod
 
     @contextmanager
-    def fake_context(user_data_dir, *, headless=False, account_id=None):
+    def fake_context(user_data_dir, *, headless=False, account_id=None, platform="tencent_channel"):
         yield object()
 
-    def fake_wait(page, *, timeout_ms):
+    def fake_wait(page, *, timeout_ms, platform="tencent_channel"):
         return False
 
     monkeypatch.setattr(browser_mod, "browser_context", fake_context)

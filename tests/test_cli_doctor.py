@@ -46,7 +46,7 @@ def test_doctor_no_accounts_shows_hint(
 
     from wxsp import cli as cli_module
 
-    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
@@ -63,7 +63,13 @@ def test_doctor_lists_each_account_with_status(
 
     calls: list[Path] = []
 
-    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
+    def fake_check(
+        path: Path,
+        *,
+        timeout_ms: int,
+        account_id: str | None = None,
+        platform: str = "tencent_channel",
+    ) -> bool:
         calls.append(path)
         assert timeout_ms <= 30_000, "doctor should use a short timeout (already-logged-in path)"
         return path.name == "account_a"  # only A is logged in
@@ -77,7 +83,7 @@ def test_doctor_lists_each_account_with_status(
     from wxsp import cli as cli_module
 
     monkeypatch.setattr(cli_module, "check_cookie", fake_check)
-    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
@@ -99,7 +105,13 @@ def test_doctor_persists_cookie_status_to_db(
 ) -> None:
     _add_account(db_env, "account_a")
 
-    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
+    def fake_check(
+        path: Path,
+        *,
+        timeout_ms: int,
+        account_id: str | None = None,
+        platform: str = "tencent_channel",
+    ) -> bool:
         return True
 
     video_root = tmp_path / "videos"
@@ -111,7 +123,7 @@ def test_doctor_persists_cookie_status_to_db(
     from wxsp import cli as cli_module
 
     monkeypatch.setattr(cli_module, "check_cookie", fake_check)
-    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
@@ -131,7 +143,13 @@ def test_doctor_continues_after_one_account_browser_crash(
     _add_account(db_env, "account_a")
     _add_account(db_env, "account_b")
 
-    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
+    def fake_check(
+        path: Path,
+        *,
+        timeout_ms: int,
+        account_id: str | None = None,
+        platform: str = "tencent_channel",
+    ) -> bool:
         if path.name == "account_a":
             raise RuntimeError("simulated crash")
         return True
@@ -145,7 +163,7 @@ def test_doctor_continues_after_one_account_browser_crash(
     from wxsp import cli as cli_module
 
     monkeypatch.setattr(cli_module, "check_cookie", fake_check)
-    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
@@ -186,7 +204,13 @@ def test_doctor_prints_nas_section_when_all_ok(
 ) -> None:
     _add_account(db_env, "account_a")
 
-    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
+    def fake_check(
+        path: Path,
+        *,
+        timeout_ms: int,
+        account_id: str | None = None,
+        platform: str = "tencent_channel",
+    ) -> bool:
         return True
 
     video_root = tmp_path / "videos"
@@ -198,7 +222,7 @@ def test_doctor_prints_nas_section_when_all_ok(
     from wxsp import cli as cli_module
 
     monkeypatch.setattr(cli_module, "check_cookie", fake_check)
-    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
@@ -214,7 +238,13 @@ def test_doctor_exits_1_when_nas_path_missing(
 ) -> None:
     _add_account(db_env, "account_a")
 
-    def fake_check(path: Path, *, timeout_ms: int, account_id: str | None = None) -> bool:
+    def fake_check(
+        path: Path,
+        *,
+        timeout_ms: int,
+        account_id: str | None = None,
+        platform: str = "tencent_channel",
+    ) -> bool:
         return True
 
     video_root = tmp_path / "missing_videos"  # 故意不 mkdir
@@ -225,7 +255,7 @@ def test_doctor_exits_1_when_nas_path_missing(
     from wxsp import cli as cli_module
 
     monkeypatch.setattr(cli_module, "check_cookie", fake_check)
-    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
@@ -246,7 +276,7 @@ def test_doctor_nas_section_runs_even_without_accounts(
 
     from wxsp import cli as cli_module
 
-    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
@@ -268,7 +298,7 @@ def test_doctor_prints_feishu_section_when_disabled(
 
     from wxsp import cli as cli_module
 
-    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
@@ -306,9 +336,11 @@ def test_doctor_cookie_warn_does_not_fail_exit_code(
 
     # cookie 仍能登录 → 触发 warn 而不是 expired
     monkeypatch.setattr(
-        cli_module, "check_cookie", lambda path, *, timeout_ms, account_id=None: True
+        cli_module,
+        "check_cookie",
+        lambda path, *, timeout_ms, account_id=None, platform="tencent_channel": True,
     )
-    monkeypatch.setattr(cli_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])

@@ -19,7 +19,7 @@
       <span class="op-spinner" id="run-today-spinner">同步飞书中…</span>
       <button class="primary" type="button"
               title="先同步飞书,再跑今天 pending"
-              hx-post="/tasks/run-today"
+              hx-post="/tasks/run-today?platform={{ request.state.current_platform }}"
               hx-target="#op-status"
               hx-swap="innerHTML"
               hx-indicator="#run-today-spinner">立即跑今天</button>
@@ -32,7 +32,7 @@
   {# ============ Tabs ============ #}
   {% if not backlog_mode %}
   <div class="tabs">
-    {% set base_q = '?' + ('date=' + filter_date.isoformat() + '&' if filter_date else '') + ('account=' + filter_account + '&' if filter_account else '') %}
+    {% set base_q = '?platform=' + request.state.current_platform + '&' + ('date=' + filter_date.isoformat() + '&' if filter_date else '') + ('account=' + filter_account + '&' if filter_account else '') %}
     <a class="tab {% if filter_bucket == 'attention' %}active{% endif %}" href="{{ base_q }}bucket=attention">
       <span class="tab-label">待处理</span>
       <span class="tab-count {% if bucket_counts.attention > 0 and filter_bucket != 'attention' %}highlight{% endif %}">{{ bucket_counts.attention }}</span>
@@ -150,12 +150,12 @@
           <div class="tc-actions">
             <a class="btn btn-sm" href="/tasks/{{ r.id }}">详情</a>
             {% if r.retryable %}
-              <form method="post" action="/tasks/{{ r.id }}/retry" style="margin:0;">
+              <form method="post" action="/tasks/{{ r.id }}/retry?platform={{ request.state.current_platform }}" style="margin:0;">
                 <button type="submit" class="btn-sm primary">重试</button>
               </form>
             {% endif %}
             {% if r.requeueable %}
-              <form method="post" action="/tasks/{{ r.id }}/requeue" style="margin:0;">
+              <form method="post" action="/tasks/{{ r.id }}/requeue?platform={{ request.state.current_platform }}" style="margin:0;">
                 <button type="submit" class="btn-sm" title="把执行日期改成今天,需再点'立即跑今天'才会真跑">入队到今天</button>
               </form>
             {% endif %}

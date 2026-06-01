@@ -499,16 +499,16 @@ def add_account(
     """
     display_name = display_name.strip()
     if not display_name:
-        return RedirectResponse("/config?flash=新增失败:显示名不能为空", status_code=303)
+        return RedirectResponse(
+            f"/config?flash=新增失败:显示名不能为空&platform={platform}", status_code=303
+        )
     with _config_lock:
         data = _load_raw_yaml(platform or "tencent_channel")
         accounts = data.setdefault("accounts", {}) or {}
-        # 提前查重:display_name 必须唯一(Settings 也会兜底,但那里报错带 pydantic
-        # 包装 + 暴露 generated ID,运营看了一头雾水;这里给清爽错误)
         dup_aid = _find_duplicate_display_name(accounts, display_name, exclude_id=None)
         if dup_aid is not None:
             return RedirectResponse(
-                f"/config?flash=新增失败:已有账号叫 {display_name!r}(ID={dup_aid}),请改个名",
+                f"/config?flash=新增失败:已有账号叫 {display_name!r}(ID={dup_aid}),请改个名&platform={platform}",
                 status_code=303,
             )
         aid = _generate_account_id(accounts)
@@ -525,7 +525,9 @@ def add_account(
         data["accounts"] = accounts
         errors = _validate_dict(data)
         if errors:
-            return RedirectResponse(f"/config?flash=新增失败: {errors[0]}", status_code=303)
+            return RedirectResponse(
+                f"/config?flash=新增失败: {errors[0]}&platform={platform}", status_code=303
+            )
         _save_yaml(data, platform=platform)
         if session.get(Account, aid) is None:
             session.add(
@@ -538,7 +540,9 @@ def add_account(
                 )
             )
     suffix = _sync_account_to_feishu(data, display_name)
-    return RedirectResponse(f"/config?flash=已添加账号 {aid}{suffix}", status_code=303)
+    return RedirectResponse(
+        f"/config?flash=已添加账号 {aid}{suffix}&platform={platform}", status_code=303
+    )
 
 
 def _find_duplicate_display_name(
@@ -615,21 +619,22 @@ def update_account(
     display_name = display_name.strip()
     if not display_name:
         return RedirectResponse(
-            f"/config?flash=保存失败:显示名不能为空&edit={account_id}", status_code=303
+            f"/config?flash=保存失败:显示名不能为空&edit={account_id}&platform={platform}",
+            status_code=303,
         )
     with _config_lock:
         data = _load_raw_yaml(platform or "tencent_channel")
         accounts = data.get("accounts", {}) or {}
         if account_id not in accounts:
             return RedirectResponse(
-                f"/config?flash=账号 {account_id} 不存在,无法编辑", status_code=303
+                f"/config?flash=账号 {account_id} 不存在,无法编辑&platform={platform}",
+                status_code=303,
             )
-        # 改名时也要查重:不能跟其他账号撞 display_name(自己不算)
         dup_aid = _find_duplicate_display_name(accounts, display_name, exclude_id=account_id)
         if dup_aid is not None:
             return RedirectResponse(
                 f"/config?flash=保存失败:显示名 {display_name!r} 已被账号 {dup_aid} 用了"
-                f"&edit={account_id}",
+                f"&edit={account_id}&platform={platform}",
                 status_code=303,
             )
         old_entry = accounts[account_id]
@@ -646,10 +651,13 @@ def update_account(
         errors = _validate_dict(data)
         if errors:
             return RedirectResponse(
-                f"/config?flash=保存失败: {errors[0]}&edit={account_id}", status_code=303
+                f"/config?flash=保存失败: {errors[0]}&edit={account_id}&platform={platform}",
+                status_code=303,
             )
         _save_yaml(data, platform=platform)
-    return RedirectResponse(f"/config?flash=已更新账号 {account_id}", status_code=303)
+    return RedirectResponse(
+        f"/config?flash=已更新账号 {account_id}&platform={platform}", status_code=303
+    )
 
 
 @router.post("/config/accounts/{account_id}/delete")
@@ -659,15 +667,20 @@ def delete_account(account_id: str, platform: str = "tencent_channel") -> Redire
         accounts = data.get("accounts", {}) or {}
         if account_id not in accounts:
             return RedirectResponse(
-                f"/config?flash=账号 {account_id} 不存在,未删除", status_code=303
+                f"/config?flash=账号 {account_id} 不存在,未删除&platform={platform}",
+                status_code=303,
             )
         accounts.pop(account_id)
         data["accounts"] = accounts
         errors = _validate_dict(data)
         if errors:
-            return RedirectResponse(f"/config?flash=删除失败: {errors[0]}", status_code=303)
+            return RedirectResponse(
+                f"/config?flash=删除失败: {errors[0]}&platform={platform}", status_code=303
+            )
         _save_yaml(data, platform=platform)
-    return RedirectResponse(f"/config?flash=已删除账号 {account_id}", status_code=303)
+    return RedirectResponse(
+        f"/config?flash=已删除账号 {account_id}&platform={platform}", status_code=303
+    )
 
 
 # ---------- 分区独立保存(2026-05-16 UI 重设计)----------

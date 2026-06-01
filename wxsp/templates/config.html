@@ -63,7 +63,7 @@
                       <td class="text-xs muted" style="max-width: 240px; overflow: hidden; text-overflow: ellipsis;"><code>{{ a.video_search_root }}</code></td>
                       <td class="nowrap">
                         <button type="button" class="btn-sm" onclick='openAccountModal({{ {"id": aid, "display_name": a.display_name, "enabled": a.enabled, "daily_limit": a.daily_limit, "video_search_root": a.video_search_root, "cover_search_root": a.cover_search_root} | tojson }})'>编辑</button>
-                        <form method="post" action="/config/accounts/{{ aid }}/delete" style="display:inline;"
+                        <form method="post" action="/config/accounts/{{ aid }}/delete?platform={{ platform }}" style="display:inline;"
                               onsubmit="return confirm('确认删除账号 {{ aid }}?(配置中的条目会被移除,Chrome profile 目录不会自动删除)');">
                           <button class="btn-sm danger" type="submit">删除</button>
                         </form>

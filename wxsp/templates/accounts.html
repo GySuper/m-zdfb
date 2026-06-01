@@ -20,7 +20,7 @@
       {% endif %}
       <span class="op-spinner" id="sync-spinner">同步中…</span>
       <button class="primary" type="button"
-              hx-post="/accounts/sync"
+              hx-post="/accounts/sync?platform={{ request.state.current_platform }}"
               hx-target="#op-status"
               hx-swap="innerHTML"
               hx-indicator="#sync-spinner">同步飞书</button>
@@ -75,17 +75,17 @@
             </div>
 
             <div class="row-actions">
-              <form method="post" action="/accounts/{{ r.id }}/login" style="margin:0;">
+              <form method="post" action="/accounts/{{ r.id }}/login?platform={{ request.state.current_platform }}" style="margin:0;">
                 <button type="submit" class="{% if needs_attention or r.cookie_status == 'unknown' %}primary{% endif %}">
                   {% if cookie_expired or r.cookie_status == "unknown" %}扫码登录{% else %}扫码续期{% endif %}
                 </button>
               </form>
               {% if r.paused_until %}
-                <form method="post" action="/accounts/{{ r.id }}/resume" style="margin:0;">
+                <form method="post" action="/accounts/{{ r.id }}/resume?platform={{ request.state.current_platform }}" style="margin:0;">
                   <button type="submit">恢复</button>
                 </form>
               {% else %}
-                <form method="post" action="/accounts/{{ r.id }}/pause" style="margin:0;">
+                <form method="post" action="/accounts/{{ r.id }}/pause?platform={{ request.state.current_platform }}" style="margin:0;">
                   <input type="hidden" name="hours" value="24">
                   <button type="submit" title="暂停 24 小时,期间该账号的任务全部跳过">暂停 24h</button>
                 </form>

@@ -116,9 +116,9 @@ def test_publish_apc_pass_runs_full_pipeline(
     )
 
     with (
-        patch("wxsp.platforms.tencent_channel.browser_context", return_value=_fake_browser_ctx()),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.browser_context", return_value=_fake_browser_ctx()),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch("wxsp.platforms.tencent_channel.screenshot", return_value=tmp_path / "shot.png"),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
@@ -157,9 +157,9 @@ def test_publish_apc_deny_injects_element_not_found(
     )
 
     with (
-        patch("wxsp.platforms.tencent_channel.browser_context", return_value=_fake_browser_ctx()),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.browser_context", return_value=_fake_browser_ctx()),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch("wxsp.platforms.tencent_channel.screenshot", side_effect=fake_screenshot),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
@@ -192,9 +192,9 @@ def test_publish_dev_mode_no_apc_call(
         extract_remote_video_id_and_url=lambda page: ("rid", "https://channels/x"),
     )
     with (
-        patch("wxsp.platforms.tencent_channel.browser_context", return_value=_fake_browser_ctx()),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.browser_context", return_value=_fake_browser_ctx()),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch("wxsp.platforms.tencent_channel.screenshot", return_value=tmp_path / "shot.png"),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):

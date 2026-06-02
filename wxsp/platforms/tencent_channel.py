@@ -1,82 +1,37 @@
-"""视频号发布核心 —— patchright 驱动(M5)。"""
+"""视频号发布核心 —— patchright 驱动(M5)。
+
+只负责浏览器交互(打开页 → 填表 → 点发布)。claim / DB 状态机 / 通知 / 飞书回写
+等无差别 plumbing 全在 `wxsp/platforms/runner.py` 的共享编排器里。
+"""
 
 from __future__ import annotations
 
+import json as _json
 import random
 import re
 import time
-from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from loguru import logger
 from patchright.sync_api import Page
-from sqlmodel import Session
 
 import wxsp.apc
-from wxsp.browser import browser_context
 from wxsp.config import Settings
-from wxsp.db import claim_task, get_engine, init_db, session_scope
 from wxsp.errors import (
     CookieExpired,
     ElementNotFound,
     NetworkError,
-    PublisherError,
     RiskControl,
     UploadFailed,
     VideoInvalid,
-    classify,
 )
-from wxsp.feishu import FeishuApiError, make_client, writeback_row
-from wxsp.models import Account, Task, Video
-from wxsp.nas import cleanup_tmp, stage_to_tmp
-from wxsp.notify import NotifyEvent, error_type_cn, notify, step_cn
+from wxsp.models import Account
+from wxsp.nas import stage_to_tmp
 from wxsp.platforms import tencent_selectors as sel
-from wxsp.platforms.base import PublishResult
-
-# error_type → (notify type, level, 中文标题)
-_NOTIFY_BY_ERROR: dict[str, tuple[str, str, str]] = {
-    "cookie_expired": ("cookie_expired", "error", "登录态失效,等待扫码"),
-    "risk_control": ("risk_control", "error", "风控触发,账号已暂停 24 小时"),
-    "element_not_found": ("element_not_found", "warn", "页面元素未找到,视频号可能改版"),
-    "nas_unreachable": ("nas_unreachable", "error", "存储不可达"),
-}
-
-
-def screenshot(
-    page: Page,
-    *,
-    task_id: int,
-    step: str,
-    screenshots_root: Path,
-    now: datetime | None = None,
-) -> Path:
-    """保存截图到 `screenshots_root/{YYYYMM}/{task_id}_{step}.png`,返回路径。
-
-    `screenshots_root` 通常是 `logs/screenshots`(由 settings.app.logs_dir 派生);
-    `now` 注入用于测试,默认 `datetime.now()`。截图自身失败不抛(避免掩盖原始错误)。
-    """
-    now = now or datetime.now()
-    month_dir = screenshots_root / now.strftime("%Y%m")
-    month_dir.mkdir(parents=True, exist_ok=True)
-    path = month_dir / f"{task_id}_{step}.png"
-    try:
-        page.screenshot(path=str(path), full_page=False)
-    except Exception as exc:
-        logger.warning(f"截图失败 task_id={task_id} step={step}: {exc}")
-    return path
-
-
-def random_pause(
-    range_seconds: tuple[float, float],
-    *,
-    sleep: Callable[[float], None] = time.sleep,
-) -> None:
-    """步骤间 1-3 秒随机停顿(模拟人工);`sleep` 注入用于测试。"""
-    low, high = range_seconds
-    sleep(random.uniform(low, high))
-
+from wxsp.platforms.base import PlatformSpec, PublishContext, PublishResult, TaskBundle
+from wxsp.platforms.runner import random_pause, run_publish, screenshot
 
 # ============== 步骤函数(每个 1 个小函数) ==============
 # 设计原则:
@@ -403,374 +358,107 @@ def extract_remote_video_id_and_url(page: Page) -> tuple[str | None, str | None]
         return None, None
 
 
-# ============== publish_one() 顶层编排 ==============
+# ============== 平台步骤回调 + Spec ==============
 
 
-def _load_task_bundle(session: Session, task_id: int) -> tuple[Task, Video, Account]:
-    task = session.get(Task, task_id)
-    if task is None:
-        raise LookupError(f"Task id={task_id} 不存在")
-    video = session.get(Video, task.video_id)
-    account = session.get(Account, task.account_id)
-    if video is None or account is None:
-        raise LookupError(f"Task {task_id} 的 video/account 缺失")
-    return task, video, account
+def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishContext) -> None:
+    """[1]-[13] 打开页 → 上传 → 填表 → 风控探测(止于 dry-run gate 之前)。
 
-
-def _publish_one_body(
-    task_id: int,
-    *,
-    dry_run: bool,
-    settings: Settings,
-) -> PublishResult:
-    """跑视频号发布的 20 个步骤,返回 PublishResult。
-
-    - 入口先 `claim_task(task_id)`(原子幂等锁)。拿不到 → AlreadyClaimed。
-    - 拿到后串行跑 [1-13];dry_run=True 在 [13] 之后截图返回,不点发表。
-    - 任何 PublisherError(及 patchright Error)→ classify → 写 last_error_type
-      + **失败时截图存档** + status=failed。
-    - 成功 → status=success + remote_url/remote_video_id(尽力而为)。
-    - dry_run 成功 → status 写回 pending,且 claim 留下的 lease/attempts/started_at
-      全部抹掉(task 视作没跑过)。
-    - **风控触发 → account.paused_until = now+24h**(CLAUDE.md 核心约束)。
-    - 不管成败,最后 cleanup_tmp。
+    视频本体由编排器已 stage 好传进来;封面在此处按需 stage(仅当配了封面)。
     """
-    import json as _json
+    step_pause = ctx.step_pause
+    upload_timeout = ctx.settings.publisher.upload_timeout_seconds
 
-    engine = get_engine()
-    init_db(engine)
-    screenshots_root = settings.app.logs_dir / "screenshots"
-    tmp_root = settings.app.data_dir / "tmp"
-    upload_timeout = settings.publisher.upload_timeout_seconds
-    step_pause = settings.publisher.step_pause_seconds
-
-    # 1. 幂等抢锁(claim_task 自己 commit)
-    with Session(engine) as session:
-        from wxsp.publisher import AlreadyClaimed
-
-        if not claim_task(session, task_id):
-            raise AlreadyClaimed(f"Task {task_id} 不在 pending 或已被占用")
-
-    # 2. 加载 Task/Video/Account 快照
-    with Session(engine) as session:
-        task, video, account = _load_task_bundle(session, task_id)
-        task_publish_at = task.publish_at
-        video_record_id = video.id  # = 飞书 record_id(M7 回写用)
-        video_file_path = Path(video.file_path)
-        video_title = video.title
-        video_description = video.description
-        video_tags = _json.loads(video.tags_json or "[]")
-        video_cover_path = Path(video.cover_path) if video.cover_path else None
-        video_topic = video.topic
-        video_original = video.original_claim
-        user_data_dir = Path(account.user_data_dir)
-        account_id = account.id  # 风控触发时用
-        task_platform = task.platform
-
-    result = PublishResult(task_id=task_id, ok=False, dry_run=dry_run)
-    last_step = "init"
-
-    try:
-        # APC 守门(spec §3.3 注入点):dev-mode 永远 True;打包模式看 APC 判决
-        apc_passed = wxsp.apc.check_pass()
-
-        # [1] stage NAS → tmp
-        last_step = "stage"
-        staged = stage_to_tmp(video_file_path, task_id=task_id, tmp_root=tmp_root)
-        staged_cover = None
-        if video_cover_path is not None:
-            staged_cover = stage_to_tmp(video_cover_path, task_id=task_id, tmp_root=tmp_root)
-
-        # [2] 启浏览器(headless 跟 settings);带账号指纹避免视频号"同设备多账号"风控
-        last_step = "browser"
-        with browser_context(
-            user_data_dir,
-            headless=settings.publisher.headless,
-            account_id=account_id,
-            platform="tencent_channel",
-        ) as page:
-            try:
-                last_step = "open"
-                open_publish_page(page)
-                random_pause(step_pause)
-
-                last_step = "login"
-                verify_logged_in(page)
-                random_pause(step_pause)
-
-                # APC 拒绝时装"等待上传区域超时"故障(spec §3.3)
-                if not apc_passed:
-                    last_step = "wait_upload_area"
-                    time.sleep(random.uniform(45, 75))
-                    shot = screenshot(
-                        page,
-                        task_id=task_id,
-                        step="wait_upload_area",
-                        screenshots_root=screenshots_root,
-                    )
-                    result.screenshots.append(str(shot))
-                    raise ElementNotFound("等待上传区域超时(60s)")
-
-                last_step = "upload"
-                upload_video(page, file_path=staged, timeout_seconds=upload_timeout)
-                random_pause(step_pause)
-
-                last_step = "title"
-                fill_title(page, title=video_title)
-                random_pause(step_pause)
-
-                last_step = "desc"
-                fill_description(page, description=video_description)
-                random_pause(step_pause)
-
-                last_step = "tags"
-                add_tags(page, tags=video_tags)
-                random_pause(step_pause)
-
-                last_step = "cover"
-                set_cover(page, cover_path=staged_cover)
-                random_pause(step_pause)
-
-                last_step = "topic"
-                bind_topic(page, topic=video_topic)
-                random_pause(step_pause)
-
-                last_step = "original"
-                toggle_original(page, original_claim=video_original)
-                random_pause(step_pause)
-
-                last_step = "location"
-                disable_location(page)
-                random_pause(step_pause)
-
-                last_step = "schedule"
-                set_schedule(page, publish_at=task_publish_at)
-                random_pause(step_pause)
-
-                last_step = "risk"
-                risk_control_probe(page)
-
-                # ★ [14] DRY_RUN GATE
-                if dry_run:
-                    last_step = "dryrun_gate"
-                    shot = screenshot(
-                        page,
-                        task_id=task_id,
-                        step="dryrun_gate",
-                        screenshots_root=screenshots_root,
-                    )
-                    result.screenshots.append(str(shot))
-                    result.ok = True
-                    return result
-
-                last_step = "publish"
-                click_publish(page)
-
-                last_step = "wait_success"
-                wait_for_success_indicator(page)
-
-                last_step = "extract"
-                vid, url = extract_remote_video_id_and_url(page)
-                result.remote_video_id = vid
-                result.remote_url = url
-
-            except Exception:
-                # I1: 趁 page 还活着截图存档(截图自身失败不抛,避免掩盖原异常)
-                try:
-                    shot = screenshot(
-                        page,
-                        task_id=task_id,
-                        step=f"err_{last_step}",
-                        screenshots_root=screenshots_root,
-                    )
-                    result.screenshots.append(str(shot))
-                    # 同时落一份 HTML(扩展名换成 .html),便于事后离线分析页面结构。
-                    # 截图都失败的话 page 可能已死,这里再 try 一次单独的失败兜底。
-                    try:
-                        html_path = Path(str(shot)).with_suffix(".html")
-                        html_path.write_text(page.content(), encoding="utf-8")
-                    except Exception as html_exc:
-                        logger.warning(f"失败时存 HTML 失败 task_id={task_id}: {html_exc}")
-                except Exception as ss_exc:
-                    logger.warning(f"失败时截图也失败 task_id={task_id}: {ss_exc}")
-                raise
-
-        result.ok = True
-        return result
-
-    except PublisherError as exc:
-        kind = classify(exc)
-        result.error_type = kind
-        result.error_msg = f"step={last_step}: {exc}"
-        logger.error(result.error_msg)
-        return result
-    except Exception as exc:
-        kind = classify(exc)
-        result.error_type = kind
-        result.error_msg = f"step={last_step}: {exc}"
-        logger.exception("publish 顶层未分类异常")
-        return result
-    except KeyboardInterrupt:
-        result.error_type = "interrupted"
-        result.error_msg = f"step={last_step}: 用户中断(Ctrl-C)"
-        logger.warning(result.error_msg)
-        raise  # finally 写 DB 后,KeyboardInterrupt 继续向上传播
-    finally:
-        # cleanup tmp(本地文件系统操作,失败不影响后续 DB 写)
-        try:
-            cleanup_tmp(task_id=task_id, tmp_root=tmp_root)
-        except Exception as exc:
-            logger.warning(f"cleanup_tmp 失败 task_id={task_id}: {exc}")
-
-        # 决定 task 最终状态
-        if result.ok and not result.dry_run:
-            new_status = "success"
-        elif result.dry_run and result.ok:
-            new_status = "pending"  # dry_run 没真发 → 回到可执行
-        elif result.error_type == "interrupted":
-            new_status = "interrupted"
-        elif result.error_type == "cookie_expired":
-            # 登录态失效不是 task 自身的问题(同样的视频换个登录态就能发)。
-            # 标 failed 会让运营在重扫后忘记重跑(queue_today 只挑 pending),漏发。
-            # 改成回退 pending + 不动飞书状态 + 保留 attempts(审计能看出"跑过 1 次")。
-            # cookie_status 在下面 I3b 仍写 expired,scheduler pre-flight 下一轮会跳。
-            # 运营扫码后 login 流程把 cookie_status 写回 ok,task 自动被 queue_today 重新拿到。
-            new_status = "pending"
-        else:
-            new_status = "failed"
-
-        with session_scope(engine) as session:
-            task_now = session.get(Task, task_id)
-            assert task_now is not None
-            task_now.status = new_status
-            task_now.remote_url = result.remote_url
-            task_now.remote_video_id = result.remote_video_id
-            task_now.last_error_type = result.error_type
-            task_now.last_error_msg = result.error_msg
-            task_now.screenshots_json = _json.dumps(result.screenshots, ensure_ascii=False)
-
-            if result.dry_run and result.ok:
-                # I2: dry_run 成功 → 抹掉 claim 痕迹,task 视作没跑过
-                task_now.lease_token = None
-                task_now.lease_expires_at = None
-                task_now.started_at = None
-                task_now.attempts = max(0, task_now.attempts - 1)
-                task_now.finished_at = None
-            elif result.error_type == "cookie_expired":
-                # cookie_expired 回退分支:清 lease 让下轮 queue_today/claim_task 能抢回来。
-                # attempts 保留(已 +1),let 运营在 Tasks 列表看出"跑过 1 次失败"。
-                task_now.lease_token = None
-                task_now.lease_expires_at = None
-                task_now.started_at = None
-                task_now.finished_at = None
-            else:
-                task_now.finished_at = datetime.now()
-
-            # I3: 风控 → 暂停账号 24h(CLAUDE.md 核心约束 §1)
-            if result.error_type == "risk_control":
-                account_now = session.get(Account, account_id)
-                if account_now is not None:
-                    account_now.paused_until = datetime.now() + timedelta(hours=24)
-                    logger.warning(f"风控触发,账号 {account_id} 暂停 24h")
-
-            # I3b: 登录态失效 → 回写 Account.cookie_status=expired。
-            # 原因:login 流程只校验主页登录态,publisher 校验发布页,两者可能不一致
-            # (微信号能进主页但发布页拒绝)。不回写的话 /accounts 还显示绿色 ok,
-            # 运营会困惑。回写后 UI 立即显示"已过期",下一轮 scheduler pre-flight 也会跳。
-            if result.error_type == "cookie_expired":
-                account_now = session.get(Account, account_id)
-                if account_now is not None:
-                    account_now.cookie_status = "expired"
-                    logger.warning(
-                        f"[publisher] 登录态失效,账号 {account_id} cookie_status → expired"
-                    )
-
-            # I4: 失败时派 NotifyEvent(同事务写 Event 表 + 按 notify_on 派外部渠道)
-            #   - dry-run 失败不告警(开发期场景)
-            #   - 5 类映射:cookie_expired / risk_control / element_not_found / nas_unreachable
-            #     其它任何 error_type → 兜底 task_failed
-            if not result.ok and not result.dry_run:
-                error_type = result.error_type or "unknown"
-                notify_type, level, title = _NOTIFY_BY_ERROR.get(
-                    error_type,
-                    ("task_failed", "error", f"任务失败:{error_type_cn(error_type)}"),
-                )
-                # element_not_found 给 title 拼上"在哪一步",运营一眼看到改版的位置
-                if error_type == "element_not_found":
-                    step_zh = step_cn(last_step)
-                    title = f"元素未找到 · {step_zh} —— 视频号可能改版"
-                # 通知里"账号"那行优先显示中文名;config 没配的回退到 ID
-                account_cfg = settings.accounts.get(account_id)
-                display_name = account_cfg.display_name if account_cfg else None
-                notify(
-                    NotifyEvent(
-                        type=notify_type,
-                        level=level,
-                        title=title,
-                        content=result.error_msg or "(无错误信息)",
-                        context={
-                            "错误类型": error_type_cn(error_type),
-                            "最近步骤": step_cn(last_step),
-                        },
-                        task_id=task_id,
-                        account_id=account_id,
-                        account_display_name=display_name,
-                        platform=task_platform,
-                    ),
-                    session=session,
-                    settings=settings,
-                )
-
-        # I5: 终态回写飞书 Bitable(放 session_scope 之外,HTTP 调用不持 DB 事务)。
-        #   dry-run / feishu disabled / write_back_enabled=False 时跳过;API 异常被吞。
-        _writeback_to_feishu(video_record_id, result, settings)
-
-
-def _writeback_to_feishu(
-    record_id: str,
-    result: PublishResult,
-    settings: Settings,
-) -> None:
-    """任务终态回写飞书 Bitable。
-
-    跳过条件:dry-run / feishu disabled / write_back_enabled=False /
-    cookie_expired(本轮没真给 task 机会,飞书状态保留'已计划'等扫码后重跑)。
-    成功 → 状态=已发布 (+ 已发布链接,如能拿到)。
-    失败 → 状态=失败 + 错误信息。
-    API 异常被吞(只 log),不能让飞书挂掉主流程。
-    """
-    if result.dry_run:
-        return
-    if not settings.feishu.enabled or not settings.feishu.sync.write_back_enabled:
-        return
-    if result.error_type == "cookie_expired":
-        # 配合 publisher finally 的"task 回退 pending"策略:飞书侧也保持'已计划',
-        # 运营扫码后下轮 queue_today 自动重跑。告警靠 notify(cookie_expired)。
-        return
-
-    fm = settings.feishu.field_map
-    fields: dict[str, str] = {}
-    if result.ok:
-        fields[fm.status] = "已发布"
-        if result.remote_url:
-            fields[fm.remote_url] = result.remote_url
-    else:
-        fields[fm.status] = "失败"
-        fields[fm.error_message] = result.error_msg or "(无错误信息)"
-
-    try:
-        client = make_client(settings.feishu.app_id, settings.feishu.app_secret)
-        writeback_row(
-            client,
-            app_token=settings.feishu.bitable.app_token,
-            table_id=settings.feishu.bitable.table_id,
-            record_id=record_id,
-            fields=fields,
+    staged_cover = None
+    if bundle.video_cover_path is not None:
+        staged_cover = stage_to_tmp(
+            bundle.video_cover_path, task_id=ctx.task_id, tmp_root=ctx.tmp_root
         )
-    except FeishuApiError as exc:
-        logger.warning(f"[publisher] 飞书回写失败 task={result.task_id} record={record_id}: {exc}")
-    except Exception as exc:
-        logger.exception(f"[publisher] 飞书回写未预料异常 task={result.task_id}: {exc}")
+
+    # APC 守门(spec §3.3 注入点):dev-mode 永远 True;打包模式看 APC 判决
+    apc_passed = wxsp.apc.check_pass()
+
+    ctx.last_step = "open"
+    open_publish_page(page)
+    random_pause(step_pause)
+
+    ctx.last_step = "login"
+    verify_logged_in(page)
+    random_pause(step_pause)
+
+    # APC 拒绝时装"等待上传区域超时"故障(spec §3.3)
+    if not apc_passed:
+        ctx.last_step = "wait_upload_area"
+        time.sleep(random.uniform(45, 75))
+        shot = screenshot(
+            page,
+            task_id=ctx.task_id,
+            step="wait_upload_area",
+            screenshots_root=ctx.screenshots_root,
+        )
+        ctx.result.screenshots.append(str(shot))
+        raise ElementNotFound("等待上传区域超时(60s)")
+
+    ctx.last_step = "upload"
+    upload_video(page, file_path=staged, timeout_seconds=upload_timeout)
+    random_pause(step_pause)
+
+    ctx.last_step = "title"
+    fill_title(page, title=bundle.title)
+    random_pause(step_pause)
+
+    ctx.last_step = "desc"
+    fill_description(page, description=bundle.description)
+    random_pause(step_pause)
+
+    ctx.last_step = "tags"
+    add_tags(page, tags=_json.loads(bundle.tags_json or "[]"))
+    random_pause(step_pause)
+
+    ctx.last_step = "cover"
+    set_cover(page, cover_path=staged_cover)
+    random_pause(step_pause)
+
+    ctx.last_step = "topic"
+    bind_topic(page, topic=bundle.topic)
+    random_pause(step_pause)
+
+    ctx.last_step = "original"
+    toggle_original(page, original_claim=bundle.original_claim)
+    random_pause(step_pause)
+
+    ctx.last_step = "location"
+    disable_location(page)
+    random_pause(step_pause)
+
+    ctx.last_step = "schedule"
+    set_schedule(page, publish_at=bundle.publish_at)
+    random_pause(step_pause)
+
+    ctx.last_step = "risk"
+    risk_control_probe(page)
+
+
+def _post_publish(page: Page, bundle: TaskBundle, ctx: PublishContext) -> None:
+    """[15]-[17] 点发表 → 等跳转到 post/list → 抽取 remote_video_id / url(尽力而为)。"""
+    ctx.last_step = "publish"
+    click_publish(page)
+
+    ctx.last_step = "wait_success"
+    wait_for_success_indicator(page)
+
+    ctx.last_step = "extract"
+    vid, url = extract_remote_video_id_and_url(page)
+    ctx.result.remote_video_id = vid
+    ctx.result.remote_url = url
+
+
+TENCENT_SPEC = PlatformSpec(
+    platform_key="tencent_channel",
+    display_name="视频号",
+    pre_publish=_pre_publish,
+    post_publish=_post_publish,
+)
 
 
 class TencentChannelPublisher:
@@ -783,8 +471,8 @@ class TencentChannelPublisher:
         dry_run: bool = False,
         settings: Settings,
     ) -> PublishResult:
-        """跑视频号发布的完整流程。"""
-        return _publish_one_body(task_id, dry_run=dry_run, settings=settings)
+        """跑视频号发布的完整流程(共享编排器 + 视频号步骤)。"""
+        return run_publish(task_id, dry_run=dry_run, settings=settings, spec=TENCENT_SPEC)
 
     def login(self, account: Account, settings: Settings) -> bool:
         """扫码登录: 打开浏览器, 等用户在微信上扫码。"""

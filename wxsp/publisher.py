@@ -6,16 +6,14 @@ from wxsp.config import Settings
 from wxsp.db import get_engine, init_db
 from wxsp.models import Task
 from wxsp.platforms.base import (  # re-export for callers
+    AlreadyClaimed,
     PlatformPublisher,
     PublishResult,
 )
 from wxsp.platforms.taobao_guanghe import TaobaoGuanghePublisher
 from wxsp.platforms.tencent_channel import TencentChannelPublisher
 
-
-class AlreadyClaimed(Exception):
-    """task 已被其它 worker 占用 / 不在可执行状态."""
-
+__all__ = ["AlreadyClaimed", "PublishResult", "publish"]
 
 _PUBLISHERS: dict[str, PlatformPublisher] = {
     "tencent_channel": TencentChannelPublisher(),

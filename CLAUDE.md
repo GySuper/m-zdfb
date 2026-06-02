@@ -138,19 +138,24 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 
 ### PlatformPublisher 协议
 
-`wxsp/platforms/base.py` 定义 `PlatformPublisher` 协议。每个平台实现 `publish_one()` + `login()`,只管浏览器交互,不碰 DB/通知/飞书回写。
+`wxsp/platforms/base.py` 定义共享类型(`PublishResult` / `PlatformPublisher` 协议 / `TaskBundle` / `PublishContext` / `PlatformSpec` / `AlreadyClaimed`)。
+
+**共享编排器(`runner.py`)**:claim → 加载快照 → 启浏览器 → 跑平台步骤 → 失败截图存档 → 错误分类 → finally 状态机(task 终态 / 风控暂停 24h / cookie_status / 通知 / 飞书回写)这一整套**平台无差别 plumbing 全在 `runner.py::run_publish()`**,各平台不再各抄一份。
+
+**平台 adapter** 只声明一个 `PlatformSpec`(两段步骤回调 `pre_publish` / `post_publish`,前者止于 dry-run gate 之前,后者点发布 + 抽取 remote_url)+ 步骤函数 + `login()`。只管浏览器交互,不碰 DB/通知/飞书。新增平台 = 写 selectors + 步骤函数 + 一个 `PlatformSpec` + 在 `publisher.py` 路由表注册一行。
 
 ```
 wxsp/platforms/
 ├── __init__.py
-├── base.py                  # PublishResult + PlatformPublisher 协议
-├── tencent_channel.py       # 视频号发布
+├── base.py                  # 共享类型:PublishResult / 协议 / TaskBundle / PublishContext / PlatformSpec / AlreadyClaimed
+├── runner.py                # 共享编排器 run_publish() + plumbing(claim/状态机/通知/飞书回写)
+├── tencent_channel.py       # 视频号步骤函数 + TENCENT_SPEC
 ├── tencent_selectors.py     # 视频号选择器
-├── taobao_guanghe.py        # 淘宝光合发布
+├── taobao_guanghe.py        # 淘宝光合步骤函数 + TAOBAO_SPEC
 └── taobao_selectors.py      # 淘宝光合选择器
 ```
 
-`publisher.py` 是薄路由层,根据 `task.platform` 调对应的 `PlatformPublisher.publish_one()`。
+`publisher.py` 是薄路由层,根据 `task.platform` 调对应的 `PlatformPublisher.publish_one()`(内部转调 `runner.run_publish(..., spec=)`)。
 
 ### 配置文件:每平台独立
 
@@ -187,10 +192,11 @@ wxsp/
 │   ├── scheduler.py                   # 每平台独立 cron + 手动 fire (APScheduler 包装)
 │   ├── publisher.py                   # 薄路由层,根据 task.platform 路由到对应 platform
 │   ├── platforms/                     # 平台 adapter 实现
-│   │   ├── base.py                    #   PublishResult + PlatformPublisher 协议
-│   │   ├── tencent_channel.py         #   视频号发布核心
+│   │   ├── base.py                    #   共享类型(PublishResult/协议/TaskBundle/PublishContext/PlatformSpec/AlreadyClaimed)
+│   │   ├── runner.py                  #   共享编排器 run_publish() + plumbing(claim/状态机/通知/飞书回写)
+│   │   ├── tencent_channel.py         #   视频号步骤函数 + TENCENT_SPEC
 │   │   ├── tencent_selectors.py       #   视频号选择器
-│   │   ├── taobao_guanghe.py          #   淘宝光合发布核心
+│   │   ├── taobao_guanghe.py          #   淘宝光合步骤函数 + TAOBAO_SPEC
 │   │   └── taobao_selectors.py        #   淘宝光合选择器
 │   ├── browser.py                     # patchright context 工厂 + per-account 指纹注入
 │   ├── fingerprint.py                 # per-account 设备指纹生成 + JSON 持久化 + JS init script

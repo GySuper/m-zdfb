@@ -122,9 +122,9 @@ def test_publish_dry_run_short_circuits_before_click_publish(
     fake_ctx.__exit__.return_value = False
 
     with (
-        patch("wxsp.platforms.tencent_channel.browser_context", return_value=fake_ctx),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.browser_context", return_value=fake_ctx),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch.multiple(
             "wxsp.platforms.tencent_channel",
             open_publish_page=fake_step("open"),
@@ -227,12 +227,12 @@ def test_publish_failure_writes_status_failed_with_screenshot(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
-        patch("wxsp.platforms.tencent_channel.screenshot", side_effect=fake_screenshot),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
+        patch("wxsp.platforms.runner.screenshot", side_effect=fake_screenshot),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
         result = publish(task_id, dry_run=False, settings=settings)
@@ -276,13 +276,13 @@ def test_publish_cookie_expired_keeps_task_pending_for_relogin(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
@@ -325,13 +325,13 @@ def test_publish_risk_control_pauses_account_24h(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
@@ -364,13 +364,13 @@ def test_publish_dry_run_success_resets_claim_residue(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
@@ -425,13 +425,13 @@ def test_publish_failure_writes_event_with_mapped_notify_type(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
@@ -467,13 +467,13 @@ def test_publish_success_does_not_write_notify_event(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
@@ -505,13 +505,13 @@ def test_publish_dry_run_failure_skips_notify_event(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
@@ -558,17 +558,17 @@ def test_publish_success_writes_back_status_and_url_to_feishu(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
-        patch("wxsp.platforms.tencent_channel.make_client", return_value=MagicMock()),
-        patch("wxsp.platforms.tencent_channel.writeback_row", side_effect=fake_writeback),
+        patch("wxsp.platforms.runner.make_client", return_value=MagicMock()),
+        patch("wxsp.platforms.runner.writeback_row", side_effect=fake_writeback),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
         result = publish(task_id, dry_run=False, settings=settings)
@@ -596,17 +596,17 @@ def test_publish_success_without_remote_url_writes_back_status_only(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
-        patch("wxsp.platforms.tencent_channel.make_client", return_value=MagicMock()),
-        patch("wxsp.platforms.tencent_channel.writeback_row", side_effect=fake_writeback),
+        patch("wxsp.platforms.runner.make_client", return_value=MagicMock()),
+        patch("wxsp.platforms.runner.writeback_row", side_effect=fake_writeback),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
         result = publish(task_id, dry_run=False, settings=settings)
@@ -641,17 +641,17 @@ def test_publish_failure_writes_back_status_failed_with_error_message(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
-        patch("wxsp.platforms.tencent_channel.make_client", return_value=MagicMock()),
-        patch("wxsp.platforms.tencent_channel.writeback_row", side_effect=fake_writeback),
+        patch("wxsp.platforms.runner.make_client", return_value=MagicMock()),
+        patch("wxsp.platforms.runner.writeback_row", side_effect=fake_writeback),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
         result = publish(task_id, dry_run=False, settings=settings)
@@ -683,17 +683,17 @@ def test_publish_cookie_expired_skips_feishu_writeback(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
-        patch("wxsp.platforms.tencent_channel.make_client", return_value=MagicMock()) as mc,
-        patch("wxsp.platforms.tencent_channel.writeback_row") as wb,
+        patch("wxsp.platforms.runner.make_client", return_value=MagicMock()) as mc,
+        patch("wxsp.platforms.runner.writeback_row") as wb,
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
         result = publish(task_id, dry_run=False, settings=settings)
@@ -716,17 +716,17 @@ def test_publish_dry_run_skips_feishu_writeback(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
-        patch("wxsp.platforms.tencent_channel.make_client", return_value=MagicMock()) as mc,
-        patch("wxsp.platforms.tencent_channel.writeback_row") as wb,
+        patch("wxsp.platforms.runner.make_client", return_value=MagicMock()) as mc,
+        patch("wxsp.platforms.runner.writeback_row") as wb,
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
         result = publish(task_id, dry_run=True, settings=settings)
@@ -749,17 +749,17 @@ def test_publish_feishu_disabled_skips_writeback(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
-        patch("wxsp.platforms.tencent_channel.make_client") as mc,
-        patch("wxsp.platforms.tencent_channel.writeback_row") as wb,
+        patch("wxsp.platforms.runner.make_client") as mc,
+        patch("wxsp.platforms.runner.writeback_row") as wb,
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
         result = publish(task_id, dry_run=False, settings=settings)
@@ -782,17 +782,17 @@ def test_publish_write_back_disabled_skips_writeback(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
-        patch("wxsp.platforms.tencent_channel.make_client") as mc,
-        patch("wxsp.platforms.tencent_channel.writeback_row") as wb,
+        patch("wxsp.platforms.runner.make_client") as mc,
+        patch("wxsp.platforms.runner.writeback_row") as wb,
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),
     ):
         result = publish(task_id, dry_run=False, settings=settings)
@@ -816,18 +816,18 @@ def test_publish_writeback_feishu_api_error_does_not_propagate(
 
     with (
         patch(
-            "wxsp.platforms.tencent_channel.browser_context",
+            "wxsp.platforms.runner.browser_context",
             return_value=_fake_browser_ctx(tmp_path),
         ),
-        patch("wxsp.platforms.tencent_channel.stage_to_tmp", return_value=tmp_path / "v.mp4"),
-        patch("wxsp.platforms.tencent_channel.cleanup_tmp"),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
         patch(
-            "wxsp.platforms.tencent_channel.screenshot",
+            "wxsp.platforms.runner.screenshot",
             side_effect=lambda *a, **kw: tmp_path / "s.png",
         ),
-        patch("wxsp.platforms.tencent_channel.make_client", return_value=MagicMock()),
+        patch("wxsp.platforms.runner.make_client", return_value=MagicMock()),
         patch(
-            "wxsp.platforms.tencent_channel.writeback_row",
+            "wxsp.platforms.runner.writeback_row",
             side_effect=FeishuApiError("API 持续失败"),
         ),
         patch.multiple("wxsp.platforms.tencent_channel", **overrides),

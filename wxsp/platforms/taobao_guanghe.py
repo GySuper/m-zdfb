@@ -1,90 +1,39 @@
-# ruff: noqa: RUF001, RUF002
-"""淘宝光合平台发布实现 — 18 步，patchright 驱动，iframe 内操作。"""
+# ruff: noqa: RUF001
+"""淘宝光合平台发布实现 — patchright 驱动,iframe 内操作。
+
+只负责浏览器交互(打开页 → 填表 → 点发布)。claim / DB 状态机 / 通知 / 飞书回写
+等无差别 plumbing 全在 `wxsp/platforms/runner.py` 的共享编排器里。
+"""
 
 from __future__ import annotations
 
 import json as _json
-import random
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
 from patchright.sync_api import FrameLocator, Page
-from sqlmodel import Session
 
 from wxsp.browser import browser_context
 from wxsp.config import Settings
-from wxsp.db import claim_task, get_engine, init_db, session_scope
 from wxsp.errors import (
     CookieExpired,
     ElementNotFound,
     NetworkError,
     ProductNotFound,
-    PublisherError,
     RiskControl,
     TopicNotFound,
     UploadFailed,
-    classify,
 )
-from wxsp.feishu import FeishuApiError, make_client, writeback_row
-from wxsp.models import Account, Task, Video
-from wxsp.nas import cleanup_tmp, stage_to_tmp
-from wxsp.notify import NotifyEvent, error_type_cn, notify, step_cn
+from wxsp.models import Account
 from wxsp.platforms import taobao_selectors as sel
-from wxsp.platforms.base import PublishResult
-
-# error_type → (notify type, level, 中文标题)
-_NOTIFY_BY_ERROR: dict[str, tuple[str, str, str]] = {
-    "cookie_expired": ("cookie_expired", "error", "登录态失效,等待扫码"),
-    "risk_control": ("risk_control", "error", "风控触发,账号已暂停 24 小时"),
-    "element_not_found": ("element_not_found", "warn", "页面元素未找到,淘宝光合可能改版"),
-    "nas_unreachable": ("nas_unreachable", "error", "存储不可达"),
-}
-
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
-def _random_pause(step_pause: tuple[float, float]) -> None:
-    time.sleep(random.uniform(*step_pause))
-
-
-def _screenshot(
-    page: Page,
-    *,
-    task_id: int,
-    step: str,
-    screenshots_root: Path,
-    now: datetime | None = None,
-) -> Path:
-    now = now or datetime.now()
-    month_dir = screenshots_root / now.strftime("%Y%m")
-    month_dir.mkdir(parents=True, exist_ok=True)
-    path = month_dir / f"{task_id}_{step}.png"
-    try:
-        page.screenshot(path=str(path), full_page=False)
-    except Exception:
-        logger.warning(f"[taobao] screenshot failed step={step}")
-    return path
+from wxsp.platforms.base import PlatformSpec, PublishContext, PublishResult, TaskBundle
+from wxsp.platforms.runner import random_pause, run_publish
 
 
 def _iframe(page: Page) -> FrameLocator:
     return page.frame_locator(sel.IFRAME_SELECTOR)
-
-
-def _load_task_bundle(session: Session, task_id: int) -> tuple[Task, Video, Account]:
-    task = session.get(Task, task_id)
-    if task is None:
-        raise ValueError(f"Task {task_id} not found")
-    video = session.get(Video, task.video_id)
-    if video is None:
-        raise ValueError(f"Video {task.video_id} not found")
-    account = session.get(Account, task.account_id)
-    if account is None:
-        raise ValueError(f"Account {task.account_id} not found")
-    return task, video, account
 
 
 # ---------------------------------------------------------------------------
@@ -119,18 +68,42 @@ def _verify_logged_in(page: Page) -> None:
 
 
 def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> None:
+    """上传视频并等待处理完成。
+
+    不能只看"等待视频上传"文字是否消失:set_input_files 后该文字尚未渲染时,首轮 count()
+    就为 0 → 立刻误判完成(竞态,大视频尤其会一传就被当成传完)。改两阶段:
+      A. 先确认真的进入"上传中"(等"等待视频上传"出现;或极快直接出"视频封面"算完成);
+      B. 确认过上传中后,再等其消失/封面就绪 → 才算完成,消除首轮竞态。
+    """
     iframe = _iframe(page)
-    file_input = iframe.locator(sel.FILE_INPUT)
-    file_input.set_input_files(str(file_path))
+    iframe.locator(sel.FILE_INPUT).set_input_files(str(file_path))
+    waiting = iframe.locator(f'text="{sel.COVER_WAITING_TEXT}"')
+    ready = iframe.locator(f'text="{sel.COVER_READY_INDICATOR}"')
+
+    # 阶段A:给 UI 渲染时间,确认上传开始(最多 ~20s)
+    started = False
+    appear_deadline = time.time() + 20
+    while time.time() < appear_deadline:
+        if ready.count():
+            logger.info("[taobao] 视频已就绪(封面出现)")
+            return
+        if waiting.count():
+            started = True
+            break
+        time.sleep(0.5)
+
+    if not started:
+        # 没观察到"上传中":可能上传极快或文案变化。尽力而为继续(与原行为兼容,不静默 fail
+        # 也不强等),但已多给 20s 渲染窗口,比原来首轮即返回安全。
+        logger.warning("[taobao] 未观察到'等待视频上传'状态,继续(可能上传极快或文案变化)")
+        return
+
+    # 阶段B:已确认上传中 → 等"上传中"消失或封面就绪 → 完成(此时不再有竞态)
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
-        try:
-            cover_waiting = iframe.locator(f'text="{sel.COVER_WAITING_TEXT}"')
-            if not cover_waiting.count():
-                logger.info("[taobao] 封面生成完成")
-                return
-        except Exception:
-            pass
+        if ready.count() or not waiting.count():
+            logger.info("[taobao] 视频上传/处理完成")
+            return
         time.sleep(3)
     raise UploadFailed("视频上传/处理超时")
 
@@ -204,29 +177,30 @@ def _add_products(page: Page, product_ids: list[str]) -> None:
     time.sleep(1)
     iframe.locator(sel.PRODUCT_DIALOG_HEADING).wait_for(timeout=5_000)
     for pid in ids:
-        iframe.locator(sel.PRODUCT_SEARCH_INPUT).fill(pid)
-        iframe.locator(sel.PRODUCT_SEARCH_INPUT).press("Enter")
-        time.sleep(2)
-        # 商品弹窗有 2 个 checkbox:第 1 个是筛选器,第 2 个起才是商品
-        all_cbs = iframe.locator('input[type="checkbox"]').all()
-        skipped_filter = False
-        selected = False
-        for cb in all_cbs:
-            try:
-                if cb.is_visible():
-                    if not skipped_filter:
-                        skipped_filter = True
-                        continue  # 跳过筛选器 checkbox
-                    cb.check()
-                    selected = True
-                    logger.info(f"[taobao] 选中商品 pid={pid}")
-                    break
-            except Exception:
-                continue
-        # 搜索无结果时只剩筛选器一个可见 checkbox,必须按"没选到商品"判定,
-        # 否则会静默跳过商品继续发布(skipped_filter 不能当成功标志)。
-        if not selected:
-            raise ProductNotFound(f"商品ID '{pid}' 搜索无结果")
+        search = iframe.locator(sel.PRODUCT_SEARCH_INPUT)
+        search.fill(pid)
+        search.press("Enter")
+
+        # 结果以商品卡片呈现(不是每商品一个可见 checkbox)。按卡片标题链接 href 里的
+        # 商品ID 精确定位 —— 搜不到 → 链接永不出现 → 判 ProductNotFound。
+        link = iframe.locator(sel.PRODUCT_ITEM_LINK_BY_ID.format(pid=pid)).first
+        try:
+            link.wait_for(state="visible", timeout=8_000)
+        except Exception as err:
+            raise ProductNotFound(f"商品ID '{pid}' 搜索无结果") from err
+
+        # 上溯到卡片容器,勾选卡片内"商品选择"复选框(hover 才显,区别于顶部"筛选"复选框)。
+        # 先 hover 卡片让复选框显出,再直接点 input(opacity:0 盖在方框上,是真正接收点击的元素)。
+        card = link.locator(sel.PRODUCT_ITEM_CARD_ANCESTOR)
+        card.hover()
+        card.locator(sel.PRODUCT_ITEM_SELECT_CHECKBOX_INPUT).first.click()
+
+        # 校验真的勾上了:卡片的 item-select label 出现 "checked" class,不静默跳过
+        try:
+            card.locator(sel.PRODUCT_ITEM_SELECTED).wait_for(timeout=3_000)
+        except Exception as err:
+            raise ProductNotFound(f"商品ID '{pid}' 已搜到但勾选未生效") from err
+        logger.info(f"[taobao] 选中商品 pid={pid}")
     iframe.locator(sel.PRODUCT_CONFIRM_BUTTON).click()
     time.sleep(1)
     # 等弹窗关闭,否则 overlay 挡住后续步骤
@@ -296,11 +270,29 @@ def _set_declaration(page: Page, declaration: str | None) -> None:
 
 
 def _toggle_ai_optimize(page: Page, on: bool) -> None:
-    if not on:
-        return
+    """把"AI优化"开关设为目标状态。
+
+    平台默认**开启**,不能靠盲点 —— 必须先读当前 aria-checked,只在与目标不一致时才点
+    (盲点会把默认开的关掉,或把该关的留在开)。开关切换失败只 warn 不阻断发布
+    (非关键设置,对齐 disable_location 的处理)。
+    """
     iframe = _iframe(page)
     switch = iframe.locator(sel.AI_TOGGLE_SWITCH)
+    try:
+        switch.wait_for(state="visible", timeout=5_000)
+    except Exception:
+        logger.warning("[taobao] 未找到 AI优化开关,跳过(可能改版)")
+        return
+    if (switch.get_attribute("aria-checked") == "true") == on:
+        return  # 已是目标态
     switch.click()
+    # 轮询确认切到目标态(Fusion next-switch 的 aria-checked 立即反映)
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        if (switch.get_attribute("aria-checked") == "true") == on:
+            return
+        time.sleep(0.2)
+    logger.warning(f"[taobao] AI优化开关点击后仍非目标态 on={on},继续发布")
 
 
 def _disable_download(page: Page) -> None:
@@ -358,8 +350,108 @@ def _risk_control_probe(page: Page) -> None:
 
 
 # ---------------------------------------------------------------------------
-# publisher class
+# 平台步骤回调 + Spec + Publisher
 # ---------------------------------------------------------------------------
+
+
+def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishContext) -> None:
+    """[3]-[15] 打开页 → 上传 → 填表 → 商品 → 定时 → 声明 → 风控探测。
+
+    视频本体由编排器已 stage 好传进来(淘宝无独立封面文件,封面由平台自动生成)。
+    """
+    step_pause = ctx.step_pause
+    upload_timeout = ctx.settings.publisher.upload_timeout_seconds
+
+    # 商品 ID:优先 product_ids_json;迁移兼容 —— 为空时回退旧版存放处 tags_json
+    product_ids_raw = (
+        bundle.product_ids_json
+        if bundle.product_ids_json and bundle.product_ids_json != "[]"
+        else None
+    )
+    if product_ids_raw is None:
+        product_ids_raw = (
+            bundle.tags_json if bundle.tags_json and bundle.tags_json != "[]" else None
+        )
+
+    ctx.last_step = "open"
+    _open_publish_page(page)
+    random_pause(step_pause)
+
+    ctx.last_step = "login"
+    _verify_logged_in(page)
+    random_pause(step_pause)
+
+    ctx.last_step = "upload"
+    _upload_video(page, file_path=staged, timeout_seconds=upload_timeout)
+    random_pause(step_pause)
+
+    ctx.last_step = "cover"
+    _wait_cover_generated(page)
+    random_pause(step_pause)
+
+    ctx.last_step = "title"
+    _fill_title(page, title=bundle.title)
+    random_pause(step_pause)
+
+    ctx.last_step = "desc"
+    _fill_description(page, description=bundle.description)
+    random_pause(step_pause)
+
+    ctx.last_step = "topic"
+    _add_topic(page, topic_name=bundle.topic)
+    random_pause(step_pause)
+
+    ctx.last_step = "products"
+    product_ids_list: list[str] = []
+    if product_ids_raw:
+        try:
+            parsed = _json.loads(product_ids_raw)
+            if isinstance(parsed, list):
+                product_ids_list = [str(p) for p in parsed if p]
+        except (TypeError, _json.JSONDecodeError):
+            logger.warning(
+                f"[taobao] 商品 ID JSON 解析失败 task_id={ctx.task_id}:"
+                f" {product_ids_raw!r},跳过商品"
+            )
+    if product_ids_list:
+        _add_products(page, product_ids=product_ids_list)
+    random_pause(step_pause)
+
+    ctx.last_step = "schedule"
+    _set_schedule(page, publish_at=bundle.publish_at)
+    random_pause(step_pause)
+
+    ctx.last_step = "declaration"
+    _set_declaration(page, declaration=bundle.declaration)
+    random_pause(step_pause)
+
+    ctx.last_step = "ai"
+    _toggle_ai_optimize(page, on=bool(bundle.ai_optimize))
+    random_pause(step_pause)
+
+    ctx.last_step = "download"
+    _disable_download(page)
+    random_pause(step_pause)
+
+    ctx.last_step = "risk"
+    _risk_control_probe(page)
+
+
+def _post_publish(page: Page, bundle: TaskBundle, ctx: PublishContext) -> None:
+    """[16]-[17] 点定时发布 → 等跳转判成功。淘宝不抽取 remote_url(到点前无公开链接)。"""
+    ctx.last_step = "publish"
+    _click_publish(page)
+
+    ctx.last_step = "wait_success"
+    _wait_for_success_indicator(page)
+
+
+TAOBAO_SPEC = PlatformSpec(
+    platform_key="taobao_guanghe",
+    display_name="淘宝光合",
+    pre_publish=_pre_publish,
+    post_publish=_post_publish,
+)
 
 
 class TaobaoGuanghePublisher:
@@ -396,335 +488,4 @@ class TaobaoGuanghePublisher:
         dry_run: bool = False,
         settings: Settings,
     ) -> PublishResult:
-        return _publish_one_body(task_id, dry_run=dry_run, settings=settings)
-
-
-def _publish_one_body(
-    task_id: int,
-    *,
-    dry_run: bool,
-    settings: Settings,
-) -> PublishResult:
-    """跑淘宝光合发布的完整流程,含 claim/DB/通知/飞书回写。
-
-    与视频号 publisher 架构一致:入口 claim_task → 串行跑步骤 → finally 写 DB
-    + 通知 + 飞书回写 + 清理 tmp。
-    """
-    engine = get_engine()
-    init_db(engine)
-    screenshots_root = settings.app.logs_dir / "screenshots"
-    tmp_root = settings.app.data_dir / "tmp"
-    pub_cfg = settings.publisher
-    upload_timeout = pub_cfg.upload_timeout_seconds
-    step_pause = pub_cfg.step_pause_seconds
-
-    # [0] 幂等抢锁
-    with Session(engine) as session:
-        from wxsp.publisher import AlreadyClaimed
-
-        if not claim_task(session, task_id):
-            raise AlreadyClaimed(f"Task {task_id} 不在 pending 或已被占用")
-
-    # 加载 Task/Video/Account 快照
-    with Session(engine) as session:
-        task, video, account = _load_task_bundle(session, task_id)
-        video_record_id = video.id
-        video_file_path = Path(video.file_path)
-        video_title = video.title
-        video_description = video.description
-        video_topic = video.topic
-        product_ids_raw = (
-            video.product_ids_json
-            if video.product_ids_json and video.product_ids_json != "[]"
-            else None
-        )
-        # 迁移兼容:旧版数据商品 ID 存在 tags_json 中(product_ids_json 为空时 fallback)
-        if product_ids_raw is None:
-            product_ids_raw = (
-                video.tags_json if video.tags_json and video.tags_json != "[]" else None
-            )
-        task_publish_at = task.publish_at
-        user_data_dir = Path(account.user_data_dir)
-        account_id = account.id
-        declaration = getattr(video, "declaration", None)
-        ai_optimize = getattr(video, "ai_optimize", False)
-        task_platform = task.platform
-
-    result = PublishResult(task_id=task_id, ok=False, dry_run=dry_run)
-    last_step = "init"
-
-    try:
-        # [1] stage NAS → tmp
-        last_step = "stage"
-        staged = stage_to_tmp(video_file_path, task_id=task_id, tmp_root=tmp_root)
-
-        # [2] launch browser
-        last_step = "browser"
-        with browser_context(
-            user_data_dir,
-            headless=pub_cfg.headless,
-            account_id=account_id,
-            platform=task_platform,
-        ) as page:
-            try:
-                # [3] open publish page
-                last_step = "open"
-                _open_publish_page(page)
-                _random_pause(step_pause)
-
-                # [4] verify login
-                last_step = "login"
-                _verify_logged_in(page)
-                _random_pause(step_pause)
-
-                # [5] upload video
-                last_step = "upload"
-                _upload_video(page, file_path=staged, timeout_seconds=upload_timeout)
-                _random_pause(step_pause)
-
-                # [6] wait cover
-                last_step = "cover"
-                _wait_cover_generated(page)
-                _random_pause(step_pause)
-
-                # [7] fill title
-                last_step = "title"
-                _fill_title(page, title=video_title)
-                _random_pause(step_pause)
-
-                # [8] fill description
-                last_step = "desc"
-                _fill_description(page, description=video_description)
-                _random_pause(step_pause)
-
-                # [9] add topic
-                last_step = "topic"
-                _add_topic(page, topic_name=video_topic)
-                _random_pause(step_pause)
-
-                # [10] add products
-                last_step = "products"
-                product_ids_list: list[str] = []
-                if product_ids_raw:
-                    try:
-                        parsed = _json.loads(product_ids_raw)
-                        if isinstance(parsed, list):
-                            product_ids_list = [str(p) for p in parsed if p]
-                    except (TypeError, _json.JSONDecodeError):
-                        logger.warning(
-                            f"[taobao] 商品 ID JSON 解析失败 task_id={task_id}:"
-                            f" {product_ids_raw!r},跳过商品"
-                        )
-                if product_ids_list:
-                    _add_products(page, product_ids=product_ids_list)
-                _random_pause(step_pause)
-
-                # [11] set schedule
-                last_step = "schedule"
-                _set_schedule(page, publish_at=task_publish_at)
-                _random_pause(step_pause)
-
-                # [12] set declaration
-                last_step = "declaration"
-                _set_declaration(page, declaration=declaration)
-                _random_pause(step_pause)
-
-                # [13] toggle AI optimize
-                last_step = "ai"
-                _toggle_ai_optimize(page, on=bool(ai_optimize))
-                _random_pause(step_pause)
-
-                # [14] disable download
-                last_step = "download"
-                _disable_download(page)
-                _random_pause(step_pause)
-
-                # [15] risk control probe
-                last_step = "risk"
-                _risk_control_probe(page)
-
-                # ★ DRY_RUN GATE
-                if dry_run:
-                    last_step = "dryrun_gate"
-                    shot = _screenshot(
-                        page,
-                        task_id=task_id,
-                        step="dryrun_gate",
-                        screenshots_root=screenshots_root,
-                    )
-                    result.screenshots.append(str(shot))
-                    result.ok = True
-                    return result
-
-                # [16] click publish
-                last_step = "publish"
-                _click_publish(page)
-
-                # [17] wait success
-                last_step = "wait_success"
-                _wait_for_success_indicator(page)
-
-            except Exception:
-                try:
-                    shot = _screenshot(
-                        page,
-                        task_id=task_id,
-                        step=f"err_{last_step}",
-                        screenshots_root=screenshots_root,
-                    )
-                    result.screenshots.append(str(shot))
-                    try:
-                        html_path = Path(str(shot)).with_suffix(".html")
-                        html_path.write_text(page.content(), encoding="utf-8")
-                    except Exception as html_exc:
-                        logger.warning(f"[taobao] 存 HTML 失败 task_id={task_id}: {html_exc}")
-                except Exception as ss_exc:
-                    logger.warning(f"[taobao] 截图失败 task_id={task_id}: {ss_exc}")
-                raise
-
-        result.ok = True
-        return result
-
-    except PublisherError as exc:
-        kind = classify(exc)
-        result.error_type = kind
-        result.error_msg = f"step={last_step}: {exc}"
-        logger.error(result.error_msg)
-        return result
-    except Exception as exc:
-        kind = classify(exc)
-        result.error_type = kind
-        result.error_msg = f"step={last_step}: {exc}"
-        logger.exception("[taobao] publish 顶层未分类异常")
-        return result
-    except KeyboardInterrupt:
-        result.error_type = "interrupted"
-        result.error_msg = f"step={last_step}: 用户中断(Ctrl-C)"
-        logger.warning(result.error_msg)
-        raise
-    finally:
-        # cleanup tmp
-        try:
-            cleanup_tmp(task_id=task_id, tmp_root=tmp_root)
-        except Exception as exc:
-            logger.warning(f"[taobao] cleanup_tmp 失败 task_id={task_id}: {exc}")
-
-        # 决定 task 最终状态
-        if result.ok and not result.dry_run:
-            new_status = "success"
-        elif result.dry_run and result.ok:
-            new_status = "pending"
-        elif result.error_type == "interrupted":
-            new_status = "interrupted"
-        elif result.error_type == "cookie_expired":
-            new_status = "pending"
-        else:
-            new_status = "failed"
-
-        with session_scope(engine) as session:
-            task_now = session.get(Task, task_id)
-            assert task_now is not None
-            task_now.status = new_status
-            task_now.last_error_type = result.error_type
-            task_now.last_error_msg = result.error_msg
-            task_now.screenshots_json = _json.dumps(result.screenshots, ensure_ascii=False)
-
-            if result.dry_run and result.ok:
-                task_now.lease_token = None
-                task_now.lease_expires_at = None
-                task_now.started_at = None
-                task_now.attempts = max(0, task_now.attempts - 1)
-                task_now.finished_at = None
-            elif result.error_type == "cookie_expired":
-                task_now.lease_token = None
-                task_now.lease_expires_at = None
-                task_now.started_at = None
-                task_now.finished_at = None
-            else:
-                task_now.finished_at = datetime.now()
-
-            # 风控 → 暂停账号 24h
-            if result.error_type == "risk_control":
-                account_now = session.get(Account, account_id)
-                if account_now is not None:
-                    account_now.paused_until = datetime.now() + timedelta(hours=24)
-                    logger.warning(f"[taobao] 风控触发,账号 {account_id} 暂停 24h")
-
-            # 登录态失效 → 写 cookie_status
-            if result.error_type == "cookie_expired":
-                account_now = session.get(Account, account_id)
-                if account_now is not None:
-                    account_now.cookie_status = "expired"
-                    logger.warning(f"[taobao] 登录态失效,账号 {account_id} cookie_status → expired")
-
-            # 失败通知
-            if not result.ok and not result.dry_run:
-                error_type = result.error_type or "unknown"
-                notify_type, level, title = _NOTIFY_BY_ERROR.get(
-                    error_type,
-                    ("task_failed", "error", f"任务失败:{error_type_cn(error_type)}"),
-                )
-                if error_type == "element_not_found":
-                    step_zh = step_cn(last_step)
-                    title = f"元素未找到 · {step_zh} —— 淘宝光合可能改版"
-                account_cfg = settings.accounts.get(account_id)
-                display_name = account_cfg.display_name if account_cfg else None
-                notify(
-                    NotifyEvent(
-                        type=notify_type,
-                        level=level,
-                        title=title,
-                        content=result.error_msg or "(无错误信息)",
-                        context={
-                            "错误类型": error_type_cn(error_type),
-                            "最近步骤": step_cn(last_step),
-                        },
-                        task_id=task_id,
-                        account_id=account_id,
-                        account_display_name=display_name,
-                        platform=task_platform,
-                    ),
-                    session=session,
-                    settings=settings,
-                )
-
-        # 终态回写飞书
-        _writeback_to_feishu(video_record_id, result, settings)
-
-
-def _writeback_to_feishu(
-    record_id: str,
-    result: PublishResult,
-    settings: Settings,
-) -> None:
-    """任务终态回写飞书 Bitable。cookie_expired 时保留'已计划'等扫码后重跑。"""
-    if result.dry_run:
-        return
-    if not settings.feishu.enabled or not settings.feishu.sync.write_back_enabled:
-        return
-    if result.error_type == "cookie_expired":
-        return
-
-    fm = settings.feishu.field_map
-    fields: dict[str, str] = {}
-    if result.ok:
-        fields[fm.status] = "已发布"
-        if result.remote_url:
-            fields[fm.remote_url] = result.remote_url
-    else:
-        fields[fm.status] = "失败"
-        fields[fm.error_message] = result.error_msg or "(无错误信息)"
-
-    try:
-        client = make_client(settings.feishu.app_id, settings.feishu.app_secret)
-        writeback_row(
-            client,
-            app_token=settings.feishu.bitable.app_token,
-            table_id=settings.feishu.bitable.table_id,
-            record_id=record_id,
-            fields=fields,
-        )
-    except FeishuApiError as exc:
-        logger.warning(f"[taobao] 飞书回写失败 task={result.task_id} record={record_id}: {exc}")
-    except Exception as exc:
-        logger.exception(f"[taobao] 飞书回写未预料异常 task={result.task_id}: {exc}")
+        return run_publish(task_id, dry_run=dry_run, settings=settings, spec=TAOBAO_SPEC)

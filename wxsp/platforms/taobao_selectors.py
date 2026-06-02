@@ -48,6 +48,17 @@ TOPIC_CLOSE_BUTTON = 'button:has-text("取消")'
 PRODUCT_TRIGGER = "text=添加商品"
 PRODUCT_DIALOG_HEADING = ".next-dialog-header"
 PRODUCT_SEARCH_INPUT = 'input[placeholder*="商品"]'
+# 搜索结果是商品卡片(非每商品一个独立 checkbox 列)。卡片标题链接的 href 含商品ID,
+# 是最稳的锚点(class 都是 CSS-module hash)。用 .format(pid=) 注入。
+PRODUCT_ITEM_LINK_BY_ID = 'a[href*="item.htm?id={pid}"]'
+# 从标题链接上溯到卡片容器(class 含 `--item--`,区别于 `--item-title--`/`--item-desc--` 等)。
+PRODUCT_ITEM_CARD_ANCESTOR = 'xpath=ancestor::*[contains(@class, "--item--")][1]'
+# 卡片内"商品选择"复选框的真实 input(区别于顶部"筛选近14天")。Fusion 把 opacity:0 的
+# input 绝对定位盖在可见方框上专门接收点击 —— 点 <label>/.next-checkbox-inner 会被 input
+# 拦截指针事件(报 "input intercepts pointer events" 超时),直接点 input 才是正解。
+PRODUCT_ITEM_SELECT_CHECKBOX_INPUT = 'label[class*="item-select"] input[type="checkbox"]'
+# 选中标记:item-select 的 label 勾上后 class 追加 "checked"(由真实选中态 DOM 确认)。
+PRODUCT_ITEM_SELECTED = 'label[class*="item-select"][class*="checked"]'
 PRODUCT_CONFIRM_BUTTON = 'button:has-text("确定")'
 PRODUCT_CLOSE_BUTTON = 'button:has-text("取消")'
 
@@ -76,7 +87,9 @@ DECLARATION_RADIO_MAP = {
 }
 
 # ============== [13] AI优化 ==============
-AI_TOGGLE_SWITCH = '[role="switch"]'
+# 锚定到含"AI优化"标签的 hosting-section 内的开关,避免误中页面上其它 role=switch。
+# next-switch 用 aria-checked="true"/"false" 表示开关态(平台默认开)。
+AI_TOGGLE_SWITCH = '[class*="hosting-section"]:has-text("AI优化") [role="switch"]'
 
 # ============== [14] 允许下载(radio,默认选中 → 点一下取消)
 DOWNLOAD_RADIO = "text=允许下载"

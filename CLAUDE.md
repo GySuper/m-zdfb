@@ -3,7 +3,7 @@
 > 本文件给 Claude Code 阅读,用于指导项目从零开发。**请逐节通读后再开始编码**,
 > 特别留意 "核心约束"、"复用与参考"、"平台架构"。
 
-**当前支持平台**:视频号(tencent_channel)、淘宝光合(taobao_guanghe)
+**当前支持平台**:视频号(tencent_channel)、淘宝光合(taobao_guanghe)、抖音(douyin)
 
 ---
 
@@ -150,7 +150,9 @@ wxsp/platforms/
 ├── tencent_channel.py       # 视频号步骤函数 + TENCENT_SPEC
 ├── tencent_selectors.py     # 视频号选择器
 ├── taobao_guanghe.py        # 淘宝光合步骤函数 + TAOBAO_SPEC
-└── taobao_selectors.py      # 淘宝光合选择器
+├── taobao_selectors.py      # 淘宝光合选择器
+├── douyin.py                # 抖音步骤函数 + DOUYIN_SPEC
+└── douyin_selectors.py      # 抖音选择器
 ```
 
 `publisher.py` 是薄路由层,根据 `task.platform` 调对应的 `PlatformPublisher.publish_one()`(内部转调 `runner.run_publish(..., spec=)`),并提供同款 `login(account)` 路由(`login` 不依赖 Settings,只开浏览器等扫码)。
@@ -236,7 +238,9 @@ wxsp/
 │   │   ├── tencent_channel.py         #   视频号步骤函数 + TENCENT_SPEC
 │   │   ├── tencent_selectors.py       #   视频号选择器
 │   │   ├── taobao_guanghe.py          #   淘宝光合步骤函数 + TAOBAO_SPEC
-│   │   └── taobao_selectors.py        #   淘宝光合选择器
+│   │   ├── taobao_selectors.py        #   淘宝光合选择器
+│   │   ├── douyin.py                  #   抖音步骤函数 + DOUYIN_SPEC
+│   │   └── douyin_selectors.py        #   抖音选择器
 │   ├── browser.py                     # patchright context 工厂 + per-account 指纹注入
 │   ├── fingerprint.py                 # per-account 设备指纹生成 + JSON 持久化 + JS init script
 │   ├── stealth_js.py                  # 上一代静态 init script(已被 fingerprint 取代,保留回滚)

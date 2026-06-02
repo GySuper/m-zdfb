@@ -72,6 +72,18 @@ REGISTRY: dict[str, PlatformMeta] = {
         },
         needs_fingerprint=False,
     ),
+    "douyin": PlatformMeta(
+        key="douyin",
+        label="抖音",
+        title_min=1,
+        login_meta={
+            "home_url": "https://creator.douyin.com/creator-micro/content/upload",
+            "mode": "selector",
+            "selector": 'div[class^="container"] input',
+        },
+        field_map_defaults={},
+        needs_fingerprint=False,
+    ),
 }
 
 ALL_PLATFORMS: list[str] = list(REGISTRY)

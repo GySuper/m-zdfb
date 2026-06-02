@@ -319,6 +319,10 @@ def run_today(request: Request, settings: Settings = Depends(get_settings)) -> H
             sync_result = sync_now(settings, platform=platform) if settings.feishu.enabled else None
         except Exception as exc:
             logger.exception(f"[web/run-today] sync_now 挂了,放弃发布: {exc}")
+            # 复位全局锁:这条路径直接 return,不会进入下面 spawn 的释放线程,
+            # 漏复位会让"跑今天"在一次飞书抖动后永久卡死。
+            with _run_today_lock:
+                _run_today_running = False
             return HTMLResponse(
                 _fragment("error", f"飞书同步失败,未启动发布:{exc}"),
                 headers={

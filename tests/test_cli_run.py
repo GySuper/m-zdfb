@@ -97,6 +97,41 @@ def test_run_today_invokes_run_today_pending_and_echoes_summary(tmp_path, monkey
     assert "failed=1" in result.stdout
 
 
+def test_run_today_no_platform_runs_each_configured_platform_with_own_settings(
+    tmp_path, monkeypatch
+):
+    """`run --today` 不带 --platform 时,必须按平台各自的 settings 分别跑。
+
+    回归 bug:旧代码用 load_settings(tencent) 这一份 settings 跑 queue_today(platform=None)
+    返回的所有平台任务 → 淘宝任务用视频号配置(错的飞书表/账号)发布、回写。
+    """
+    import wxsp.config as cfg
+    from wxsp.scheduler import RunSummary
+
+    existing = tmp_path / "exists.yaml"
+    existing.write_text("x")
+    # 让"已配置平台"确定为全部(两个),与 cwd 是否有真配置文件解耦
+    monkeypatch.setattr(cfg, "get_config_path", lambda p="tencent_channel": existing)
+
+    calls: list[tuple[str | None, object]] = []
+
+    def fake_run(settings, *, platform=None):
+        calls.append((platform, settings))
+        return RunSummary(attempted=1, succeeded=1, failed=0, skipped_paused=0)
+
+    monkeypatch.setattr("wxsp.cli.run_today_pending", fake_run)
+    monkeypatch.setattr(
+        "wxsp.cli.load_settings", lambda platform="tencent_channel": f"S::{platform}"
+    )
+
+    result = CliRunner().invoke(app, ["run", "--today"])
+    assert result.exit_code == 0, result.stdout
+    # 每个平台各跑一次,且各用自己平台的 settings
+    assert ("tencent_channel", "S::tencent_channel") in calls
+    assert ("taobao_guanghe", "S::taobao_guanghe") in calls
+    assert len(calls) == 2
+
+
 def test_run_today_all_success_exits_zero(tmp_path, monkeypatch):
     from wxsp.scheduler import RunSummary
 

@@ -465,13 +465,20 @@ def init_script(fp: Fingerprint) -> str:
         Object.defineProperty(navigator, 'userAgentData', {{ get: () => uaData }});
     }} catch (e) {{}}
 
-    // Audio 指纹:对 getChannelData 加微小噪声
+    // Audio 指纹:对 getChannelData 加确定性噪声。
+    // 不能用 Math.random()——那样每次调用结果都变,同账号音频指纹漂移,
+    // 视频号会判定"同账号换设备"踢登录(违反"同账号永远拿同一套指纹")。
+    // 改用 audioNoise 派生的确定性 LCG(Park-Miller),保证同账号每次一致、
+    // 不同账号(audioNoise 不同)各异。
     try {{
         const origGetChannelData = AudioBuffer.prototype.getChannelData;
         AudioBuffer.prototype.getChannelData = function() {{
             const data = origGetChannelData.apply(this, arguments);
+            let s = Math.floor(fp.audioNoise * 1e9) % 2147483647;
+            if (s <= 0) s += 2147483646;
             for (let i = 0; i < data.length; i += 100) {{
-                data[i] = data[i] + (Math.random() - 0.5) * fp.audioNoise;
+                s = (s * 16807) % 2147483647;
+                data[i] = data[i] + ((s / 2147483647) - 0.5) * fp.audioNoise;
             }}
             return data;
         }};

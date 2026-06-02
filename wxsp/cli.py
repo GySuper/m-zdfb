@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 
 from wxsp.archive import cleanup_old_files, install_file_sink
 from wxsp.browser import check_cookie
-from wxsp.config import load_settings
+from wxsp.config import Settings, load_settings
 from wxsp.db import get_engine, init_db, session_scope
 from wxsp.doctor import check_feishu, check_nas, record_cookie_check, refresh_cookie_status
 from wxsp.feishu import FeishuApiError
@@ -382,14 +382,30 @@ def run(
         raise typer.Exit(code=1)
 
     if today:
-        plat_label = f"({platform})" if platform else ""
-        typer.echo(f"[wxsp] 跑今天所有 pending 任务{plat_label}...")
-        summary = run_today_pending(settings, platform=platform)
-        typer.echo(
-            f"[wxsp] 完成: attempted={summary.attempted} succeeded={summary.succeeded} "
-            f"failed={summary.failed} skipped_paused={summary.skipped_paused}"
-        )
-        if summary.failed > 0:
+        # 不带 --platform 时跑所有已配置平台,但每个平台必须用各自的 settings
+        # (否则淘宝任务会用视频号配置回写到错的飞书表/账号)。
+        from wxsp.config import ALL_PLATFORMS, get_config_path
+
+        if platform is not None:
+            targets: list[tuple[str, Settings]] = [(platform, settings)]
+        else:
+            configured = [p for p in ALL_PLATFORMS if get_config_path(p).exists()]
+            if not configured:
+                configured = ["tencent_channel"]
+            targets = [(p, load_settings(platform=p)) for p in configured]
+
+        any_failed = False
+        for plat, plat_settings in targets:
+            typer.echo(f"[wxsp] 跑今天所有 pending 任务({plat})...")
+            summary = run_today_pending(plat_settings, platform=plat)
+            typer.echo(
+                f"[wxsp] 完成({plat}): attempted={summary.attempted} "
+                f"succeeded={summary.succeeded} failed={summary.failed} "
+                f"skipped_paused={summary.skipped_paused}"
+            )
+            if summary.failed > 0:
+                any_failed = True
+        if any_failed:
             raise typer.Exit(code=1)
         return
 

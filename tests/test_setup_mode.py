@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def app_in_setup_mode(monkeypatch, tmp_path):
     """构造 config.yaml 不存在的环境,加载 fastapi app。"""
-    monkeypatch.setattr("wxsp.config.get_config_path", lambda: tmp_path / "config.yaml")
+    # get_config_path(platform) 现在按平台取,需接收平台参数(返回同一个不存在的路径即可)
+    monkeypatch.setattr("wxsp.config.get_config_path", lambda *_a, **_k: tmp_path / "config.yaml")
     import importlib
 
     import wxsp.api.app as app_module

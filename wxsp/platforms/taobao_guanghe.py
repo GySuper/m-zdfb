@@ -209,19 +209,23 @@ def _add_products(page: Page, product_ids: list[str]) -> None:
         time.sleep(2)
         # 商品弹窗有 2 个 checkbox:第 1 个是筛选器,第 2 个起才是商品
         all_cbs = iframe.locator('input[type="checkbox"]').all()
-        clicked = False
+        skipped_filter = False
+        selected = False
         for cb in all_cbs:
             try:
                 if cb.is_visible():
-                    if not clicked:
-                        clicked = True
+                    if not skipped_filter:
+                        skipped_filter = True
                         continue  # 跳过筛选器 checkbox
                     cb.check()
+                    selected = True
                     logger.info(f"[taobao] 选中商品 pid={pid}")
                     break
             except Exception:
                 continue
-        if not clicked:
+        # 搜索无结果时只剩筛选器一个可见 checkbox,必须按"没选到商品"判定,
+        # 否则会静默跳过商品继续发布(skipped_filter 不能当成功标志)。
+        if not selected:
             raise ProductNotFound(f"商品ID '{pid}' 搜索无结果")
     iframe.locator(sel.PRODUCT_CONFIRM_BUTTON).click()
     time.sleep(1)

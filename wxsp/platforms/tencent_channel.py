@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import re
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -325,10 +326,13 @@ def set_schedule(page: Page, *, publish_at: datetime) -> None:
     radio.click()
     page.click(sel.SCHEDULE_DATE_INPUT)
 
-    # 翻月(只翻到目标月,不处理跨年场景 —— validator 14d 上限本来就在 1 个月内可达)
-    target_month = publish_at.strftime("%m月")
+    # 翻月(只翻到目标月,不处理跨年场景 —— validator 14d 上限本来就在 1 个月内可达)。
+    # 页面月份标签实际渲染可能是 "6月" / "06月" / "2026年6月",不能直接和
+    # strftime("%m月")="06月" 比字符串(个位数月份永不相等 → 误翻月、把任务排晚一个月)。
+    # 抽出"N月"里的数字按月份号比较;抽不到数字(异常格式)就保守不翻,留在当前月。
     page_month = page.inner_text(sel.SCHEDULE_MONTH_LABEL)
-    if page_month != target_month:
+    m = re.search(r"(\d{1,2})\s*月", page_month)
+    if m and int(m.group(1)) != publish_at.month:
         page.click(sel.SCHEDULE_NEXT_MONTH_BTN)
 
     # 选日

@@ -13,7 +13,8 @@ def fresh_app(monkeypatch, tmp_path):
     config_path = tmp_path / "config.yaml"
     user_data = tmp_path / "data"
     user_data.mkdir()
-    monkeypatch.setattr("wxsp.config.get_config_path", lambda: config_path)
+    # get_config_path(platform) 现在按平台取,需接收平台参数(返回同一个不存在的路径即可)
+    monkeypatch.setattr("wxsp.config.get_config_path", lambda *_a, **_k: config_path)
     monkeypatch.setattr("wxsp.config.get_user_data_dir", lambda: user_data)
     monkeypatch.setattr("wxsp.config.get_user_logs_dir", lambda: tmp_path / "logs")
     import importlib

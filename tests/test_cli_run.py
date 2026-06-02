@@ -129,7 +129,8 @@ def test_run_today_no_platform_runs_each_configured_platform_with_own_settings(
     # 每个平台各跑一次,且各用自己平台的 settings
     assert ("tencent_channel", "S::tencent_channel") in calls
     assert ("taobao_guanghe", "S::taobao_guanghe") in calls
-    assert len(calls) == 2
+    assert ("douyin", "S::douyin") in calls
+    assert len(calls) == len(cfg.ALL_PLATFORMS)
 
 
 def test_run_today_all_success_exits_zero(tmp_path, monkeypatch):

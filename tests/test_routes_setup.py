@@ -25,12 +25,14 @@ def fresh_app(monkeypatch, tmp_path):
     return app_module.app, config_path
 
 
-def test_step1_welcome_renders(fresh_app):
+def test_step1_platform_select_renders(fresh_app):
+    """step 1 现在是"选平台"页(M11),不再是欢迎页。"""
     app, _ = fresh_app
     client = TestClient(app)
     resp = client.get("/setup/step/1")
     assert resp.status_code == 200
-    assert "欢迎" in resp.text or "wxsp" in resp.text
+    assert "选择平台" in resp.text
+    assert "视频号" in resp.text  # platform_label(tencent_channel) 渲染为下拉项
 
 
 def test_step2_post_stores_feishu_and_advances(fresh_app):
@@ -63,7 +65,8 @@ def test_step4_post_stores_notify_and_advances(fresh_app):
     """step/4 = notify(原来的 step/5),账号步骤已删除。"""
     app, _ = fresh_app
     client = TestClient(app, follow_redirects=False)
-    # 先把 feishu / nas 填完,否则 step 4 会被前置守卫拦回
+    # 先把 平台 / feishu / nas 填完,否则 step 4 会被前置守卫拦回
+    client.post("/setup/step/1", data={"platform": "tencent_channel"})
     client.post(
         "/setup/step/2",
         data={"app_id": "x", "app_secret": "y", "app_token": "z", "table_id": "t"},
@@ -79,6 +82,7 @@ def test_complete_writes_config_yaml(fresh_app, tmp_path):
     app, config_path = fresh_app
     client = TestClient(app, follow_redirects=False)
 
+    client.post("/setup/step/1", data={"platform": "tencent_channel"})
     client.post(
         "/setup/step/2",
         data={

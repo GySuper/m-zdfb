@@ -180,9 +180,12 @@ webui:
 
 
 def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str = _VALID_YAML) -> Path:
-    (tmp_path / "config.yaml").write_text(content, encoding="utf-8")
+    # 多平台拆分后路由读写 config_{platform}.yaml;直接写平台文件,避免 get_config_path
+    # 把单文件 config.yaml 迁移走(→ config_tencent_channel.yaml + .bak)导致测试读不到。
+    cfg = tmp_path / "config_tencent_channel.yaml"
+    cfg.write_text(content, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    return tmp_path / "config.yaml"
+    return cfg
 
 
 def _form(**overrides: Any) -> dict[str, Any]:
@@ -315,7 +318,7 @@ def test_config_post_writes_when_valid_and_backups(
 
     new_data = yaml.safe_load(cfg.read_text("utf-8"))
     assert new_data["webui"]["port"] == 9000
-    assert (tmp_path / "config.yaml.bak").read_text("utf-8") == old
+    assert cfg.with_suffix(".yaml.bak").read_text("utf-8") == old
 
 
 def test_config_post_keeps_secret_when_left_empty(

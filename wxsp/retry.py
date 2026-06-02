@@ -1,4 +1,11 @@
-"""重试装饰器:指数退避 + 异常类型白名单(M5)。"""
+"""重试装饰器:指数退避 + 异常类型白名单(M5)。
+
+⚠️ 现状:本装饰器已实现并有单测,但**尚未接线到发布步骤**。CLAUDE.md
+"错误分类与重试策略" 表里 transient 错误(network / upload_failed /
+nas_unreachable / element_not_found)的自动重试为目标设计,当前未启用;
+已生效的是 cookie_expired / risk_control 的"不重试 + halt"语义
+(见 scheduler.run_today_pending)。接线为后续工作。
+"""
 
 from __future__ import annotations
 

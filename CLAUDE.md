@@ -316,7 +316,7 @@ accounts:
 scheduler:
   daily_cron_hour: 9                  # 每天 09:00 自动触发跑当日任务
   daily_cron_minute: 0
-  strategy: round-robin               # 账号空时按 round-robin 分配
+  strategy: round-robin               # 保留字段,当前未使用(账号必填,不做自动分配)
 
 # ============== 发布器 ==============
 publisher:
@@ -402,7 +402,7 @@ SQLite 是唯一的运行时事实来源,所有任务从飞书拉取。Web UI **
 | 封面文件 | 单行文本 | 否 | 读 | 同"视频文件":裸文件名(在账号 `cover_search_root` 递归搜)或完整路径(过 `paths.path_aliases` 翻译) |
 | 合集 | 单选 | 否 | 读 | 视频号合集名(需提前在平台建好) |
 | 原创 | 复选框 | 否 | 读 | |
-| 账号 | 单选 | 否 | 读 | 空 → round-robin 分配;非空可填 **display_name(中文名)或 account_id**(validator 双向反查)。账号 ID 工具侧 `secrets.token_hex(4)` 自动生成,运营无需关心;平台新增账号时会自动把 display_name 追加到本字段的飞书单选项 |
+| 账号 | 单选 | **是** | 读 | **必填**:可填 **display_name(中文名)或 account_id**(validator 双向反查);留空 → 校验失败回写"未指定"(**不再** round-robin 自动分配)。账号 ID 工具侧 `secrets.token_hex(4)` 自动生成,运营无需关心;平台新增账号时会自动把 display_name 追加到本字段的飞书单选项 |
 | **执行日期** | 日期 | **是** | 读 | **新增**。daemon 只跑 `execute_date = today` 的任务 |
 | **定时发布时间** | 日期时间 | **是** | 读 | **改名 + 必填**(原"计划发布时间")。视频号页面上设置的发布时刻 |
 | 状态 | 单选 | 否 | **写** | 工具回写:待入库 / 已计划 / 发布中 / 已发布 / 失败 |
@@ -439,13 +439,15 @@ wxsp run --daemon
 
 ## 账号分配 + 调度
 
-### 账号分配(round-robin)
+### 账号分配(账号必填,无自动分配)
 
-`scheduler.py` 在飞书 sync 入库时分配账号:
+飞书行的 `账号` 字段**必填**:validator 按 account_id / display_name 反查到具体账号;留空 → 校验失败回写"未指定"(**不做** round-robin 自动分配)。
 
-1. 飞书行已显式指定 `账号` 字段 → 固定到指定账号
-2. 否则按 **round-robin** 分配到 enabled 的账号
+1. 飞书行 `账号` 字段非空 → 反查固定到指定账号
+2. 留空 → validator 判失败 + 飞书回写"未指定"(运营在飞书侧补填账号)
 3. 若某账号当日任务数 > `daily_limit` → validator 拒绝入库 + 飞书回写错误
+
+> 历史设计曾计划"空账号 round-robin 自动分配",现已改为**账号必填**(运营在飞书侧指定)。`scheduler.strategy` 配置项为保留字段,当前未使用。
 
 ### 时间调度(无时间窗口分配)
 
@@ -686,17 +688,19 @@ uvicorn wxsp.api.app:app --port 8765
 
 ## 错误分类与重试策略
 
-| 类型 | 含义 | 重试策略 |
+> ⚠️ **现状**:`retry.py` 的 `retry_on` 装饰器已实现但**尚未接线到发布步骤**。下表 transient 错误(`network` / `upload_failed` / `nas_unreachable` / `element_not_found`)的"自动重试次数"为**目标设计,待实现**;当前这些错误跑一次失败即按下表的 halt 语义处理(不自动重试)。**已生效**的是 `cookie_expired` / `risk_control` 的"不重试 + 账号级 halt"与 `element_not_found` / `nas_unreachable` 的"全局 halt"。
+
+| 类型 | 含义 | 重试策略(`*` = 规划中,尚未接线) |
 |------|------|----------|
-| `network` | 网络/超时 | 指数退避,最多 3 次 |
+| `network` | 网络/超时 | 指数退避,最多 3 次 `*` |
 | `cookie_expired` | 登录失效 | 不重试,告警,**软失败:task 回退 pending + 不回写飞书"失败"** —— 运营扫码登录后下轮 queue_today 自动重跑(该账号其余 5 个 task 也不会被错误标 failed)。`cookie_status` 仍写 `expired`,scheduler pre-flight 下一轮跳过(**账号级 halt**) |
 | `risk_control` | 平台风控 | 不重试,账号暂停 24 小时(**账号级 halt**) |
 | `video_invalid` | 文件损坏/格式不支持 | 不重试 |
-| `element_not_found` | 元素找不到(可能改版) | 1 次重试,截图,告警(**全局 halt**) |
-| `upload_failed` | 上传中断 | 2 次重试 |
-| `nas_unreachable` | NAS 不可达 | 5 次指数退避(NAS 可能短暂掉线)(**全局 halt**) |
-| `feishu_api_error` | 飞书 API 错误 | 3 次重试 |
-| `unknown` | 兜底 | 1 次重试,然后 failed |
+| `element_not_found` | 元素找不到(可能改版) | 1 次重试 `*`,截图,告警(**全局 halt** 已生效) |
+| `upload_failed` | 上传中断 | 2 次重试 `*` |
+| `nas_unreachable` | NAS 不可达 | 5 次指数退避 `*`(NAS 可能短暂掉线)(**全局 halt** 已生效) |
+| `feishu_api_error` | 飞书 API 错误 | 3 次重试(回写路径 `writeback_row` 已实现独立退避) |
+| `unknown` | 兜底 | 1 次重试 `*`,然后 failed |
 
 > 飞书回写本身(`feishu.writeback_row`)有独立退避序列 `(1s/3s/10s,共 4 次)` —— 历史 `(1s/2s/3 次)` 在飞书抖动时被实测打穿,最后一条 task 跑完 status="已计划" 不更新。退避总时长 ~14s 远小于一次 publish 的 1-5min,不会拖慢主流程。
 

@@ -122,7 +122,8 @@ def validate(
 
     # ① 完整性前置检查:4 个核心字段任一为空 → incomplete=True 返回。
     #    业务还没填完的草稿(运营在飞书慢慢补),sync 跳过且不回写"失败",等下次再拉。
-    #    其他字段(描述/标签/封面/合集/原创/账号)允许为空,走默认值或 round-robin。
+    #    其他字段(描述/标签/封面/合集/原创)允许为空走默认值;**账号必填**
+    #    (空 → _check_account 判失败回写"未指定",不做 round-robin 自动分配)。
     if _is_incomplete(row.fields, fm):
         return ValidationResult(ok=False, incomplete=True)
 

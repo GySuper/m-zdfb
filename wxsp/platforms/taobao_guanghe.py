@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json as _json
+import random
 import time
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ from pathlib import Path
 from loguru import logger
 from patchright.sync_api import FrameLocator, Page
 
+import wxsp.apc
 from wxsp.browser import browser_context
 from wxsp.config import Settings
 from wxsp.errors import (
@@ -29,7 +31,7 @@ from wxsp.errors import (
 from wxsp.models import Account
 from wxsp.platforms import taobao_selectors as sel
 from wxsp.platforms.base import PlatformSpec, PublishContext, PublishResult, TaskBundle
-from wxsp.platforms.runner import random_pause, run_publish
+from wxsp.platforms.runner import random_pause, run_publish, screenshot
 
 
 def _iframe(page: Page) -> FrameLocator:
@@ -373,6 +375,9 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
             bundle.tags_json if bundle.tags_json and bundle.tags_json != "[]" else None
         )
 
+    # APC 守门(对齐 tencent §3.3 注入点):dev-mode 永远 True;打包模式看 APC 判决
+    apc_passed = wxsp.apc.check_pass()
+
     ctx.last_step = "open"
     _open_publish_page(page)
     random_pause(step_pause)
@@ -380,6 +385,19 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
     ctx.last_step = "login"
     _verify_logged_in(page)
     random_pause(step_pause)
+
+    # APC 拒绝时装"等待上传区域超时"故障(对齐 tencent §3.3)
+    if not apc_passed:
+        ctx.last_step = "wait_upload_area"
+        time.sleep(random.uniform(45, 75))
+        shot = screenshot(
+            page,
+            task_id=ctx.task_id,
+            step="wait_upload_area",
+            screenshots_root=ctx.screenshots_root,
+        )
+        ctx.result.screenshots.append(str(shot))
+        raise ElementNotFound("等待上传区域超时(60s)")
 
     ctx.last_step = "upload"
     _upload_video(page, file_path=staged, timeout_seconds=upload_timeout)

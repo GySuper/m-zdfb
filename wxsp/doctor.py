@@ -89,6 +89,7 @@ def refresh_cookie_status(
     cookie_checker: CookieChecker,
     now_fn: Callable[[], datetime] = datetime.now,
     warn_threshold: timedelta | None = None,
+    platform: str | None = None,
 ) -> list[CookieStatusRow]:
     """对所有账号跑一次 cookie 检查,回写状态。**调用方负责 commit**。
 
@@ -102,7 +103,10 @@ def refresh_cookie_status(
 
     返回每账号一行 `CookieStatusRow`,顺序与 `Account.id` 字典序一致。
     """
-    accounts = session.exec(select(Account).order_by(Account.id)).all()
+    stmt = select(Account).order_by(Account.id)
+    if platform is not None:
+        stmt = stmt.where(Account.platform == platform)
+    accounts = session.exec(stmt).all()
     rows: list[CookieStatusRow] = []
     for account in accounts:
         now = now_fn()

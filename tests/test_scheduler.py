@@ -652,6 +652,34 @@ def test_make_scheduler_no_jobs_when_disabled(tmp_path: Path) -> None:
     assert sched.get_jobs() == []
 
 
+def test_register_daily_crons_skips_disabled_platform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """start_daemon 的 per-platform cron 注册必须尊重各平台 scheduler.enabled
+    —— 关掉某平台不应再给它注册每日 cron。"""
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    import wxsp.config as cfg
+    from wxsp.scheduler import _register_daily_crons
+
+    existing = tmp_path / "exists.yaml"
+    existing.write_text("x")
+    monkeypatch.setattr(cfg, "get_config_path", lambda p="tencent_channel": existing)
+
+    def fake_load(platform: str = "tencent_channel"):  # type: ignore[no-untyped-def]
+        s = make_settings(tmp_path, tmp_path)
+        s.scheduler.enabled = platform == "tencent_channel"  # 淘宝关掉
+        return s
+
+    monkeypatch.setattr(cfg, "load_settings", fake_load)
+
+    sched = BackgroundScheduler()
+    registered = _register_daily_crons(sched, make_settings(tmp_path, tmp_path))
+
+    assert registered == ["tencent_channel"]
+    assert {j.id for j in sched.get_jobs()} == {"daily_tencent_channel"}
+
+
 # ============== M9 count_backlog + maybe_warn_backlog ==============
 
 

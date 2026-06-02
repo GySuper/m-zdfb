@@ -15,6 +15,31 @@ from wxsp.nas import (
 )
 
 
+def test_find_video_nas_drop_raises_nas_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NAS 检索中途掉线(rglob 抛 OSError)→ NasUnreachable,而不是裸 OSError 崩掉整次 sync。"""
+    from wxsp.errors import NasUnreachable
+
+    root = tmp_path / "videos"
+    root.mkdir()
+
+    def boom(self: Path, pattern: str):  # type: ignore[no-untyped-def]
+        raise OSError("Stale file handle")
+
+    monkeypatch.setattr(Path, "rglob", boom)
+    with pytest.raises(NasUnreachable):
+        find_video("x.mp4", search_root=root)
+
+
+def test_find_video_missing_file_still_raises_filenotfound(tmp_path: Path) -> None:
+    """真·文件不存在仍是 FileNotFoundError(校验失败),不能被误判成 NAS 不可达。"""
+    root = tmp_path / "videos"
+    root.mkdir()
+    with pytest.raises(FileNotFoundError):
+        find_video("does-not-exist.mp4", search_root=root)
+
+
 def test_find_video_single_match(tmp_path: Path) -> None:
     root = tmp_path / "videos"
     (root / "a").mkdir(parents=True)

@@ -159,7 +159,10 @@ def browser_context(
                 launch_kwargs["viewport"] = {"width": 1280, "height": 720}
         except Exception as exc:
             logger.warning(f"[browser] 指纹注入失败 account={account_id}: {exc};退化到无指纹模式")
-            launch_kwargs["viewport"] = {"width": 1280, "height": 720}
+            # CLAUDE.md:指纹生成失败 → 软回退到无指纹模式(no_viewport=True),用真实
+            # 窗口尺寸,少一个 viewport 仿真指纹信号。先清掉可能半写入的 viewport 避免冲突。
+            launch_kwargs.pop("viewport", None)
+            launch_kwargs["no_viewport"] = True
     else:
         launch_kwargs["viewport"] = {"width": 1280, "height": 720}
 

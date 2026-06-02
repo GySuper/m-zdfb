@@ -515,6 +515,44 @@ def make_scheduler(settings: Settings, *, blocking: bool = False) -> BaseSchedul
     return scheduler
 
 
+def _register_daily_crons(scheduler: BaseScheduler, settings: Settings) -> list[str]:
+    """按平台注册每日 cron(各平台用自己的 config),返回实际注册的平台 key 列表。
+
+    抽成独立函数便于测试:start_daemon 末尾是阻塞的 scheduler.start(),不好直接测。
+    """
+    from wxsp.config import ALL_PLATFORMS, load_settings
+    from wxsp.config import get_config_path as _get_cfg_path
+
+    platform_keys = [p for p in ALL_PLATFORMS if _get_cfg_path(p).exists()]
+    registered: list[str] = []
+    for platform_key in platform_keys:
+        try:
+            plat_settings = load_settings(platform=platform_key)
+        except Exception:
+            plat_settings = settings
+        sched_cfg = plat_settings.scheduler
+        if not sched_cfg.enabled:
+            logger.info(f"[scheduler] 平台 [{platform_key}] scheduler.enabled=false,跳过注册 cron")
+            continue
+        scheduler.add_job(
+            lambda p=platform_key: _daily_cron(p, load_settings(platform=p)),
+            CronTrigger(
+                hour=sched_cfg.daily_cron_hour,
+                minute=sched_cfg.daily_cron_minute,
+                timezone=settings.app.timezone,
+            ),
+            id=f"daily_{platform_key}",
+            name=f"[{platform_key}] daily sync + run",
+        )
+        logger.info(
+            f"[scheduler] 平台 [{platform_key}] cron:每日 "
+            f"{sched_cfg.daily_cron_hour:02d}:{sched_cfg.daily_cron_minute:02d} "
+            f"({settings.app.timezone}) sync + run_today_pending"
+        )
+        registered.append(platform_key)
+    return registered
+
+
 def start_daemon(settings: Settings) -> None:
     """daemon 入口:启动时 (1) 标 interrupted (2) 清过期日志/截图 (3) 积压告警判定
     (4) 起 blocking scheduler + 注册 per-platform cron job。
@@ -556,40 +594,8 @@ def start_daemon(settings: Settings) -> None:
             logger.warning(f"[scheduler] 启动积压检查失败,忽略: {exc}")
 
     scheduler = make_scheduler(settings, blocking=True)
-
-    # 按平台注册 cron job — 发现所有已配置的平台
-    from wxsp.config import ALL_PLATFORMS, load_settings
-    from wxsp.config import get_config_path as _get_cfg_path
-
-    platform_keys = [p for p in ALL_PLATFORMS if _get_cfg_path(p).exists()]
-    if not platform_keys:
-        if settings.scheduler.enabled:
-            logger.info(
-                f"[scheduler] daemon 启动:每日 "
-                f"{settings.scheduler.daily_cron_hour:02d}:{settings.scheduler.daily_cron_minute:02d} "
-                f"({settings.app.timezone}) 跑 run_today_pending(无平台配置)"
-            )
-    for platform_key in platform_keys:
-        # Load the platform-specific config for scheduling
-        try:
-            plat_settings = load_settings(platform=platform_key)
-        except Exception:
-            plat_settings = settings
-        sched_cfg = plat_settings.scheduler
-        scheduler.add_job(
-            lambda p=platform_key: _daily_cron(p, load_settings(platform=p)),
-            CronTrigger(
-                hour=sched_cfg.daily_cron_hour,
-                minute=sched_cfg.daily_cron_minute,
-                timezone=settings.app.timezone,
-            ),
-            id=f"daily_{platform_key}",
-            name=f"[{platform_key}] daily sync + run",
-        )
-        logger.info(
-            f"[scheduler] 平台 [{platform_key}] cron:每日 "
-            f"{sched_cfg.daily_cron_hour:02d}:{sched_cfg.daily_cron_minute:02d} "
-            f"({settings.app.timezone}) sync + run_today_pending"
-        )
+    registered = _register_daily_crons(scheduler, settings)
+    if not registered:
+        logger.info("[scheduler] daemon 启动:没有启用的平台 cron(手动入口仍可用)")
 
     scheduler.start()  # 阻塞

@@ -224,14 +224,15 @@ def doctor(
     cookie_failed = False
 
     with _open_session() as session:
-        # 先看有没有账号 —— 没有就提示,但不 return,继续跑 NAS section
-        if not session.exec(select(Account)).first():
+        # 先看该平台有没有账号 —— 没有就提示,但不 return,继续跑 NAS section
+        if not session.exec(select(Account).where(Account.platform == platform)).first():
             typer.echo("[wxsp] 无账号。先 `wxsp accounts add`,再 `wxsp login <id>` 扫码。")
         else:
             rows = refresh_cookie_status(
                 session,
                 cookie_checker=cookie_checker,
                 warn_threshold=warn_threshold,
+                platform=platform,
             )
             typer.echo(f"{'ID':<14} {'Cookie':<10} {'最后活跃':<20}")
             for row in rows:
@@ -258,7 +259,7 @@ def doctor(
                         ),
                         session=session,
                         settings=settings,
-                        platform="tencent_channel",
+                        platform=platform,
                     )
                 elif row.status != "ok":
                     cookie_failed = True

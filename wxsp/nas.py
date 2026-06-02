@@ -63,10 +63,17 @@ def _find(filename: str, search_root: Path) -> Path:
     """通用实现:在 search_root 下递归找 filename,多匹配取 mtime 最新。"""
     if not search_root.exists():
         raise FileNotFoundError(filename)
-    matches = list(search_root.rglob(filename))
-    if not matches:
-        raise FileNotFoundError(filename)
-    return max(matches, key=lambda p: p.stat().st_mtime)
+    try:
+        matches = list(search_root.rglob(filename))
+        if not matches:
+            raise FileNotFoundError(filename)
+        return max(matches, key=lambda p: p.stat().st_mtime)
+    except FileNotFoundError:
+        raise  # 真·没找到 = 校验失败,保持原语义
+    except OSError as exc:
+        # rglob / stat 中途抛 OSError(NAS 掉线 ESTALE/ENETDOWN 等)→ 归类 nas_unreachable,
+        # 不能让裸 OSError 冒泡崩掉整次 sync(CLAUDE.md §5)。
+        raise NasUnreachable(f"NAS 检索 {filename} 时不可达: {exc}") from exc
 
 
 def find_video(

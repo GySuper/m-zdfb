@@ -179,6 +179,107 @@ def test_doctor_continues_after_one_account_browser_crash(
         assert b is not None and b.cookie_status == "ok"
 
 
+def test_doctor_only_checks_target_platform_accounts(
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """doctor --platform X 只检查该平台账号,不碰其它平台账号
+    (否则会用错平台的登录检测去开别的平台的 profile)。"""
+    engine = get_engine(db_env)
+    init_db(engine)
+    with Session(engine) as s:
+        s.add(
+            Account(
+                id="tc_a",
+                display_name="视频号A",
+                user_data_dir="/tmp/profiles/tc_a",
+                platform="tencent_channel",
+            )
+        )
+        s.add(
+            Account(
+                id="tb_a",
+                display_name="淘宝A",
+                user_data_dir="/tmp/profiles/tb_a",
+                platform="taobao_guanghe",
+            )
+        )
+        s.commit()
+
+    checked: list[str | None] = []
+
+    def fake_check(
+        path: Path,
+        *,
+        timeout_ms: int,
+        account_id: str | None = None,
+        platform: str = "tencent_channel",
+    ) -> bool:
+        checked.append(account_id)
+        return True
+
+    video_root = tmp_path / "videos"
+    cover_root = tmp_path / "covers"
+    video_root.mkdir()
+    cover_root.mkdir()
+    settings = make_settings(video_root, cover_root)
+
+    from wxsp import cli as cli_module
+
+    monkeypatch.setattr(cli_module, "check_cookie", fake_check)
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
+
+    runner = CliRunner()
+    runner.invoke(app, ["doctor", "--platform", "taobao_guanghe"])
+
+    assert checked == ["tb_a"]  # 只检查淘宝账号,视频号账号不碰
+
+
+def test_doctor_cookie_warning_tagged_with_target_platform(
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """cookie_warning 告警必须按 doctor 的目标平台打标,而不是硬编码视频号。"""
+    from datetime import datetime, timedelta
+
+    engine = get_engine(db_env)
+    init_db(engine)
+    with Session(engine) as s:
+        s.add(
+            Account(
+                id="tb_a",
+                display_name="淘宝A",
+                user_data_dir="/tmp/profiles/tb_a",
+                platform="taobao_guanghe",
+                cookie_last_active_at=datetime.now() - timedelta(days=5),  # idle 久 → warn
+            )
+        )
+        s.commit()
+
+    notify_platforms: list[str | None] = []
+
+    video_root = tmp_path / "videos"
+    cover_root = tmp_path / "covers"
+    video_root.mkdir()
+    cover_root.mkdir()
+    settings = make_settings(video_root, cover_root)
+
+    from wxsp import cli as cli_module
+
+    monkeypatch.setattr(
+        cli_module,
+        "check_cookie",
+        lambda path, *, timeout_ms, account_id=None, platform="tencent_channel": True,
+    )
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
+    monkeypatch.setattr(
+        cli_module, "notify", lambda event, **kw: notify_platforms.append(kw.get("platform"))
+    )
+
+    runner = CliRunner()
+    runner.invoke(app, ["doctor", "--platform", "taobao_guanghe"])
+
+    assert notify_platforms == ["taobao_guanghe"]
+
+
 # ============== NAS section ==============
 
 

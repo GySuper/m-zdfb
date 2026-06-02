@@ -233,7 +233,7 @@
               {% else %}<span class="badge error">{{ level_cn(e.level) }}</span>{% endif %}
             </td>
             <td class="text-sm">{{ error_type_cn(e.type) }}</td>
-            <td>{% if e.task_id %}<a href="/tasks/{{ e.task_id }}">#{{ e.task_id }}</a>{% endif %}</td>
+            <td>{% if e.task_id %}<a href="/tasks/{{ e.task_id }}?platform={{ request.state.current_platform }}">#{{ e.task_id }}</a>{% endif %}</td>
             <td class="muted text-sm">{{ e.account_id or "—" }}</td>
             <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ e.message }}</td>
           </tr>

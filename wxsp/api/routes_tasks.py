@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from loguru import logger
 from sqlmodel import Session, col, select
 
@@ -185,10 +185,15 @@ def task_detail(
     request: Request,
     task_id: int,
     session: Session = Depends(get_session),
-) -> HTMLResponse:
+) -> Response:
     task = session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} 不存在")
+    # 详情页固定属于任务自己的平台:若当前平台上下文与之不符(直达 URL / 链接漏带 ?platform=),
+    # 纠正到任务平台,避免侧栏被中间件重定向到默认平台(视频号)。
+    current_platform = getattr(request.state, "current_platform", None)
+    if current_platform and current_platform != task.platform:
+        return RedirectResponse(url=f"/tasks/{task_id}?platform={task.platform}", status_code=303)
     video = session.get(Video, task.video_id)
     account = session.get(Account, task.account_id)
     events = list(

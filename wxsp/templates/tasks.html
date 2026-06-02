@@ -62,16 +62,9 @@
     <summary><span>筛选</span><span class="filters-state">日期 {{ filter_date or '不限' }}{% if filter_platform %} · {{ platform_cn(filter_platform) }}{% endif %}{% if filter_account %} · 账号 {{ filter_account }}{% endif %}{% if filter_status %} · 状态 {{ status_cn(filter_status) }}{% endif %}</span></summary>
     <form method="get" action="/tasks" class="filter-form">
       <label>执行日期 <input type="date" name="date" value="{{ filter_date.isoformat() if filter_date else '' }}"></label>
-      {% if platform_options|length > 1 %}
-      <label>平台
-        <select name="platform">
-          <option value="">全部</option>
-          {% for p in platform_options %}
-            <option value="{{ p }}" {% if filter_platform==p %}selected{% endif %}>{{ platform_cn(p) }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      {% endif %}
+      {# 平台是页面上下文(由侧栏切换),不是列表筛选项:始终随表单提交当前平台,
+         否则"应用筛选"会丢平台 → 被中间件重定向到默认平台。 #}
+      <input type="hidden" name="platform" value="{{ request.state.current_platform }}">
       <label>账号
         <select name="account">
           <option value="">全部</option>
@@ -115,7 +108,7 @@
 
           <div class="tc-main">
             <div class="tc-title">
-              <a href="/tasks/{{ r.id }}">{{ r.title }}</a>
+              <a href="/tasks/{{ r.id }}?platform={{ request.state.current_platform }}">{{ r.title }}</a>
               <span class="tc-id">#{{ r.id }}</span>
             </div>
             <div class="tc-meta">
@@ -148,7 +141,7 @@
           </div>
 
           <div class="tc-actions">
-            <a class="btn btn-sm" href="/tasks/{{ r.id }}">详情</a>
+            <a class="btn btn-sm" href="/tasks/{{ r.id }}?platform={{ request.state.current_platform }}">详情</a>
             {% if r.retryable %}
               <form method="post" action="/tasks/{{ r.id }}/retry?platform={{ request.state.current_platform }}" style="margin:0;">
                 <button type="submit" class="btn-sm primary">重试</button>

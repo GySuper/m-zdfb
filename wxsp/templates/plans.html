@@ -38,7 +38,7 @@
               <div class="tl-time">{{ hh }}</div>
               <div class="tl-bar"></div>
               <div class="tl-content">
-                <a href="/tasks/{{ it.id }}" class="tl-title">{{ it.title }}</a>
+                <a href="/tasks/{{ it.id }}?platform={{ request.state.current_platform }}" class="tl-title">{{ it.title }}</a>
                 <div class="tl-meta">
                   <code>{{ it.account }}</code>
                   <span class="text-faint">·</span>

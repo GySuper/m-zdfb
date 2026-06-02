@@ -70,7 +70,7 @@
         if (autoscroll.checked) pre.scrollTop = pre.scrollHeight;
       }
 
-      const es = new EventSource('/api/logs/stream');
+      const es = new EventSource('/api/logs/stream?platform={{ request.state.current_platform }}');
       es.onopen = () => { status.textContent = '✓ 已连接'; status.className = 'badge ok'; };
       es.onerror = () => { status.textContent = '⚠ 断开,重连中'; status.className = 'badge error'; };
       es.onmessage = (ev) => appendLine(ev.data);

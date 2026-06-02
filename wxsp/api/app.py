@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qs, urlparse
 
@@ -39,6 +39,20 @@ from wxsp.scheduler import (
 
 _SETUP_PREFIX = "/setup"
 _STATIC_PREFIX = "/static"
+
+
+def _infer_platform_from_request(request: Request, platforms: Mapping[str, object]) -> str | None:
+    """从来源 URL 的 ?platform= 推断平台,保住同站导航的平台上下文。
+
+    优先 HX-Current-URL(HTMX 请求带的当前页 URL),再 Referer。取不到 → None(退默认)。
+    这样丢参/空参的 GET(筛选表单、漏带参的链接、SSE)都留在当前平台,不跌回默认平台。
+    """
+    for src in (request.headers.get("HX-Current-URL", ""), request.headers.get("Referer", "")):
+        if src and "?" in src:
+            vals = parse_qs(urlparse(src).query).get("platform", [])
+            if vals and vals[0] in platforms:
+                return vals[0]
+    return None
 
 
 def _setup_required() -> bool:
@@ -183,25 +197,22 @@ def create_app() -> FastAPI:
             if current and current in platforms:
                 pass  # explicit ?platform= in URL
             elif request.method == "GET":
-                # No valid platform in URL on GET -> redirect to add it
+                # 无显式 platform 的 GET:先从来源(Referer / HX-Current-URL)推断,保住当前
+                # 平台上下文,推不到再退默认;然后重定向补上 ?platform=(规范 URL + 页面链接正确)。
                 from fastapi.responses import RedirectResponse as _Redir
 
+                resolved = _infer_platform_from_request(request, platforms) or default_p
                 qp = dict(request.query_params)
-                qp["platform"] = default_p
+                qp["platform"] = resolved
                 qs = "&".join(f"{k}={v}" for k, v in qp.items())
-                target = f"{path}?{qs}" if qs else f"{path}?platform={default_p}"
+                target = f"{path}?{qs}" if qs else f"{path}?platform={resolved}"
                 return _Redir(url=target, status_code=302)
             else:
-                # POST/DELETE etc: try to infer platform from Referer
-                referer = request.headers.get("Referer", "")
-                ref_platform = None
-                if referer and "?" in referer:
-                    ref_qs = parse_qs(urlparse(referer).query)
-                    p_vals = ref_qs.get("platform", [])
-                    if p_vals and p_vals[0] in platforms:
-                        ref_platform = p_vals[0]
+                # POST/DELETE etc: 同样从来源推断平台
                 request.state.platforms = platforms
-                request.state.current_platform = ref_platform or default_p
+                request.state.current_platform = (
+                    _infer_platform_from_request(request, platforms) or default_p
+                )
                 request.state.has_multiple_platforms = len(platforms) > 1
                 return await call_next(request)
             request.state.platforms = platforms

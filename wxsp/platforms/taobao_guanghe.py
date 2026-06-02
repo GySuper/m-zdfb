@@ -248,20 +248,23 @@ def _set_schedule(page: Page, publish_at: datetime) -> None:
     combo.click(force=True)
     time.sleep(1)
 
-    # ③ 点日历上的目标日期(day 数字)
-    day_str = str(publish_at.day)
-    picker = iframe.locator(".next-overlay-wrapper.opened")
-    picker.get_by_text(day_str, exact=True).first.click(force=True)
-    time.sleep(0.5)
+    # ③ 直接填日期/时间输入框,绕开点日历格子(见 selectors 注释:格子里本月+下月
+    #    日号重复,.first 会点到本月同号 → 跨月任务排错月份)。
+    #    先填日期会把时间重置成 00:00,所以时间必须在日期之后填。
+    picker = iframe.locator(sel.SCHEDULE_PICKER_OVERLAY)
+    date_input = iframe.locator(sel.SCHEDULE_DATE_INPUT)
+    date_input.fill(publish_at.strftime("%Y/%m/%d"))
+    date_input.press("Enter")
+    time.sleep(0.3)
 
     # ④ 填时间 HH:mm
-    time_str = publish_at.strftime("%H:%M")
-    time_input = iframe.locator('input[placeholder="HH:mm"]')
-    time_input.fill(time_str)
+    time_input = iframe.locator(sel.SCHEDULE_TIME_INPUT)
+    time_input.fill(publish_at.strftime("%H:%M"))
+    time_input.press("Enter")
     time.sleep(0.3)
 
     # ⑤ 点"确定"关闭 DatePicker
-    picker.locator('button:has-text("确定")').click()
+    picker.locator(sel.SCHEDULE_CONFIRM).click()
     time.sleep(0.5)
 
     # ⑥ 确认按钮已变成"定时发布"

@@ -56,6 +56,14 @@ SCHEDULE_RADIO = "text=定时发布"
 SCHEDULE_COMBOBOX = '[role="combobox"]'
 SUBMIT_BUTTON_SCHEDULED = 'button:has-text("定时发布")'
 SUBMIT_BUTTON_IMMEDIATE = 'button:has-text("立即发布")'
+# DatePicker 内部:日期/时间用文本输入框直接填(YYYY/MM/DD + HH:mm),绕开点日历格子。
+# 日历里本月日号和下月溢出日号重复(如本月+下月都有 "1""2""3"),点 .first 会选到
+# 本月同号 → 跨月任务被排到错误月份。实测:填 YYYY/MM/DD 会让日历自动翻到目标月并选中,
+# 但会把时间重置成 00:00,故时间必须在日期之后填。
+SCHEDULE_PICKER_OVERLAY = ".next-overlay-wrapper.opened"
+SCHEDULE_DATE_INPUT = 'input[placeholder="YYYY/MM/DD"]'
+SCHEDULE_TIME_INPUT = 'input[placeholder="HH:mm"]'
+SCHEDULE_CONFIRM = 'button:has-text("确定")'
 
 # ============== [12] 创作者声明 ==============
 DECLARATION_RADIO_MAP = {

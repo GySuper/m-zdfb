@@ -16,6 +16,8 @@ from platformdirs import user_data_dir as _platform_user_data_dir
 from platformdirs import user_log_dir as _platform_user_log_dir
 from pydantic import BaseModel, Field, model_validator
 
+from wxsp.platform_meta import REGISTRY
+
 
 def is_packaged() -> bool:
     if os.environ.get("WXSP_DEV_MODE") == "1":
@@ -40,15 +42,9 @@ def get_user_logs_dir() -> Path:
     return Path("./logs").resolve()
 
 
-# ---------------------------------------------------------------------------
-# known platforms
-# ---------------------------------------------------------------------------
-_PLATFORM_LABELS: dict[str, str] = {
-    "tencent_channel": "视频号",
-    "taobao_guanghe": "淘宝光合",
-}
-
-ALL_PLATFORMS = list(_PLATFORM_LABELS)
+# 已知平台:中文名 / 登录检测 / 标题下限等单一信息源见 wxsp/platform_meta.py。
+# 本模块只从 REGISTRY 派生平台 key 列表,不再各存一份平台表。
+ALL_PLATFORMS = list(REGISTRY)
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +66,7 @@ def get_default_platform() -> str:
     path = _default_platform_path()
     if path.exists():
         val = path.read_text(encoding="utf-8").strip()
-        if val in _PLATFORM_LABELS:
+        if val in REGISTRY:
             return val
     # Fallback: first platform with a config file
     for p in ALL_PLATFORMS:
@@ -87,7 +83,8 @@ def set_default_platform(platform: str) -> None:
 
 
 def platform_label(key: str) -> str:
-    return _PLATFORM_LABELS.get(key, key)
+    meta = REGISTRY.get(key)
+    return meta.label if meta is not None else key
 
 
 def get_config_path(platform: str = "tencent_channel") -> Path:

@@ -238,15 +238,10 @@ def complete(request: Request) -> RedirectResponse:
     return RedirectResponse(url="/accounts", status_code=302)
 
 
-def _render_config(data: dict[str, Any], *, platform: str = "tencent_channel") -> dict[str, Any]:
-    feishu = data["feishu"]
-    nas_root = data["nas"]["nas_root"]
-    webhook = data.get("notify", {}).get("webhook", "")
+def _field_map_for(platform: str) -> dict[str, str]:
+    """飞书字段映射:共有字段 + 平台特有默认值(后者取自 wxsp.platform_meta)。"""
+    from wxsp.platform_meta import get_meta
 
-    data_dir = wxsp_config.get_user_data_dir()
-    logs_dir = wxsp_config.get_user_logs_dir()
-
-    # Per-platform field_map
     field_map = {
         "video_file": "视频文件",
         "title": "标题",
@@ -258,24 +253,19 @@ def _render_config(data: dict[str, Any], *, platform: str = "tencent_channel") -
         "remote_url": "已发布链接",
         "error_message": "错误信息",
     }
-    if platform == "taobao_guanghe":
-        field_map.update(
-            {
-                "topic": "话题活动",
-                "product_ids": "商品ID",
-                "declaration": "创作者声明",
-                "ai_optimize": "AI优化",
-            }
-        )
-    else:
-        field_map.update(
-            {
-                "tags": "标签",
-                "cover": "封面文件",
-                "topic": "合集",
-                "original_claim": "原创",
-            }
-        )
+    field_map.update(get_meta(platform).field_map_defaults)
+    return field_map
+
+
+def _render_config(data: dict[str, Any], *, platform: str = "tencent_channel") -> dict[str, Any]:
+    feishu = data["feishu"]
+    nas_root = data["nas"]["nas_root"]
+    webhook = data.get("notify", {}).get("webhook", "")
+
+    data_dir = wxsp_config.get_user_data_dir()
+    logs_dir = wxsp_config.get_user_logs_dir()
+
+    field_map = _field_map_for(platform)
 
     # 账号不在向导里建,留空 dict;运营装完后到 /config 加账号(那里自动生成 ID + 同步飞书)。
     return {

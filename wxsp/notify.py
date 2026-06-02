@@ -151,8 +151,13 @@ class WecomNotifier:
 
 
 def _platform_tag(platform: str | None) -> str:
-    """平台 key → 中文标签,用于通知 markdown 头部。"""
-    return {"tencent_channel": "视频号", "taobao_guanghe": "淘宝光合"}.get(platform or "", "视频号")
+    """平台 key → 中文标签,用于通知 markdown 头部。
+
+    取自 wxsp.platform_meta(单一信息源);未知/None 回退视频号(历史默认)。
+    """
+    from wxsp.platform_meta import get_meta
+
+    return get_meta(platform).label
 
 
 def _format_markdown(event: NotifyEvent) -> str:

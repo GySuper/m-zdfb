@@ -14,15 +14,19 @@ from sqlmodel import Session, select
 
 from wxsp.archive import cleanup_old_files, install_file_sink
 from wxsp.browser import check_cookie
-from wxsp.config import Settings, load_settings
+from wxsp.config import ALL_PLATFORMS, Settings, load_settings, platform_label
 from wxsp.db import get_engine, init_db, session_scope
 from wxsp.doctor import check_feishu, check_nas, record_cookie_check, refresh_cookie_status
 from wxsp.feishu import FeishuApiError
 from wxsp.models import Account
 from wxsp.notify import NotifyEvent, notify
 from wxsp.publisher import AlreadyClaimed, publish
+from wxsp.publisher import login as publisher_login
 from wxsp.scheduler import run_today_pending, start_daemon
 from wxsp.sync import sync_now
+
+# 平台列表助记串(CLI 帮助文案动态生成,加平台不再改 cli.py)
+_PLATFORM_LIST = " | ".join(ALL_PLATFORMS)
 
 
 def _force_utf8_stdout() -> None:
@@ -79,34 +83,21 @@ def login(account_id: str = typer.Argument(..., help="账号 ID")) -> None:
         if account is None:
             typer.echo(f"[wxsp] 账号 {account_id!r} 不存在。先 `wxsp accounts add`。")
             raise typer.Exit(code=1)
-        user_data_dir = Path(account.user_data_dir)
         account_platform: str = getattr(account, "platform", "tencent_channel")
+        # 浏览器扫码可能开 5 分钟,session 立刻关。expunge 让 account 的已加载字段
+        # (platform/id/user_data_dir)在 detached 后仍可读,供 publisher_login 透传。
+        session.expunge(account)
 
-    # 2. 启浏览器,等扫码 / 等已登录标记可见(最长 5 分钟)
+    # 2. 启浏览器,等扫码 / 等已登录标记可见(最长 5 分钟)。
+    #    按 account.platform 路由到对应平台的 login(publisher 薄路由,加平台不改这里)。
     is_logged_in: bool | None
-    if account_platform == "taobao_guanghe":
-        from wxsp.platforms.taobao_guanghe import TaobaoGuanghePublisher
-
-        typer.echo(f"[wxsp] 打开浏览器,请在弹出窗口中登录淘宝光合 {account_id}(最长 5 分钟)...")
-        settings = load_settings(platform=account_platform)
-        pub = TaobaoGuanghePublisher()
-        try:
-            is_logged_in = pub.login(account, settings)
-        except Exception as exc:
-            typer.echo(f"[wxsp] 浏览器启动失败:{exc}")
-            is_logged_in = None
-    else:
-        typer.echo(f"[wxsp] 打开浏览器,请在弹出窗口中扫码登录 {account_id}(最长 5 分钟)...")
-        try:
-            is_logged_in = check_cookie(
-                user_data_dir,
-                timeout_ms=300_000,
-                account_id=account_id,
-                platform=account_platform,
-            )
-        except Exception as exc:
-            typer.echo(f"[wxsp] 浏览器启动失败:{exc}")
-            is_logged_in = None
+    label = platform_label(account_platform)
+    typer.echo(f"[wxsp] 打开浏览器,请在弹出窗口中登录{label}账号 {account_id}(最长 5 分钟)...")
+    try:
+        is_logged_in = publisher_login(account)
+    except Exception as exc:
+        typer.echo(f"[wxsp] 浏览器启动失败:{exc}")
+        is_logged_in = None
 
     # 3. 回写 DB
     now = datetime.now()
@@ -131,9 +122,7 @@ def accounts_add(
         ..., "--user-data-dir", help="Chrome profile 目录,每账号独立"
     ),
     daily_limit: int = typer.Option(20, "--daily-limit", help="每日发布上限"),
-    platform: str = typer.Option(
-        "tencent_channel", "--platform", help="平台: tencent_channel | taobao_guanghe"
-    ),
+    platform: str = typer.Option("tencent_channel", "--platform", help=f"平台: {_PLATFORM_LIST}"),
 ) -> None:
     """新增账号到 DB。"""
     with _open_session() as session:
@@ -322,9 +311,7 @@ def doctor(
 @app.command("sync")
 def sync(
     dry_run: bool = typer.Option(False, "--dry-run", help="走完流程但不写 DB 不回写飞书"),
-    platform: str = typer.Option(
-        "tencent_channel", "--platform", help="平台: tencent_channel | taobao_guanghe"
-    ),
+    platform: str = typer.Option("tencent_channel", "--platform", help=f"平台: {_PLATFORM_LIST}"),
 ) -> None:
     """立即拉一次飞书 Bitable,执行入库 / 错误回写。"""
     settings = load_settings(platform=platform)
@@ -357,7 +344,7 @@ def run(
     task_id: int | None = typer.Option(None, "--task-id", help="跑指定单条任务"),
     dry_run: bool = typer.Option(False, "--dry-run", help="发布步骤跑到点'发布'前停下"),
     platform: str | None = typer.Option(
-        None, "--platform", help="平台: tencent_channel | taobao_guanghe(仅 --today 时可选)"
+        None, "--platform", help=f"平台: {_PLATFORM_LIST}(仅 --today 时可选)"
     ),
 ) -> None:
     """执行任务。三选一:--task-id 单条 / --today 跑今天 / --daemon 起 cron。"""
@@ -476,7 +463,7 @@ def logs(
 @app.command("cleanup")
 def cleanup(
     platform: str | None = typer.Option(
-        None, "--platform", help="平台(如 tencent_channel / taobao_guanghe),默认全部"
+        None, "--platform", help=f"平台({_PLATFORM_LIST}),默认全部"
     ),
 ) -> None:
     """清理过保留期的日志 / 失败截图(M9)。

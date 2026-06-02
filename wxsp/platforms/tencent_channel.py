@@ -474,7 +474,7 @@ class TencentChannelPublisher:
         """跑视频号发布的完整流程(共享编排器 + 视频号步骤)。"""
         return run_publish(task_id, dry_run=dry_run, settings=settings, spec=TENCENT_SPEC)
 
-    def login(self, account: Account, settings: Settings) -> bool:
+    def login(self, account: Account) -> bool:
         """扫码登录: 打开浏览器, 等用户在微信上扫码。"""
         from wxsp.browser import check_cookie
 

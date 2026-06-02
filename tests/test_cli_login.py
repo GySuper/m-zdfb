@@ -71,9 +71,8 @@ def test_login_success_marks_cookie_ok_and_bumps_last_active(
         assert timeout_ms >= 60_000, "login must use a generous timeout for QR scan"
         return True
 
-    from wxsp import cli as cli_module
-
-    monkeypatch.setattr(cli_module, "check_cookie", fake_check)
+    # login 经 publisher → TencentChannelPublisher.login → wxsp.browser.check_cookie
+    monkeypatch.setattr("wxsp.browser.check_cookie", fake_check)
 
     runner = CliRunner()
     result = runner.invoke(app, ["login", "account_a"])
@@ -106,9 +105,8 @@ def test_login_failure_marks_cookie_expired_and_exits_nonzero(
     ) -> bool:
         return False  # simulated scan timeout
 
-    from wxsp import cli as cli_module
-
-    monkeypatch.setattr(cli_module, "check_cookie", fake_check)
+    # login 经 publisher → TencentChannelPublisher.login → wxsp.browser.check_cookie
+    monkeypatch.setattr("wxsp.browser.check_cookie", fake_check)
 
     runner = CliRunner()
     result = runner.invoke(app, ["login", "account_a"])
@@ -137,9 +135,7 @@ def test_login_browser_crash_marks_cookie_unknown(
     ) -> bool:
         raise RuntimeError("simulated patchright crash")
 
-    from wxsp import cli as cli_module
-
-    monkeypatch.setattr(cli_module, "check_cookie", crashing_check)
+    monkeypatch.setattr("wxsp.browser.check_cookie", crashing_check)
 
     runner = CliRunner()
     result = runner.invoke(app, ["login", "account_a"])
@@ -167,9 +163,8 @@ def test_login_outputs_chinese_success_message(
     ) -> bool:
         return True
 
-    from wxsp import cli as cli_module
-
-    monkeypatch.setattr(cli_module, "check_cookie", fake_check)
+    # login 经 publisher → TencentChannelPublisher.login → wxsp.browser.check_cookie
+    monkeypatch.setattr("wxsp.browser.check_cookie", fake_check)
 
     runner = CliRunner()
     result = runner.invoke(app, ["login", "account_a"])

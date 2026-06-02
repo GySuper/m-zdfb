@@ -31,22 +31,17 @@ from loguru import logger
 from patchright.sync_api import Page, sync_playwright
 
 from wxsp.config import get_user_data_dir, is_packaged
-
-# 平台登录态检测配置:"url" 模式检查 URL 是否含 fragment,"selector" 模式轮询选择器
-_PLATFORM_LOGIN_META: dict[str, dict[str, Any]] = {
-    "tencent_channel": {
-        "home_url": "https://channels.weixin.qq.com",
-        "mode": "selector",
-        "selector": 'div:has-text("发表视频"), button:has-text("发表"), button:has-text("发布视频")',
-    },
-    "taobao_guanghe": {
-        "home_url": "https://creator.guanghe.taobao.com",
-        "mode": "url",
-        "login_fragment": "login.taobao.com",
-    },
-}
+from wxsp.platform_meta import get_meta
 
 WECHAT_CHANNELS_HOME = "https://channels.weixin.qq.com"
+
+
+def login_meta_for(platform: str) -> dict[str, Any]:
+    """平台登录态检测配置,取自 wxsp.platform_meta(单一信息源)。
+
+    "url" 模式检查 URL 是否含 login_fragment,"selector" 模式轮询 selector。
+    """
+    return get_meta(platform).login_meta
 
 
 def _chromium_root() -> Path | None:
@@ -91,13 +86,16 @@ def browser_context(
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(chromium_root)
     user_data_dir.mkdir(parents=True, exist_ok=True)
 
-    # 显式 cookie 持久化:patchright 的 persistent context 在关闭时不一定能
-    # 把 session cookie 写入 SQLite,导致淘宝登录后重开丢 cookie。
-    # 这里额外保存/恢复到同目录的 cookies.json(platform 甄别,视频号走 fingerprint 不需要)。
-    _use_explicit_cookies = platform != "tencent_channel"
+    # 反检测档位由 platform_meta 声明:needs_fingerprint=True 的平台注入 per-account
+    # 指纹 + AutomationControlled,靠 persistent context 持久化 cookie;False 的平台
+    # 不注入指纹,改用 cookies.json 显式持久化(patchright persistent context 对
+    # session cookie 落盘不可靠)。
+    needs_fingerprint = get_meta(platform).needs_fingerprint
+
+    _use_explicit_cookies = not needs_fingerprint
     _cookie_file = user_data_dir / "cookies.json"
 
-    if platform == "tencent_channel":
+    if needs_fingerprint:
         _chrome_args = [
             "--disable-blink-features=AutomationControlled",
             "--window-position=0,0",
@@ -135,8 +133,8 @@ def browser_context(
         )
 
     fp_init_script: str | None = None
-    # 指纹只对视频号有效;淘宝等平台跳过(风控机制不同,不需要设备指纹模拟)
-    if account_id is not None and not disable_all and platform == "tencent_channel":
+    # 指纹只对 needs_fingerprint 平台启用;其它平台跳过(风控机制不同,不需要设备指纹模拟)
+    if account_id is not None and not disable_all and needs_fingerprint:
         try:
             from wxsp.fingerprint import (
                 context_options as fp_context_options,
@@ -240,7 +238,7 @@ def wait_for_logged_in(page: Page, *, timeout_ms: int, platform: str = "tencent_
 
     返回 True = 已登录;False = 超时。
     """
-    meta = _PLATFORM_LOGIN_META.get(platform, _PLATFORM_LOGIN_META["tencent_channel"])
+    meta = login_meta_for(platform)
     page.goto(meta["home_url"], wait_until="domcontentloaded")
     if meta["mode"] == "url":
         login_fragment = meta["login_fragment"]

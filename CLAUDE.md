@@ -142,7 +142,7 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 
 **共享编排器(`runner.py`)**:claim → 加载快照 → 启浏览器 → 跑平台步骤 → 失败截图存档 → 错误分类 → finally 状态机(task 终态 / 风控暂停 24h / cookie_status / 通知 / 飞书回写)这一整套**平台无差别 plumbing 全在 `runner.py::run_publish()`**,各平台不再各抄一份。
 
-**平台 adapter** 只声明一个 `PlatformSpec`(两段步骤回调 `pre_publish` / `post_publish`,前者止于 dry-run gate 之前,后者点发布 + 抽取 remote_url)+ 步骤函数 + `login()`。只管浏览器交互,不碰 DB/通知/飞书。新增平台 = 写 selectors + 步骤函数 + 一个 `PlatformSpec` + 在 `publisher.py` 路由表注册一行。
+**平台 adapter** 只声明一个 `PlatformSpec`(两段步骤回调 `pre_publish` / `post_publish`,前者止于 dry-run gate 之前,后者点发布 + 抽取 remote_url)+ 步骤函数 + `login()`。只管浏览器交互,不碰 DB/通知/飞书。
 
 ```
 wxsp/platforms/
@@ -155,7 +155,47 @@ wxsp/platforms/
 └── taobao_selectors.py      # 淘宝光合选择器
 ```
 
-`publisher.py` 是薄路由层,根据 `task.platform` 调对应的 `PlatformPublisher.publish_one()`(内部转调 `runner.run_publish(..., spec=)`)。
+`publisher.py` 是薄路由层,根据 `task.platform` 调对应的 `PlatformPublisher.publish_one()`(内部转调 `runner.run_publish(..., spec=)`),并提供同款 `login(account)` 路由(`login` 不依赖 Settings,只开浏览器等扫码)。
+
+### 平台元数据登记表(`wxsp/platform_meta.py`)——新增平台的单一信息源
+
+每个平台的**静态身份信息**集中在 `wxsp/platform_meta.py` 的 `REGISTRY: dict[str, PlatformMeta]`(纯数据,不 import 任何 adapter,故 config/browser/validator/notify/setup 都能安全读它):
+
+| `PlatformMeta` 字段 | 消费方 |
+|---|---|
+| `label` 中文名 | `config.platform_label` / `notify._platform_tag` / `i18n.platform_cn` |
+| `title_min` 标题下限 | `validator._title_min_for` |
+| `login_meta` 登录态检测 | `browser.login_meta_for` |
+| `field_map_defaults` 平台特有飞书字段 | `routes_setup._field_map_for` / `routes_config._field_map_keys` |
+| `needs_fingerprint` 反检测档位 | `browser.browser_context`(指纹 + AutomationControlled + cookie 持久化策略) |
+
+这些消费方一律 `get_meta(platform)` 读表,**不再各存一份 per-platform map**。`config.ALL_PLATFORMS = list(REGISTRY)` 也从这里派生。回归保障见 `tests/test_platform_meta_single_source.py`(注入假平台断言各消费方都从 `REGISTRY` 读)。
+
+### 新增一个平台(操作手册)
+
+以平台 key `X` 为例,**按顺序**做完这 5 步,然后 `pytest` + `wxsp run --task-id <N> --dry-run` 验证:
+
+1. **选择器** `platforms/X_selectors.py`:发布页 URL、登录态判定、各步骤元素、`RISK_CONTROL_KEYWORDS`、`SUCCESS_INDICATORS`。优先语义化(`text=`/`role=`/`placeholder=`),少用脆弱 CSS class。
+2. **步骤实现** `platforms/X.py`:
+   - 每个发布步骤一个函数,**只做浏览器交互**,失败抛 `errors.py` 里的错误类型;
+   - `_pre_publish(page, bundle, staged, ctx)`:打开页 → 上传 → 填表 → 风控探测,**必须止于点发布之前**;
+   - `_post_publish(page, bundle, ctx)`:点发布 → 等成功 →(可选)抽 `remote_url` 写进 `ctx.result`;
+   - `X_SPEC = PlatformSpec(platform_key="X", display_name="中文名", pre_publish=_pre_publish, post_publish=_post_publish)`;
+   - `class XPublisher`:`publish_one` 转调 `run_publish(..., spec=X_SPEC)`;`login(account)` 开浏览器等扫码(**不接 Settings**)。
+3. **注册行为** `publisher._PUBLISHERS`:加 `"X": XPublisher()` 一行。
+4. **注册元数据** `platform_meta.REGISTRY`:加一条 `PlatformMeta(key, label, title_min, login_meta, field_map_defaults, needs_fingerprint)`。
+5. **生成配置**:`wxsp setup` 选平台 → 写出 `config_X.yaml`(账号去 `/config` 加)。
+
+> config / notify / browser / validator / setup / cli **都不用改**——全从 `REGISTRY` 读。
+
+**⚠️ 注意事项(踩过的坑)**
+
+- **`needs_fingerprint` 选对档**:`True` = 注入 per-account 指纹 + `AutomationControlled` + 靠 persistent context 存 cookie(视频号这种按设备指纹判多账号的强风控平台);`False` = 不注入指纹 + 用 `cookies.json` 显式持久化(淘宝)。选错会掉登录或被风控。
+- **平台特有错误**:新错误类型加到 `errors.py`(继承 `PublisherError`)→ `errors._KIND_BY_TYPE` 映射 → `notify._ERROR_TYPE_CN` 中文名,三处缺一告警就显示"未知错误"(参考 taobao 的 `ProductNotFound`/`TopicNotFound`)。
+- **新 step 名**:`ctx.last_step` 用的字符串若是新的,加进 `notify._STEP_CN`,否则告警里步骤名会漏成英文。
+- **需要全新飞书字段时**:`TaskBundle` 是字段超集;复用现有字段(title/desc/topic/tags/cover/products/declaration/ai)无需动,但要读**全新**字段得顺着 `models.Video`(加列)→ `config.FeishuFieldMap` → `feishu`/`validator`(入库)→ `base.TaskBundle` → `runner.load_task_bundle` 整条链加,别只加一头。
+- **dry-run 红线**:`pre_publish` 之后是 dry-run gate,`--dry-run` 在这里截断;点发布只能写在 `post_publish`,否则 dry-run 会真发出去。
+- **风控约束照旧**:视频号系平台 headless 禁用、最小发布间隔、步骤间随机停顿等仍受"核心约束"管;风控文案配进 selectors 的 `RISK_CONTROL_KEYWORDS`,命中即 `RiskControl`(账号暂停 24h)。
 
 ### 配置文件:每平台独立
 
@@ -185,6 +225,7 @@ wxsp/
 │   ├── __init__.py
 │   ├── cli.py                         # Typer CLI 入口
 │   ├── config.py                      # Pydantic Settings (per-platform config_{platform}.yaml)
+│   ├── platform_meta.py               # 平台静态元数据登记表 REGISTRY(新增平台单一信息源)
 │   ├── db.py                          # SQLModel engine + session + 状态转换辅助 + 幂等锁
 │   ├── models.py                      # SQLModel 表 (Account/Video/Task/Event),含 platform 字段
 │   ├── feishu.py                      # Bitable 拉取(sync_now) + 回写

@@ -114,6 +114,9 @@ class PlatformPublisher(Protocol):
         """Execute publishing steps for one task."""
         ...
 
-    def login(self, account: Account, settings: Settings) -> bool:
-        """Open browser and let user log in. Returns True on success."""
+    def login(self, account: Account) -> bool:
+        """Open browser and let user log in. Returns True on success.
+
+        登录只需打开浏览器到平台首页等扫码,不依赖 Settings(故不接 settings 参数)。
+        """
         ...

@@ -62,12 +62,6 @@ def enabled_cn(value: bool) -> str:
     return ENABLED_CN.get(value, "未知")
 
 
-PLATFORM_CN: dict[str, str] = {
-    "tencent_channel": "视频号",
-    "taobao_guanghe": "淘宝光合",
-}
-
-
 def error_type_cn(value: str | None) -> str:
     if not value:
         return ""
@@ -75,4 +69,8 @@ def error_type_cn(value: str | None) -> str:
 
 
 def platform_cn(value: str) -> str:
-    return PLATFORM_CN.get(value, value)
+    """平台 key → 中文名,取自 wxsp.platform_meta(单一信息源);未知 key 原样返回。"""
+    from wxsp.platform_meta import REGISTRY
+
+    meta = REGISTRY.get(value)
+    return meta.label if meta is not None else value

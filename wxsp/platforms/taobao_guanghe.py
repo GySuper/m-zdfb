@@ -475,7 +475,7 @@ TAOBAO_SPEC = PlatformSpec(
 class TaobaoGuanghePublisher:
     platform_key = "taobao_guanghe"
 
-    def login(self, account: Account, settings: Settings) -> bool:
+    def login(self, account: Account) -> bool:
         """开浏览器导航到淘宝光合首页, 等用户手动登录。"""
         user_data_dir = Path(account.user_data_dir)
         logger.info(f"[taobao] 开始登录 account={account.id}")

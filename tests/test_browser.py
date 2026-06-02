@@ -20,18 +20,18 @@ def test_wechat_channels_home_constant_is_https():
 
 
 def test_platform_login_meta_has_tencent_channel():
-    from wxsp.browser import _PLATFORM_LOGIN_META
+    from wxsp.browser import login_meta_for
 
-    tc = _PLATFORM_LOGIN_META["tencent_channel"]
+    tc = login_meta_for("tencent_channel")
     assert tc["mode"] == "selector"
     # 选择器必须提到仅登录后出现的文本
     assert "发表" in tc["selector"] or "发布" in tc["selector"]
 
 
 def test_platform_login_meta_has_taobao_guanghe():
-    from wxsp.browser import _PLATFORM_LOGIN_META
+    from wxsp.browser import login_meta_for
 
-    tb = _PLATFORM_LOGIN_META["taobao_guanghe"]
+    tb = login_meta_for("taobao_guanghe")
     assert tb["mode"] == "url"
     assert "login.taobao.com" in tb["login_fragment"]
 

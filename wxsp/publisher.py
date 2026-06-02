@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from wxsp.config import Settings
 from wxsp.db import get_engine, init_db
-from wxsp.models import Task
+from wxsp.models import Account, Task
 from wxsp.platforms.base import (  # re-export for callers
     AlreadyClaimed,
     PlatformPublisher,
@@ -13,7 +13,7 @@ from wxsp.platforms.base import (  # re-export for callers
 from wxsp.platforms.taobao_guanghe import TaobaoGuanghePublisher
 from wxsp.platforms.tencent_channel import TencentChannelPublisher
 
-__all__ = ["AlreadyClaimed", "PublishResult", "publish"]
+__all__ = ["AlreadyClaimed", "PublishResult", "login", "publish"]
 
 _PUBLISHERS: dict[str, PlatformPublisher] = {
     "tencent_channel": TencentChannelPublisher(),
@@ -51,3 +51,9 @@ def publish(
 
     pub = _get_publisher(platform)
     return pub.publish_one(task_id, dry_run=dry_run, settings=settings)
+
+
+def login(account: Account) -> bool:
+    """Route to the correct platform publisher's login based on account.platform."""
+    platform = getattr(account, "platform", "tencent_channel")
+    return _get_publisher(platform).login(account)

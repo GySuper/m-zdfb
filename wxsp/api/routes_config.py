@@ -76,24 +76,12 @@ _SHARED_FIELD_MAP_KEYS = [
     ("error_message", "错误信息"),
 ]
 
-_PLATFORM_FIELD_MAP_KEYS: dict[str, list[tuple[str, str]]] = {
-    "tencent_channel": [
-        ("tags", "标签"),
-        ("cover", "封面文件"),
-        ("topic", "合集"),
-        ("original_claim", "原创"),
-    ],
-    "taobao_guanghe": [
-        ("topic", "话题活动"),
-        ("product_ids", "商品ID"),
-        ("declaration", "创作者声明"),
-        ("ai_optimize", "AI优化"),
-    ],
-}
-
 
 def _field_map_keys(platform: str) -> list[tuple[str, str]]:
-    extra = _PLATFORM_FIELD_MAP_KEYS.get(platform, [])
+    """配置表单字段:共有字段 + 平台特有默认值(后者取自 wxsp.platform_meta,保持声明顺序)。"""
+    from wxsp.platform_meta import get_meta
+
+    extra = list(get_meta(platform).field_map_defaults.items())
     return _SHARED_FIELD_MAP_KEYS + extra
 
 

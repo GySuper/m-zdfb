@@ -86,12 +86,16 @@ class NasFinder(Protocol):
 # ---------------------------------------------------------------------------
 
 _TITLE_MAX = 30
-# 视频号要求 16 字以上,淘宝光合无此限制
-_TITLE_MIN_BY_PLATFORM: dict[str, int] = {
-    "tencent_channel": 16,
-    "taobao_guanghe": 1,
-}
 _TAGS_MAX = 5
+
+
+def _title_min_for(platform: str) -> int:
+    """标题最小字数,取自 wxsp.platform_meta(视频号 16,淘宝光合无限制取 1)。"""
+    from wxsp.platform_meta import get_meta
+
+    return get_meta(platform).title_min
+
+
 _VIDEO_EXTENSIONS = {".mp4", ".mov"}
 _VIDEO_MAX_BYTES = 4 * 1024**3  # 4 GiB
 _PUBLISH_MIN_DELTA = timedelta(minutes=30)
@@ -241,7 +245,7 @@ def _check_title(
         errors.append(FieldError(field=field_name, message="未指定"))
         return None
     n = len(raw)
-    title_min = _TITLE_MIN_BY_PLATFORM.get(platform, 16)
+    title_min = _title_min_for(platform)
     if n < title_min or n > _TITLE_MAX:
         if title_min > 1:
             msg = f"{n} 字(要求 {title_min}-{_TITLE_MAX} 字)"

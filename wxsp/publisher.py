@@ -10,6 +10,7 @@ from wxsp.platforms.base import (  # re-export for callers
     PlatformPublisher,
     PublishResult,
 )
+from wxsp.platforms.douyin import DouyinPublisher
 from wxsp.platforms.taobao_guanghe import TaobaoGuanghePublisher
 from wxsp.platforms.tencent_channel import TencentChannelPublisher
 
@@ -18,6 +19,7 @@ __all__ = ["AlreadyClaimed", "PublishResult", "login", "publish"]
 _PUBLISHERS: dict[str, PlatformPublisher] = {
     "tencent_channel": TencentChannelPublisher(),
     "taobao_guanghe": TaobaoGuanghePublisher(),
+    "douyin": DouyinPublisher(),
 }
 
 

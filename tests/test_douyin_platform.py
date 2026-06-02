@@ -33,3 +33,19 @@ def test_douyin_field_map_only_common_fields() -> None:
     # 抖音无平台特有字段:不应混入 topic / product_ids / declaration 等
     assert "product_ids" not in fm
     assert "topic" not in fm
+
+
+def test_douyin_routing_returns_douyin_publisher() -> None:
+    from wxsp.platforms.douyin import DouyinPublisher
+    from wxsp.publisher import _get_publisher
+
+    assert isinstance(_get_publisher("douyin"), DouyinPublisher)
+
+
+def test_douyin_spec_wiring() -> None:
+    from wxsp.platforms.douyin import DOUYIN_SPEC, _post_publish, _pre_publish
+
+    assert DOUYIN_SPEC.platform_key == "douyin"
+    assert DOUYIN_SPEC.display_name == "抖音"
+    assert DOUYIN_SPEC.pre_publish is _pre_publish
+    assert DOUYIN_SPEC.post_publish is _post_publish

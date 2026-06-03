@@ -13,7 +13,9 @@ def test_douyin_registered_in_registry() -> None:
     assert m.needs_fingerprint is False
     # 抖音用 tags(→话题标签)+ cover;这俩不在公共集里,放 field_map_defaults
     assert m.field_map_defaults == {"tags": "标签", "cover": "封面文件"}
-    assert m.login_meta["mode"] == "selector"
+    # 扫码后抖音落到 creator-micro/home(非上传页),按 URL 片段 + 登录文案消失判定
+    assert m.login_meta["mode"] == "logged_in_url"
+    assert "creator-micro/" in m.login_meta["logged_in_fragment"]
     assert "creator.douyin.com" in m.login_meta["home_url"]
     assert "douyin" in ALL_PLATFORMS
 

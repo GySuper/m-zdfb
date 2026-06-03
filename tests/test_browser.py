@@ -36,6 +36,91 @@ def test_platform_login_meta_has_taobao_guanghe():
     assert "login.taobao.com" in tb["login_fragment"]
 
 
+def test_platform_login_meta_has_douyin():
+    from wxsp.browser import login_meta_for
+
+    dy = login_meta_for("douyin")
+    # 扫码后抖音落到 creator-micro/home(非上传页),故用 URL 片段 + 登录文案消失判定,
+    # 不能用上传页专属按钮的 selector 模式。
+    assert dy["mode"] == "logged_in_url"
+    assert "creator-micro/" in dy["logged_in_fragment"]
+    assert "扫码登录" in dy["login_markers"]
+
+
+# ---- wait_for_logged_in 的 "logged_in_url" 检测回路(用假 page,不开真浏览器)----
+
+
+class _FakeLocator:
+    def __init__(self, visible: bool) -> None:
+        self._visible = visible
+
+    @property
+    def first(self) -> _FakeLocator:
+        return self
+
+    def is_visible(self) -> bool:
+        return self._visible
+
+
+class _FakeContext:
+    def cookies(self) -> list:
+        return []
+
+
+class _FakePage:
+    """按脚本化的 (url, 可见登录文案) 序列模拟轮询;每次 wait_for_timeout 前进一步,末步重复。"""
+
+    def __init__(self, steps: list) -> None:
+        self._steps = steps
+        self._i = 0
+        self.context = _FakeContext()
+        self.goto_url: str | None = None
+
+    def goto(self, url: str, wait_until: str | None = None) -> None:
+        self.goto_url = url
+
+    def _cur(self) -> tuple:
+        return self._steps[min(self._i, len(self._steps) - 1)]
+
+    @property
+    def url(self) -> str:
+        return self._cur()[0]
+
+    def get_by_text(self, text: str, exact: bool = False) -> _FakeLocator:
+        return _FakeLocator(text in self._cur()[1])
+
+    def wait_for_timeout(self, ms: int) -> None:
+        self._i += 1
+
+
+def test_wait_for_logged_in_logged_in_url_detects_after_scan_redirect():
+    """扫码后从登录页跳到 creator-micro/home(无上传页按钮)也要判为已登录。"""
+    from wxsp.browser import wait_for_logged_in
+
+    login = ("https://creator.douyin.com/", {"扫码登录", "验证码登录"})
+    home = ("https://creator.douyin.com/creator-micro/home", set())
+    page = _FakePage([login, login, home])
+    assert wait_for_logged_in(page, timeout_ms=100_000, platform="douyin") is True
+    assert page.goto_url == "https://creator.douyin.com/"
+
+
+def test_wait_for_logged_in_logged_in_url_false_while_markers_persist():
+    """URL 含 creator-micro 但登录文案还在(登录浮层)→ 不能误判为已登录。"""
+    from wxsp.browser import wait_for_logged_in
+
+    overlay = ("https://creator.douyin.com/creator-micro/content/upload", {"扫码登录"})
+    page = _FakePage([overlay])
+    assert wait_for_logged_in(page, timeout_ms=80, platform="douyin") is False
+
+
+def test_wait_for_logged_in_logged_in_url_times_out_when_never_logged_in():
+    from wxsp.browser import wait_for_logged_in
+
+    login = ("https://creator.douyin.com/", {"扫码登录", "验证码登录"})
+    page = _FakePage([login])
+    assert wait_for_logged_in(page, timeout_ms=80, platform="douyin") is False
+
+
 def test_public_callables_importable():
     from wxsp.browser import browser_context, check_cookie, wait_for_logged_in
 

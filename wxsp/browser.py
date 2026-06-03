@@ -245,18 +245,19 @@ def wait_for_logged_in(page: Page, *, timeout_ms: int, platform: str = "tencent_
         deadline = _time.monotonic() + timeout_ms / 1000.0
         while _time.monotonic() < deadline:
             if login_fragment not in page.url:
-                # 登录成功:等足够时间让 cookie 全部落盘
-                page.wait_for_timeout(5000)
-                # 强制触发 cookie flush(写磁盘)
-                try:
-                    cookies = page.context.cookies()
-                    logger.info(
-                        f"[browser] {platform} 登录成功," f" cookies={len(cookies)} url={page.url}"
-                    )
-                except Exception:
-                    pass
-                # 再等 2 秒确保 SQLite WAL 同步到 disk
-                page.wait_for_timeout(2000)
+                _settle_cookies(page, platform)
+                return True
+            page.wait_for_timeout(2000)
+        return False
+    if meta["mode"] == "logged_in_url":
+        # 已登录判据:URL 进入 logged_in_fragment(如 creator-micro/*)且登录文案都消失。
+        # 抖音扫码后落到 creator-micro/home(非上传页),故不能等上传页专属元素。
+        fragment = meta["logged_in_fragment"]
+        markers = [m for m in meta.get("login_markers", "").split(",") if m]
+        deadline = _time.monotonic() + timeout_ms / 1000.0
+        while _time.monotonic() < deadline:
+            if fragment in page.url and not _login_markers_visible(page, markers):
+                _settle_cookies(page, platform)
                 return True
             page.wait_for_timeout(2000)
         return False
@@ -265,6 +266,28 @@ def wait_for_logged_in(page: Page, *, timeout_ms: int, platform: str = "tencent_
         return True
     except Exception:
         return False
+
+
+def _login_markers_visible(page: Page, markers: list[str]) -> bool:
+    """登录文案(扫码登录/验证码登录)任一可见 = 还在登录页。"""
+    for marker in markers:
+        try:
+            if page.get_by_text(marker, exact=True).first.is_visible():
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _settle_cookies(page: Page, platform: str) -> None:
+    """登录确认后等 cookie 落盘:douyin/taobao 用 cookies.json 持久化,关 context 前必须 flush。"""
+    page.wait_for_timeout(5000)
+    try:
+        cookies = page.context.cookies()
+        logger.info(f"[browser] {platform} 登录成功, cookies={len(cookies)} url={page.url}")
+    except Exception:
+        pass
+    page.wait_for_timeout(2000)  # 再等 2 秒确保 SQLite WAL 同步到 disk
 
 
 def check_cookie(

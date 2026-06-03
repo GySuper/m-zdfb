@@ -77,11 +77,14 @@ REGISTRY: dict[str, PlatformMeta] = {
         label="抖音",
         title_min=1,
         login_meta={
-            "home_url": "https://creator.douyin.com/creator-micro/content/upload",
-            "mode": "selector",
-            # 已登录上传页才有的「上传视频」按钮(312x40,稳可见);未登录会被登录页挡住。
-            # 对真实页面校验定稿(2026-06-03)。详见 douyin_selectors.LOGGED_IN_INDICATOR。
-            "selector": 'button:has-text("上传视频")',
+            # 扫码登录走「访问首页 → 扫码后抖音自动跳进 creator-micro/* → 登录文案消失」判定。
+            # 不能用上传页专属按钮:扫码成功后抖音落到 creator-micro/home(不是上传页),
+            # 那页没有「上传视频」按钮 → 旧 selector 模式永远等不到(对真实页校验,2026-06-03)。
+            # 首页(root)未登录 URL 不含 creator-micro、登录后自动跳进去,故片段判定无误判。
+            "home_url": "https://creator.douyin.com/",
+            "mode": "logged_in_url",
+            "logged_in_fragment": "creator.douyin.com/creator-micro/",
+            "login_markers": "扫码登录,验证码登录",
         },
         # 抖音用到的非公共字段:标签(→话题标签)、封面。其余 9 个公共字段在 base 集里。
         field_map_defaults={"tags": "标签", "cover": "封面文件"},

@@ -291,6 +291,8 @@ def trigger_sync(request: Request, settings: Settings = Depends(get_settings)) -
     finally:
         _sync_lock.release()
     parts = [f"新入库 {result.accepted} 条"]
+    if result.updated:
+        parts.append(f"覆盖更新 {result.updated} 条")
     if result.rejected:
         wb_note = ""
         if result.writeback_failed > 0:

@@ -357,6 +357,8 @@ def run_today(request: Request, settings: Settings = Depends(get_settings)) -> H
         msg = "飞书未启用,直接跑今天 pending(已开始,完成后任务状态会变化)"
     else:
         bits = [f"飞书同步完成(新入库 {sync_result.accepted} 条"]
+        if sync_result.updated:
+            bits.append(f",覆盖更新 {sync_result.updated} 条")
         if sync_result.rejected:
             bits.append(f",校验失败 {sync_result.rejected} 条")
         if sync_result.skipped_incomplete:

@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
-from patchright.sync_api import Locator, Page
+from patchright.sync_api import Page
 
 from wxsp.browser import browser_context
 from wxsp.config import Settings
@@ -92,19 +92,10 @@ def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> No
     raise UploadFailed("视频上传/处理超时")
 
 
-def _desc_section(page: Page) -> Locator:
-    """定位"作品描述"区块(标题 input + 描述编辑器都在里面)。"""
-    return (
-        page.get_by_text(sel.DESC_SECTION_ANCHOR, exact=True)
-        .locator("xpath=ancestor::div[2]")
-        .locator("xpath=following-sibling::div[1]")
-    )
-
-
 def _fill_title(page: Page, title: str) -> None:
     if not title:
         return
-    inp = _desc_section(page).locator(sel.TITLE_INPUT_IN_SECTION).first
+    inp = page.locator(sel.TITLE_INPUT).first
     inp.wait_for(state="visible", timeout=10_000)
     inp.fill(title[: sel.TITLE_MAX_LENGTH])
 
@@ -113,11 +104,11 @@ def _fill_description(page: Page, description: str | None, fallback_title: str) 
     text = description or fallback_title
     if not text:
         return
-    editor = _desc_section(page).locator(sel.DESC_EDITOR_IN_SECTION).first
+    # 发布页是全新作品,简介编辑器初始为空,无需 select-all 清空(且 Ctrl+A 在 macOS
+    # 不是全选)。click 聚焦后键盘输入,光标留在末尾,供随后的 _add_tags 追加话题标签。
+    editor = page.locator(sel.DESC_EDITOR).first
     editor.wait_for(state="visible", timeout=10_000)
     editor.click()
-    page.keyboard.press("Control+KeyA")
-    page.keyboard.press("Delete")
     page.keyboard.type(text)
 
 
@@ -128,21 +119,23 @@ def _add_tags(page: Page, tags: list[str]) -> None:
 
 
 def _set_cover(page: Page, cover_path: Path | None) -> None:
-    """有自定义封面 → 上传横版封面;无封面留给 _handle_auto_cover 在发布前兜底。"""
+    """有自定义封面 → 走封面弹窗上传(可选功能)。
+
+    抖音封面弹窗较复杂(横/竖/AI 封面 + 裁剪),入口与「完成」按钮可能各有多个,
+    一律取 .first。裁剪/应用全流程未端到端实跑校验,首次用自定义封面时按需微调;
+    无封面时 douyin 会自动生成 AI 封面,此步整体跳过。
+    """
     if cover_path is None:
         return
-    page.click(sel.COVER_ENTRY)
+    page.locator(sel.COVER_ENTRY).first.click()
     modal = page.locator(sel.COVER_MODAL)
     modal.wait_for(timeout=10_000)
     page.wait_for_timeout(1000)
-    modal.locator(sel.COVER_UPLOAD_INPUT).set_input_files(str(cover_path))
+    modal.locator(sel.COVER_UPLOAD_INPUT).first.set_input_files(str(cover_path))
     page.wait_for_timeout(2000)
-    modal.locator(sel.COVER_DONE_BUTTON).click()
-    try:
-        page.locator(sel.COVER_EXTRACT_FOOTER).wait_for(state="detached", timeout=10_000)
-    except Exception:
-        logger.warning("[douyin] 封面弹窗未按预期关闭,继续")
-    logger.info("[douyin] 自定义封面设置完成")
+    modal.locator(sel.COVER_DONE_BUTTON).first.click()
+    page.wait_for_timeout(1000)
+    logger.info("[douyin] 自定义封面设置完成(best-effort)")
 
 
 def _handle_auto_cover(page: Page) -> None:
@@ -167,13 +160,13 @@ def _handle_auto_cover(page: Page) -> None:
 
 
 def _set_schedule(page: Page, publish_at: datetime) -> None:
+    # 切到「定时发布」→ 日期时间输入框出现(默认预填当前+2h,故必须整体替换)。
+    # 用 fill() 一次性清空并写入,避免 Ctrl/Cmd+A 全选的跨平台差异(macOS 是 Cmd+A)。
     page.locator(sel.SCHEDULE_RADIO).click()
     page.wait_for_timeout(1000)
     inp = page.locator(sel.SCHEDULE_DATETIME_INPUT)
-    inp.click()
-    page.keyboard.press("Control+KeyA")
-    page.keyboard.type(publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT))
-    page.keyboard.press("Enter")
+    inp.fill(publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT))
+    inp.press("Enter")
     page.wait_for_timeout(1000)
 
 
@@ -203,6 +196,14 @@ def _wait_for_success(page: Page, timeout: int = 60) -> None:
             logger.info("[douyin] 已跳转作品管理页,发布成功")
             return
         except Exception:
+            # 跳转判据为主;个别情况只弹「发布成功」toast 不跳转,用文本兜底
+            for kw in sel.SUCCESS_INDICATORS:
+                try:
+                    if page.get_by_text(kw).first.is_visible():
+                        logger.info(f"[douyin] 命中成功文案「{kw}」,发布成功")
+                        return
+                except Exception:
+                    pass
             _handle_auto_cover(page)
             time.sleep(0.5)
     raise ElementNotFound("发布成功判定超时")

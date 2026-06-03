@@ -79,7 +79,9 @@ REGISTRY: dict[str, PlatformMeta] = {
         login_meta={
             "home_url": "https://creator.douyin.com/creator-micro/content/upload",
             "mode": "selector",
-            "selector": 'div[class^="container"] input',
+            # 已登录上传页才有的「上传视频」按钮(312x40,稳可见);未登录会被登录页挡住。
+            # 对真实页面校验定稿(2026-06-03)。详见 douyin_selectors.LOGGED_IN_INDICATOR。
+            "selector": 'button:has-text("上传视频")',
         },
         field_map_defaults={},
         needs_fingerprint=False,

@@ -1,8 +1,11 @@
 # ruff: noqa: RUF001
 """抖音创作者中心选择器 —— 抖音改版时的唯一改动点。
 
-值迁移自 _ref/social-auto-upload/uploader/douyin_uploader/main.py,
-对真实页面校验定稿。优先语义化(text= / role= / placeholder=),少用脆弱 CSS class。
+已对真实页面校验定稿(2026-06-03,creator.douyin.com)。
+核心发布路径(登录态 / 上传 / 标题 / 描述 / 定时 / 发布)均经实跑校验;
+封面弹窗(横/竖/AI 封面 + 裁剪)为可选功能,仅校验了入口/弹窗/上传 input,
+裁剪与「完成」应用全流程未端到端实跑,首次用自定义封面时按需微调。
+优先语义化(text= / role= / placeholder=),少用脆弱 CSS class。
 """
 
 from __future__ import annotations
@@ -10,7 +13,7 @@ from __future__ import annotations
 # ---- 页面 URL ----
 UPLOAD_PAGE = "https://creator.douyin.com/creator-micro/content/upload"
 HOME_URL = "https://creator.douyin.com/"
-# 上传后进入的发布页(抖音有两种 URL 变体,任一命中即算进入)
+# 上传后进入的发布页(实测命中第 2 个变体 content/post/video;两个都保留兜底)
 PUBLISH_PAGE_URLS = (
     "https://creator.douyin.com/creator-micro/content/publish?enter_from=publish_page",
     "https://creator.douyin.com/creator-micro/content/post/video?enter_from=publish_page",
@@ -19,31 +22,31 @@ PUBLISH_PAGE_URLS = (
 MANAGE_URL_GLOB = "https://creator.douyin.com/creator-micro/content/manage**"
 
 # ---- 登录态 ----
-LOGIN_TEXT_MARKERS = ("扫码登录", "手机号登录")  # 任一出现 = 未登录
+# 未登录页出现「扫码登录 / 验证码登录」(无「手机号登录」字样,那只是输入框 placeholder)
+LOGIN_TEXT_MARKERS = ("扫码登录", "验证码登录")  # 任一出现 = 未登录
 LOGGED_IN_HOME_PREFIX = "https://creator.douyin.com/creator-micro/home"
-# platform_meta.login_meta 用的"已登录可见"指示元素(对真页面定稿)
-LOGGED_IN_INDICATOR = 'div[class^="container"] input'
+# platform_meta.login_meta 用的「已登录可见」指示元素:上传页「上传视频」按钮(未登录会被
+# 登录页挡住)。注:与 platform_meta.login_meta["selector"] 同值(那边不 import 本模块,
+# 故各存一份,改时两处一起改)。
+LOGGED_IN_INDICATOR = 'button:has-text("上传视频")'
 
 # ---- 视频上传 ----
 VIDEO_FILE_INPUT = "div[class^='container'] input"
+# 上传/转码完成 = 预览区出现「重新上传」(在 long-card 容器内)
 UPLOAD_DONE_MARKER = '[class^="long-card"] div:has-text("重新上传")'
-UPLOAD_FAILED_MARKER = 'div.progress-div > div:has-text("上传失败")'
-UPLOAD_RETRY_INPUT = 'div.progress-div [class^="upload-btn-input"]'
+UPLOAD_FAILED_MARKER = "text=上传失败"  # 失败态未实跑触发,文本兜底
+UPLOAD_RETRY_INPUT = 'input[class^="upload-btn-input"]'
 
-# ---- 标题 / 描述 ----
-DESC_SECTION_ANCHOR = (
-    "作品描述"  # get_by_text(exact) → ancestor::div[2] → following-sibling::div[1]
-)
-TITLE_INPUT_IN_SECTION = 'input[type="text"]'
-DESC_EDITOR_IN_SECTION = '.zone-container[contenteditable="true"]'
+# ---- 标题 / 描述(直接全局定位;弃用脆弱的「作品描述」区块 xpath)----
+TITLE_INPUT = 'input[placeholder*="作品标题"]'
+DESC_EDITOR = '.zone-container[contenteditable="true"]'
 TITLE_MAX_LENGTH = 30
 
-# ---- 封面 ----
-COVER_ENTRY = 'text="选择封面"'
+# ---- 封面(可选;弹窗复杂,best-effort,未端到端实跑)----
+COVER_ENTRY = "text=选择封面"  # 横/竖两个入口,adapter 取 .first
 COVER_MODAL = 'div[id*="creator-content-modal"]'
-COVER_UPLOAD_INPUT = "div[class^='semi-upload upload'] >> input.semi-upload-hidden-input"
-COVER_DONE_BUTTON = 'button:visible:has-text("完成")'
-COVER_EXTRACT_FOOTER = "div.extractFooter"
+COVER_UPLOAD_INPUT = "div[class^='semi-upload upload'] input.semi-upload-hidden-input"
+COVER_DONE_BUTTON = 'button:has-text("完成")'  # 弹窗内可能多个,adapter 取 .first
 COVER_REQUIRED_HINT = "请设置封面后再发布"
 COVER_RECOMMEND_FIRST = '[class^="recommendCover-"]'
 COVER_CONFIRM_APPLY_TEXT = "是否确认应用此封面？"

@@ -132,9 +132,11 @@ def _set_cover(page: Page, cover_path: Path | None) -> None:
     modal.wait_for(timeout=10_000)
     page.wait_for_timeout(1000)
     modal.locator(sel.COVER_UPLOAD_INPUT).first.set_input_files(str(cover_path))
+    page.wait_for_timeout(4000)
+    modal.locator(sel.COVER_SET_HORIZONTAL_BUTTON).first.click()
     page.wait_for_timeout(2000)
     modal.locator(sel.COVER_DONE_BUTTON).first.click()
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(4000)
     logger.info("[douyin] 自定义封面设置完成(best-effort)")
 
 

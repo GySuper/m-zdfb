@@ -26,9 +26,10 @@ MANAGE_URL_GLOB = "https://creator.douyin.com/creator-micro/content/manage**"
 LOGIN_TEXT_MARKERS = ("扫码登录", "验证码登录")  # 任一出现 = 未登录
 # 登录成功后会跳到 creator-micro/* 下任意页(不一定是 /home),用子串判更稳
 LOGGED_IN_URL_FRAGMENT = "creator.douyin.com/creator-micro/"
-# platform_meta.login_meta 用的「已登录可见」指示元素:上传页「上传视频」按钮(未登录会被
-# 登录页挡住)。注:与 platform_meta.login_meta["selector"] 同值(那边不 import 本模块,
-# 故各存一份,改时两处一起改)。
+# 上传页「上传视频」按钮(已登录且在上传页才有)。
+# 注:登录态检测已改用 platform_meta.login_meta 的 logged_in_url 模式(URL 片段 +
+# 登录文案消失,见 LOGGED_IN_URL_FRAGMENT / LOGIN_TEXT_MARKERS),不再用本元素。
+# 此常量目前无引用,保留备用(如需在上传页二次确认登录态)。
 LOGGED_IN_INDICATOR = 'button:has-text("上传视频")'
 
 # ---- 视频上传 ----
@@ -47,6 +48,7 @@ TITLE_MAX_LENGTH = 30
 COVER_ENTRY = "text=选择封面"  # 横/竖两个入口,adapter 取 .first
 COVER_MODAL = 'div[id*="creator-content-modal"]'
 COVER_UPLOAD_INPUT = "div[class^='semi-upload upload'] input.semi-upload-hidden-input"
+COVER_SET_HORIZONTAL_BUTTON = 'button:has-text("设置横封面")'  # 上传竖封面后点它再点完成
 COVER_DONE_BUTTON = 'button:has-text("完成")'  # 弹窗内可能多个,adapter 取 .first
 COVER_REQUIRED_HINT = "请设置封面后再发布"
 COVER_RECOMMEND_FIRST = '[class^="recommendCover-"]'

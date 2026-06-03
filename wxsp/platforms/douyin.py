@@ -295,7 +295,8 @@ class DouyinPublisher:
                 page.goto(sel.HOME_URL, wait_until="domcontentloaded")
                 deadline = time.time() + 300
                 while time.time() < deadline:
-                    if page.url.startswith(sel.LOGGED_IN_HOME_PREFIX):
+                    # 扫码后跳进 creator-micro/*(任意页)且无登录文案 = 登录成功
+                    if sel.LOGGED_IN_URL_FRAGMENT in page.url:
                         markers_visible = False
                         for m in sel.LOGIN_TEXT_MARKERS:
                             try:

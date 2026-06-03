@@ -24,7 +24,8 @@ MANAGE_URL_GLOB = "https://creator.douyin.com/creator-micro/content/manage**"
 # ---- 登录态 ----
 # 未登录页出现「扫码登录 / 验证码登录」(无「手机号登录」字样,那只是输入框 placeholder)
 LOGIN_TEXT_MARKERS = ("扫码登录", "验证码登录")  # 任一出现 = 未登录
-LOGGED_IN_HOME_PREFIX = "https://creator.douyin.com/creator-micro/home"
+# 登录成功后会跳到 creator-micro/* 下任意页(不一定是 /home),用子串判更稳
+LOGGED_IN_URL_FRAGMENT = "creator.douyin.com/creator-micro/"
 # platform_meta.login_meta 用的「已登录可见」指示元素:上传页「上传视频」按钮(未登录会被
 # 登录页挡住)。注:与 platform_meta.login_meta["selector"] 同值(那边不 import 本模块,
 # 故各存一份,改时两处一起改)。

@@ -16,6 +16,17 @@ from wxsp.db import get_engine, init_db
 from wxsp.feishu import BitableRow
 from wxsp.models import Account, Task, Video
 
+# 二次同步测试用:改正后的新标题(18~30 字,合规)
+_RESYNC_NEW_TITLE = "改过的新标题视频内容编号十八个字以上凑数用"
+
+
+def _edited_row(record_id: str, base: BitableRow, *, title: str | None = None) -> BitableRow:
+    """复制一行飞书记录,可改标题,record_id 保持不变(模拟运营改同一行)。"""
+    fields = dict(base.fields)
+    if title is not None:
+        fields["标题"] = title
+    return BitableRow(record_id=record_id, fields=fields)
+
 
 def _datetime_to_feishu_ms(dt: datetime) -> int:
     utc_dt = dt.replace(tzinfo=timezone(timedelta(hours=8))).astimezone(timezone.utc)
@@ -197,7 +208,7 @@ def test_sync_happy_pipeline(sync_env: dict[str, Any], monkeypatch: pytest.Monke
         assert fields["错误信息"]  # 非空
 
 
-def test_sync_second_run_skips_existing(
+def test_sync_second_run_overwrites_pending(
     sync_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     now = datetime(2026, 5, 12, 9, 0)
@@ -215,25 +226,20 @@ def test_sync_second_run_skips_existing(
     monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
 
     runner = CliRunner()
-    # 第一遍
     r1 = runner.invoke(app, ["sync"])
     assert r1.exit_code == 0
-    accepted_first = [w for w in writebacks if w[1].get("状态") == "已计划"]
-    assert len(accepted_first) == 5
+    assert len([w for w in writebacks if w[1].get("状态") == "已计划"]) == 5
 
-    # 第二遍:DB 已有 5 条 → 全部 skip,回写"已有历史任务"
     writebacks.clear()
     r2 = runner.invoke(app, ["sync"])
     assert r2.exit_code == 0
-    assert len(writebacks) == 5
-    for _, fields in writebacks:
-        assert "已有历史任务" in (fields.get("错误信息") or "")
-        assert "状态" not in fields  # 不动 status
+    assert "覆盖更新: 5" in r2.output
+    assert len([w for w in writebacks if w[1].get("状态") == "已计划"]) == 5
 
     engine = get_engine(sync_env["db_path"])
     with Session(engine) as session:
         tasks = session.exec(select(Task)).all()
-    assert len(tasks) == 5  # 没新增
+    assert len(tasks) == 5
 
 
 def test_sync_disabled_exits_zero(
@@ -290,3 +296,225 @@ def test_sync_feishu_api_error_exits_70(
     runner = CliRunner()
     result = runner.invoke(app, ["sync"])
     assert result.exit_code == 70
+
+
+def test_resync_overwrites_pending_row(
+    sync_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 5, 12, 9, 0)
+    rows = [_happy_row(0, now)]
+    fake = _FakeClient(rows)
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: fake)
+    monkeypatch.setattr("wxsp.sync.fetch_pending_rows", lambda client, **kw: list(rows))
+    writebacks: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "wxsp.sync.writeback_row",
+        lambda client, *, record_id, fields, **kw: writebacks.append((record_id, fields)),
+    )
+    monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
+
+    runner = CliRunner()
+    assert runner.invoke(app, ["sync"]).exit_code == 0
+
+    rows[:] = [_edited_row("rec_ok_0", _happy_row(0, now), title=_RESYNC_NEW_TITLE)]
+    writebacks.clear()
+    out = runner.invoke(app, ["sync"])
+    assert out.exit_code == 0
+    assert "覆盖更新: 1" in out.output
+
+    engine = get_engine(sync_env["db_path"])
+    with Session(engine) as session:
+        videos = session.exec(select(Video)).all()
+        tasks = session.exec(select(Task)).all()
+    assert len(videos) == 1 and len(tasks) == 1
+    assert videos[0].title == _RESYNC_NEW_TITLE
+    assert tasks[0].status == "pending"
+    assert tasks[0].attempts == 0
+    assert any(f.get("状态") == "已计划" and f.get("错误信息") == "" for _, f in writebacks)
+
+
+def test_resync_overwrites_failed_row_and_resets(
+    sync_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 5, 12, 9, 0)
+    rows = [_happy_row(0, now)]
+    fake = _FakeClient(rows)
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: fake)
+    monkeypatch.setattr("wxsp.sync.fetch_pending_rows", lambda client, **kw: list(rows))
+    monkeypatch.setattr("wxsp.sync.writeback_row", lambda client, *, record_id, fields, **kw: None)
+    monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
+
+    runner = CliRunner()
+    assert runner.invoke(app, ["sync"]).exit_code == 0
+
+    engine = get_engine(sync_env["db_path"])
+    with Session(engine) as session:
+        task = session.exec(select(Task)).one()
+        task.status = "failed"
+        task.attempts = 3
+        task.last_error_type = "upload_failed"
+        task.last_error_msg = "boom"
+        task.finished_at = now
+        session.add(task)
+        session.commit()
+
+    out = runner.invoke(app, ["sync"])
+    assert out.exit_code == 0
+    assert "覆盖更新: 1" in out.output
+
+    with Session(engine) as session:
+        task = session.exec(select(Task)).one()
+    assert task.status == "pending"
+    assert task.attempts == 0
+    assert task.last_error_type is None
+    assert task.last_error_msg is None
+    assert task.finished_at is None
+
+
+def test_resync_refuses_published_row(
+    sync_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 5, 12, 9, 0)
+    rows = [_happy_row(0, now)]
+    fake = _FakeClient(rows)
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: fake)
+    monkeypatch.setattr("wxsp.sync.fetch_pending_rows", lambda client, **kw: list(rows))
+    writebacks: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "wxsp.sync.writeback_row",
+        lambda client, *, record_id, fields, **kw: writebacks.append((record_id, fields)),
+    )
+    monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
+
+    runner = CliRunner()
+    assert runner.invoke(app, ["sync"]).exit_code == 0
+    original_title = _happy_row(0, now).fields["标题"]
+
+    engine = get_engine(sync_env["db_path"])
+    with Session(engine) as session:
+        task = session.exec(select(Task)).one()
+        task.status = "success"
+        task.remote_url = "http://example.com/v1"
+        session.add(task)
+        session.commit()
+
+    rows[:] = [_edited_row("rec_ok_0", _happy_row(0, now), title=_RESYNC_NEW_TITLE)]
+    writebacks.clear()
+    out = runner.invoke(app, ["sync"])
+    assert out.exit_code == 0
+    assert "覆盖更新: 0" in out.output
+
+    with Session(engine) as session:
+        video = session.exec(select(Video)).one()
+        task = session.exec(select(Task)).one()
+    assert video.title == original_title
+    assert task.status == "success"
+    assert any(
+        f.get("状态") == "已发布" and "已发布成功" in (f.get("错误信息") or "")
+        for _, f in writebacks
+    )
+
+
+def test_resync_skips_running_row_without_writeback(
+    sync_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 5, 12, 9, 0)
+    rows = [_happy_row(0, now)]
+    fake = _FakeClient(rows)
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: fake)
+    monkeypatch.setattr("wxsp.sync.fetch_pending_rows", lambda client, **kw: list(rows))
+    writebacks: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "wxsp.sync.writeback_row",
+        lambda client, *, record_id, fields, **kw: writebacks.append((record_id, fields)),
+    )
+    monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
+
+    runner = CliRunner()
+    assert runner.invoke(app, ["sync"]).exit_code == 0
+    original_title = _happy_row(0, now).fields["标题"]
+
+    engine = get_engine(sync_env["db_path"])
+    with Session(engine) as session:
+        task = session.exec(select(Task)).one()
+        task.status = "running"
+        session.add(task)
+        session.commit()
+
+    rows[:] = [_edited_row("rec_ok_0", _happy_row(0, now), title=_RESYNC_NEW_TITLE)]
+    writebacks.clear()
+    out = runner.invoke(app, ["sync"])
+    assert out.exit_code == 0
+
+    with Session(engine) as session:
+        video = session.exec(select(Video)).one()
+        task = session.exec(select(Task)).one()
+    assert video.title == original_title
+    assert task.status == "running"
+    assert all(rid != "rec_ok_0" for rid, _ in writebacks)
+
+
+def test_resync_rejects_now_invalid_row(
+    sync_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 5, 12, 9, 0)
+    rows = [_happy_row(0, now)]
+    fake = _FakeClient(rows)
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: fake)
+    monkeypatch.setattr("wxsp.sync.fetch_pending_rows", lambda client, **kw: list(rows))
+    writebacks: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "wxsp.sync.writeback_row",
+        lambda client, *, record_id, fields, **kw: writebacks.append((record_id, fields)),
+    )
+    monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
+
+    runner = CliRunner()
+    assert runner.invoke(app, ["sync"]).exit_code == 0
+    original_title = _happy_row(0, now).fields["标题"]
+
+    rows[:] = [_edited_row("rec_ok_0", _happy_row(0, now), title="短")]
+    writebacks.clear()
+    out = runner.invoke(app, ["sync"])
+    assert out.exit_code == 0
+
+    engine = get_engine(sync_env["db_path"])
+    with Session(engine) as session:
+        video = session.exec(select(Video)).one()
+        task = session.exec(select(Task)).one()
+    assert video.title == original_title
+    assert task.status == "pending"
+    assert any(f.get("状态") == "失败" and (f.get("错误信息") or "") for _, f in writebacks)
+
+
+def test_resync_dry_run_overwrite_writes_nothing(
+    sync_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 5, 12, 9, 0)
+    rows = [_happy_row(0, now)]
+    fake = _FakeClient(rows)
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: fake)
+    monkeypatch.setattr("wxsp.sync.fetch_pending_rows", lambda client, **kw: list(rows))
+    writebacks: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "wxsp.sync.writeback_row",
+        lambda client, *, record_id, fields, **kw: writebacks.append((record_id, fields)),
+    )
+    monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
+
+    runner = CliRunner()
+    assert runner.invoke(app, ["sync"]).exit_code == 0
+    original_title = _happy_row(0, now).fields["标题"]
+
+    # 改标题后 dry-run 再同步:应报"覆盖更新"但不落库、不回写
+    rows[:] = [_edited_row("rec_ok_0", _happy_row(0, now), title=_RESYNC_NEW_TITLE)]
+    writebacks.clear()
+    out = runner.invoke(app, ["sync", "--dry-run"])
+    assert out.exit_code == 0
+    assert "覆盖更新: 1 (dry-run)" in out.output
+
+    engine = get_engine(sync_env["db_path"])
+    with Session(engine) as session:
+        video = session.exec(select(Video)).one()
+    assert video.title == original_title  # DB 未被改动
+    assert writebacks == []  # dry-run 不回写

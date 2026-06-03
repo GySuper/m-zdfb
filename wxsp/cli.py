@@ -333,6 +333,7 @@ def sync(
     typer.echo(f"[wxsp] 飞书同步完成({platform})")
     typer.echo(f"  拉取: {result.pulled}")
     typer.echo(f"  入库: {result.accepted}{' (dry-run)' if dry_run else ''}")
+    typer.echo(f"  覆盖更新: {result.updated}{' (dry-run)' if dry_run else ''}")
     typer.echo(f"  拒绝: {result.rejected}{' (已回写)' if not dry_run else ''}")
     typer.echo(f"  已存在跳过: {result.skipped_existing}")
 

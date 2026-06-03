@@ -28,6 +28,7 @@ from wxsp.validator import FieldError, NasFinder, validate
 class SyncResult:
     pulled: int = 0
     accepted: int = 0
+    updated: int = 0  # 已存在行被改正后覆盖重入库(重置为 pending)的行数
     rejected: int = 0
     skipped_existing: int = 0
     skipped_incomplete: int = 0  # 业务还没填完(4 核心字段任一空)→ 跳过 + 不回写
@@ -84,8 +85,11 @@ def sync_now(
     nas_finder: NasFinder = _NasFinderImpl()
     now = datetime.now()
     accepted: list[str] = []
+    updated: list[str] = []
     rejected: list[tuple[str, list[FieldError]]] = []
-    skipped: list[str] = []
+    skipped: list[str] = []  # 孤儿 Video / 写库竞态 → 计 skipped_existing,不回写
+    published_refused: list[str] = []  # 本地已发布 → 拒绝,回写"已发布"
+    running_skipped: list[str] = []  # 本地正在跑 → 跳过,不回写
     skipped_incomplete: list[str] = []  # 4 核心字段空 → 跳过且不回写,等下次拉
 
     engine = get_engine()
@@ -103,9 +107,7 @@ def sync_now(
             if aid in settings.accounts
         }
         for row in rows:
-            if session.get(Video, row.record_id) is not None:
-                skipped.append(row.record_id)
-                continue
+            existing_video = session.get(Video, row.record_id)
             v_result = validate(
                 row,
                 config=settings,
@@ -120,44 +122,68 @@ def sync_now(
             if not v_result.ok:
                 rejected.append((row.record_id, v_result.errors))
                 continue
-            if dry_run:
+
+            if existing_video is None:
+                # 全新行:与原逻辑一致,新建 Video + Task
+                if dry_run:
+                    accepted.append(row.record_id)
+                    continue
+                video = Video(
+                    id=row.record_id,
+                    source="feishu",
+                    file_path=str(v_result.video_path),
+                    title=v_result.title or "",
+                    description=v_result.description,
+                    tags_json=json.dumps(v_result.tags, ensure_ascii=False),
+                    cover_path=str(v_result.cover_path) if v_result.cover_path else None,
+                    topic=v_result.topic,
+                    original_claim=v_result.original_claim,
+                    declaration=v_result.declaration,
+                    ai_optimize=v_result.ai_optimize,
+                    product_ids_json=json.dumps(v_result.product_ids, ensure_ascii=False),
+                    ingested_at=now,
+                )
+                task = Task(
+                    video_id=row.record_id,
+                    account_id=v_result.account_id or "",
+                    platform=platform,
+                    execute_date=v_result.execute_date,
+                    publish_at=v_result.publish_at,
+                    status="pending",
+                )
+                try:
+                    with session.begin_nested():
+                        session.add(video)
+                        session.add(task)
+                except IntegrityError:
+                    skipped.append(row.record_id)
+                    continue
                 accepted.append(row.record_id)
                 continue
-            video = Video(
-                id=row.record_id,
-                source="feishu",
-                file_path=str(v_result.video_path),
-                title=v_result.title or "",
-                description=v_result.description,
-                tags_json=json.dumps(v_result.tags, ensure_ascii=False),
-                cover_path=str(v_result.cover_path) if v_result.cover_path else None,
-                topic=v_result.topic,
-                original_claim=v_result.original_claim,
-                declaration=v_result.declaration,
-                ai_optimize=v_result.ai_optimize,
-                product_ids_json=json.dumps(v_result.product_ids, ensure_ascii=False),
-                ingested_at=now,
-            )
-            task = Task(
-                video_id=row.record_id,
-                account_id=v_result.account_id or "",
-                platform=platform,
-                execute_date=v_result.execute_date,
-                publish_at=v_result.publish_at,
-                status="pending",
-            )
-            try:
-                with session.begin_nested():
-                    session.add(video)
-                    session.add(task)
-            except IntegrityError:
+
+            # 已存在:按本地 Task 状态决定覆盖 / 拒绝 / 跳过
+            existing_task = session.exec(select(Task).where(Task.video_id == row.record_id)).first()
+            if existing_task is None:
+                # Video 无对应 Task(异常半状态)→ 防呆跳过,不覆盖不回写
                 skipped.append(row.record_id)
                 continue
-            accepted.append(row.record_id)
+            if existing_task.status == "running":
+                running_skipped.append(row.record_id)
+                continue
+            if existing_task.status == "success":
+                published_refused.append(row.record_id)
+                continue
+            # pending / failed / skipped / interrupted → 覆盖
+            if dry_run:
+                updated.append(row.record_id)
+                continue
+            _apply_overwrite(session, existing_video, existing_task, v_result, platform, now)
+            updated.append(row.record_id)
 
     result.accepted = len(accepted)
+    result.updated = len(updated)
     result.rejected = len(rejected)
-    result.skipped_existing = len(skipped)
+    result.skipped_existing = len(skipped) + len(published_refused) + len(running_skipped)
     result.skipped_incomplete = len(skipped_incomplete)
     result.rejected_details = rejected
 
@@ -167,6 +193,12 @@ def sync_now(
         for record_id in accepted:
             if not _safe_writeback(client, feishu_cfg, record_id, {fm.status: "已计划"}):
                 wb_failed += 1
+        for record_id in updated:
+            # 覆盖成功:状态回"已计划"并清空旧错误信息
+            if not _safe_writeback(
+                client, feishu_cfg, record_id, {fm.status: "已计划", fm.error_message: ""}
+            ):
+                wb_failed += 1
         for record_id, errs in rejected:
             if not _safe_writeback(
                 client,
@@ -175,14 +207,16 @@ def sync_now(
                 {fm.status: "失败", fm.error_message: _format_errors(errs)},
             ):
                 wb_failed += 1
-        for record_id in skipped:
+        for record_id in published_refused:
+            # 已发布:移出"待入库"过滤,避免每次同步重复拒绝刷屏
             if not _safe_writeback(
                 client,
                 feishu_cfg,
                 record_id,
-                {fm.error_message: "已有历史任务,请在 Web UI 重试"},
+                {fm.status: "已发布", fm.error_message: _PUBLISHED_REFUSE_MSG},
             ):
                 wb_failed += 1
+        # running_skipped / skipped:不回写(留待入库,下轮自然收敛)
         result.writeback_failed = wb_failed
 
     return result
@@ -206,3 +240,47 @@ def _safe_writeback(client: Any, feishu_cfg: Any, record_id: str, fields: dict[s
 def _format_errors(errs: list[FieldError]) -> str:
     bullet_lines = "\n".join(f"· {e.field}: {e.message}" for e in errs)
     return f'校验失败,请修复后将"状态"改回"待入库":\n{bullet_lines}'
+
+
+_PUBLISHED_REFUSE_MSG = "该任务已发布成功,不能改这一行重发;如需重新发布,请在飞书新建一行任务。"
+
+
+def _apply_overwrite(
+    session: Any,
+    video: Video,
+    task: Task,
+    v_result: Any,
+    platform: str,
+    now: datetime,
+) -> None:
+    """已存在且未发布的任务:原地刷新 Video 内容 + 把 Task 重置为干净 pending。"""
+    video.file_path = str(v_result.video_path)
+    video.title = v_result.title or ""
+    video.description = v_result.description
+    video.tags_json = json.dumps(v_result.tags, ensure_ascii=False)
+    video.cover_path = str(v_result.cover_path) if v_result.cover_path else None
+    video.topic = v_result.topic
+    video.original_claim = v_result.original_claim
+    video.declaration = v_result.declaration
+    video.ai_optimize = v_result.ai_optimize
+    video.product_ids_json = json.dumps(v_result.product_ids, ensure_ascii=False)
+    video.ingested_at = now
+
+    task.account_id = v_result.account_id or ""
+    task.execute_date = v_result.execute_date
+    task.publish_at = v_result.publish_at
+    task.platform = platform
+    task.status = "pending"
+    task.attempts = 0
+    task.lease_token = None
+    task.lease_expires_at = None
+    task.last_error_type = None
+    task.last_error_msg = None
+    task.started_at = None
+    task.finished_at = None
+    task.remote_video_id = None
+    task.remote_url = None
+    task.screenshots_json = "[]"
+
+    session.add(video)
+    session.add(task)

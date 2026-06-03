@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}九豆 · 自动发布平台{% endblock %}</title>
+  <title>{{ platform_cn(request.state.current_platform) }}·{% block page_title %}九豆{% endblock %}</title>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/sse.js"></script>
   <style>

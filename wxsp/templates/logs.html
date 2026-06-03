@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}日志 · 九豆{% endblock %}
+{% block page_title %}日志{% endblock %}
 {% block content %}
 
   <div class="page-header">
     <div>
-      <div class="page-title">实时日志</div>
+      <div class="page-title">{{ platform_cn(request.state.current_platform) }}·实时日志</div>
       <div class="page-subtitle">服务运行时所有 logger 输出 · 通过 SSE 推送</div>
     </div>
     <div class="page-actions">

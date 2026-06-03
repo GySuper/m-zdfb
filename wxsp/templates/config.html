@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}配置 · 九豆{% endblock %}
+{% block page_title %}配置{% endblock %}
 {% block content %}
 
   <div class="page-header">
     <div>
-      <div class="page-title">{{ platform_label or '视频号' }}配置</div>
+      <div class="page-title">{{ platform_cn(request.state.current_platform) }}·配置</div>
       <div class="page-subtitle">
         文件 <code>{{ abs_path }}</code>
         {% if not exists %} <span class="badge error">未找到</span>{% endif %}

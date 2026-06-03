@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}任务 · 九豆{% endblock %}
+{% block page_title %}任务{% endblock %}
 {% block content %}
 
   <div class="page-header">
     <div>
-      <div class="page-title">任务</div>
+      <div class="page-title">{{ platform_cn(request.state.current_platform) }}·任务</div>
       <div class="page-subtitle">
         {% if backlog_mode %}
           历史积压视图 · 执行日期早于今天且仍待发布/已中断

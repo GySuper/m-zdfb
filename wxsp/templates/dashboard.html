@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}总览 · 九豆{% endblock %}
+{% block page_title %}总览{% endblock %}
 {% block content %}
 
 {# ============ 计算异常项 ============ #}
@@ -10,7 +10,7 @@
 
   <div class="page-header">
     <div>
-      <div class="page-title">总览</div>
+      <div class="page-title">{{ platform_cn(request.state.current_platform) }}·总览</div>
       <div class="page-subtitle">{{ today }} · <span id="dashClock"></span></div>
     </div>
     <div class="page-actions">

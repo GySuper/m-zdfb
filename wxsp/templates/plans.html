@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}计划 · 九豆{% endblock %}
+{% block page_title %}计划{% endblock %}
 {% block content %}
 
   {# flatten groups → 单一时间线 #}
@@ -13,7 +13,7 @@
 
   <div class="page-header">
     <div>
-      <div class="page-title">发布计划</div>
+      <div class="page-title">{{ platform_cn(request.state.current_platform) }}·发布计划</div>
       <div class="page-subtitle">按发布时间排序的当日清单 · 只读视图</div>
     </div>
     <div class="page-actions">

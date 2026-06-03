@@ -194,6 +194,79 @@ def test_login_creates_db_row_if_missing(
         assert s.get(Account, "account_b") is not None
 
 
+def test_open_browser_triggers_background_thread(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """open-browser POST 启动后台 thread 跑 _run_open_browser(里头开浏览器停主页)。
+    测试把 _run_open_browser 替成 noop,只验证 thread 被起 + redirect + 收尾清理。
+    """
+    calls: list[tuple[str, Path]] = []
+
+    def fake_run_open(
+        account_id: str, user_data_dir: Path, *, platform: str = "tencent_channel"
+    ) -> None:
+        calls.append((account_id, user_data_dir))
+
+    monkeypatch.setattr(routes_accounts, "_run_open_browser", fake_run_open)
+    r = client.post("/accounts/account_a/open-browser", follow_redirects=False)
+    assert r.status_code == 303
+    assert "已打开" in unquote(r.headers["location"])
+    for _ in range(50):  # 最多等 1s
+        t = routes_accounts._login_in_flight.get("account_a")
+        if t is None or not t.is_alive():
+            break
+        time.sleep(0.02)
+    assert len(calls) == 1
+    assert calls[0][0] == "account_a"
+    assert isinstance(calls[0][1], Path)
+    assert "account_a" not in routes_accounts._login_in_flight
+
+
+def test_open_browser_unknown_account_404(client: TestClient) -> None:
+    r = client.post("/accounts/no_such/open-browser", follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_open_browser_and_login_are_mutually_exclusive(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同一 profile 只能开一个 chromium:open-browser 在跑时,同账号 login 不起新线程。
+
+    两者共用 _login_in_flight,避免两个 chromium 抢同一个 user_data_dir。
+    """
+    started = threading.Event()
+    release = threading.Event()
+    login_calls: list[str] = []
+
+    def slow_open(
+        account_id: str, user_data_dir: Path, *, platform: str = "tencent_channel"
+    ) -> None:
+        started.set()
+        release.wait(timeout=5.0)  # 卡住线程,模拟"窗口还开着"
+
+    monkeypatch.setattr(routes_accounts, "_run_open_browser", slow_open)
+    monkeypatch.setattr(
+        routes_accounts, "_run_login", lambda account_id, *a, **k: login_calls.append(account_id)
+    )
+
+    r1 = client.post("/accounts/account_a/open-browser", follow_redirects=False)
+    assert r1.status_code == 303
+    assert started.wait(timeout=2.0), "open-browser thread 没起来"
+    try:
+        # 窗口还开着时点登录 → login 命中自己的去重分支,不起新线程
+        r2 = client.post("/accounts/account_a/login", follow_redirects=False)
+        assert r2.status_code == 303
+        assert "已在扫码中" in unquote(r2.headers["location"])
+        assert login_calls == []
+    finally:
+        release.set()
+    for _ in range(50):
+        if "account_a" not in routes_accounts._login_in_flight:
+            break
+        time.sleep(0.02)
+    assert "account_a" not in routes_accounts._login_in_flight
+
+
 def test_sync_skipped_when_feishu_disabled(client: TestClient) -> None:
     """飞书 disabled → 返回 warn 片段(HTMX),不抛 302。"""
     r = client.post("/accounts/sync", follow_redirects=False)

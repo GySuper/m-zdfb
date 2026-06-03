@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}账号 · 九豆{% endblock %}
+{% block page_title %}账号{% endblock %}
 {% block content %}
 
   <div class="page-header">
     <div>
-      <div class="page-title">账号管理</div>
+      <div class="page-title">{{ platform_cn(request.state.current_platform) }}·账号管理</div>
       <div class="page-subtitle">共 {{ rows|length }} 个账号{% if filter_platform %} · {{ platform_cn(filter_platform) }}{% endif %}</div>
     </div>
     <div class="page-actions">
@@ -75,6 +75,9 @@
             </div>
 
             <div class="row-actions">
+              <form method="post" action="/accounts/{{ r.id }}/open-browser?platform={{ request.state.current_platform }}" style="margin:0;">
+                <button type="submit" title="打开该账号的浏览器并停在平台主页,你自己手动操作；工具不做任何自动动作,操作完关掉窗口即可">打开浏览器</button>
+              </form>
               <form method="post" action="/accounts/{{ r.id }}/login?platform={{ request.state.current_platform }}" style="margin:0;">
                 <button type="submit" class="{% if needs_attention or r.cookie_status == 'unknown' %}primary{% endif %}">
                   {% if cookie_expired or r.cookie_status == "unknown" %}扫码登录{% else %}扫码续期{% endif %}

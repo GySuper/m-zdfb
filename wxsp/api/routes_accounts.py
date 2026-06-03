@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -36,8 +37,14 @@ _sync_lock = threading.Lock()
 # 解决"运营点两次扫码登录"刷出两个 chromium 进程抢同一个 user_data_dir,导致后开的
 # 那个抛 'Target page, context or browser has been closed' + DB cookie_status 被
 # 覆盖成 unknown。Lock 保护 dict 读写;Thread.is_alive() 判断真实存活态。
+# 「打开浏览器」手动操作也注册进同一个 dict —— 同一 user_data_dir 只能被一个 chromium
+# 打开,故 login 与手动开浏览器互斥(谁先占用谁赢,另一个被提示去用已开的窗口)。
 _login_in_flight: dict[str, threading.Thread] = {}
 _login_lock = threading.Lock()
+
+# 「打开浏览器」手动操作的封顶时长(防用户忘了关窗口导致线程 + profile 锁泄漏)。
+# 到点强制关浏览器释放 profile;手动操作账号一般远不到 2 小时。
+_OPEN_BROWSER_MAX_SECONDS = 2 * 60 * 60
 
 router = APIRouter()
 
@@ -200,6 +207,56 @@ def _login_runner(account_id: str, user_data_dir: Path, platform: str = "tencent
             _login_in_flight.pop(account_id, None)
 
 
+@router.post("/accounts/{account_id}/open-browser")
+def open_browser_account(
+    account_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """打开账号浏览器停在平台主页,**不做任何自动操作**,供运营手动操作自己的账号。
+
+    与扫码登录共用 _login_in_flight 去重:同一 user_data_dir 不能被两个 chromium
+    同时打开(否则后开的崩 + 互相踢登录),故 login 与手动开浏览器互斥。
+    """
+    cfg = settings.accounts.get(account_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"账号 {account_id} 未配置")
+    plat = getattr(request.state, "current_platform", "") or ""
+    # plat(请求上下文)优先于 AccountConfig.platform 的 Pydantic 默认值(对淘宝/抖音是错的)
+    account_platform = plat or getattr(cfg, "platform", "") or "tencent_channel"
+    with _login_lock:
+        existing = _login_in_flight.get(account_id)
+        if existing is not None and existing.is_alive():
+            return _redirect(
+                f"账号 {account_id} 已有浏览器窗口打开(扫码或手动),直接用那个窗口;"
+                "想重开先关掉它再点",
+                platform=plat,
+            )
+        thread = threading.Thread(
+            target=_open_browser_runner,
+            args=(account_id, Path(cfg.user_data_dir), account_platform),
+            daemon=True,
+            name=f"web-open-browser-{account_id}",
+        )
+        _login_in_flight[account_id] = thread
+        thread.start()
+    return _redirect(
+        f"已打开 {account_id} 的浏览器,请在窗口里手动操作;操作完直接关掉窗口即可",
+        platform=plat,
+    )
+
+
+def _open_browser_runner(
+    account_id: str, user_data_dir: Path, platform: str = "tencent_channel"
+) -> None:
+    """_run_open_browser 的薄包装:无论成功失败,finally 清掉 _login_in_flight。"""
+    try:
+        _run_open_browser(account_id, user_data_dir, platform=platform)
+    finally:
+        with _login_lock:
+            _login_in_flight.pop(account_id, None)
+
+
 @router.post("/accounts/sync", response_class=HTMLResponse)
 def trigger_sync(request: Request, settings: Settings = Depends(get_settings)) -> HTMLResponse:
     """同步执行飞书 Bitable sync;返回 HTML 片段(HTMX 用)。
@@ -280,3 +337,34 @@ def _run_login(account_id: str, user_data_dir: Path, *, platform: str = "tencent
     engine = get_engine()
     with session_scope(engine) as s:
         record_cookie_check(s, account_id, is_logged_in=is_logged_in, now=_dt.now())
+
+
+def _run_open_browser(
+    account_id: str, user_data_dir: Path, *, platform: str = "tencent_channel"
+) -> None:
+    """开浏览器停在平台主页,不做任何操作,等用户手动关窗口(封顶 _OPEN_BROWSER_MAX_SECONDS)。
+
+    用户关掉窗口 → page.is_closed() 或 wait_for_timeout 抛错 → 退出 with → 清理。
+    封顶到点强制关浏览器释放 profile,避免线程 + profile 锁泄漏。
+    """
+    from wxsp.browser import browser_context, login_meta_for
+
+    home_url = login_meta_for(platform).get("home_url", "about:blank")
+    try:
+        with browser_context(
+            user_data_dir, headless=False, account_id=account_id, platform=platform
+        ) as page:
+            try:
+                page.goto(home_url, wait_until="domcontentloaded")
+            except Exception as exc:
+                logger.warning(f"[web/open-browser] {account_id} 打开主页失败: {exc}")
+            deadline = time.monotonic() + _OPEN_BROWSER_MAX_SECONDS
+            while time.monotonic() < deadline:
+                if page.is_closed():
+                    break
+                try:
+                    page.wait_for_timeout(1000)
+                except Exception:
+                    break  # 窗口被用户关掉 = target 消失
+    except Exception as exc:
+        logger.exception(f"[web/open-browser] {account_id} 浏览器异常: {exc}")

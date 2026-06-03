@@ -83,7 +83,8 @@ REGISTRY: dict[str, PlatformMeta] = {
             # 对真实页面校验定稿(2026-06-03)。详见 douyin_selectors.LOGGED_IN_INDICATOR。
             "selector": 'button:has-text("上传视频")',
         },
-        field_map_defaults={},
+        # 抖音用到的非公共字段:标签(→话题标签)、封面。其余 9 个公共字段在 base 集里。
+        field_map_defaults={"tags": "标签", "cover": "封面文件"},
         needs_fingerprint=False,
     ),
 }

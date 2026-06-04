@@ -36,6 +36,14 @@ def _need(key: str) -> str:
 
 
 def main() -> None:
+    # 冻结 exe 的 stdout 默认 cp1252,打印中文会 UnicodeEncodeError 崩在第一行。
+    # 强制 UTF-8(同 build 脚本 inject 用的招),errors=replace 兜底永不崩。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     endpoint = _need("APC_ENDPOINT")
     app_id = _need("APC_APP_ID")
     app_secret = _need("APC_APP_SECRET")

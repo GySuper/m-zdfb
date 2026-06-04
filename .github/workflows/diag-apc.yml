@@ -1,9 +1,11 @@
 name: Diagnose APC
 
-# 一次性诊断:用打包同一套 APC secrets 调后端 + 复刻客户端验签,
-# 打印"到底哪把钥匙不对"。只在网页手动点 Run workflow 时跑,不影响正常打包。
-# linux 与 windows 各跑一遍:对比二者的 ① 公钥自检 + VERDICT,
-# 若 windows 失败而 linux 通过 = Windows 打包链把公钥弄坏了。
+# 一次性诊断:用打包同一套 APC secrets 调后端 + 复刻客户端验签。
+# linux/windows 源码跑已证明公钥+验签都正常 → 把疑点缩到 PyInstaller 冻结运行时:
+# windows job 再 PyInstaller 冻结两个 diag.exe ——
+#   A 复刻 0.7.5(不 collect cryptography)   B 加 --collect-all cryptography
+# A 失败而 B 通过 = 冻结包漏了 cryptography 的 RS256 后端,根因+修法同时坐实。
+# 只在网页手动 Run workflow 时跑,不影响正常打包。
 on:
   workflow_dispatch:
 
@@ -20,7 +22,7 @@ jobs:
           enable-cache: true
       - name: uv sync
         run: uv sync --all-extras
-      - name: Run APC diagnostic (linux)
+      - name: Run APC diagnostic (linux, source)
         env:
           APC_ENDPOINT:   ${{ secrets.APC_ENDPOINT }}
           APC_APP_ID:     ${{ secrets.APC_APP_ID }}
@@ -31,6 +33,14 @@ jobs:
 
   diag-windows:
     runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      APC_ENDPOINT:   ${{ secrets.APC_ENDPOINT }}
+      APC_APP_ID:     ${{ secrets.APC_APP_ID }}
+      APC_APP_SECRET: ${{ secrets.APC_APP_SECRET }}
+      APC_PUBLIC_KEY: ${{ secrets.APC_PUBLIC_KEY }}
+      APC_CERT_FP:    ${{ secrets.APC_CERT_FP }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,16 +51,31 @@ jobs:
           enable-cache: true
       - name: uv sync
         run: uv sync --all-extras
-      - name: Run APC diagnostic (windows)
+
+      - name: APC diagnostic (windows, source — 基线,应通过)
         shell: pwsh
-        env:
-          PYTHONUTF8: "1"
-          PYTHONIOENCODING: "utf-8"
-          APC_ENDPOINT:   ${{ secrets.APC_ENDPOINT }}
-          APC_APP_ID:     ${{ secrets.APC_APP_ID }}
-          APC_APP_SECRET: ${{ secrets.APC_APP_SECRET }}
-          APC_PUBLIC_KEY: ${{ secrets.APC_PUBLIC_KEY }}
-          APC_CERT_FP:    ${{ secrets.APC_CERT_FP }}
         run: |
           [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
           uv run python scripts/diag_apc.py
+
+      - name: APC diagnostic (windows, PyInstaller 冻结 A/B 对比)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+
+          Write-Host "========== 冻结 A:复刻 0.7.5(不 collect cryptography)=========="
+          uv run --with pyinstaller pyinstaller --onefile --console `
+            --collect-all apc_sdk --name diagA scripts/diag_apc.py
+          Write-Host "----- 运行 frozen diagA.exe -----"
+          & .\dist\diagA.exe
+          Write-Host "diagA exit=$LASTEXITCODE"
+
+          Write-Host "========== 冻结 B:加 --collect-all cryptography(候选修复)=========="
+          uv run --with pyinstaller pyinstaller --onefile --console `
+            --collect-all apc_sdk --collect-all cryptography --name diagB scripts/diag_apc.py
+          Write-Host "----- 运行 frozen diagB.exe -----"
+          & .\dist\diagB.exe
+          Write-Host "diagB exit=$LASTEXITCODE"
+
+          exit 0

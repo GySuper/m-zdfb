@@ -28,7 +28,7 @@ from sqlmodel import Session
 
 from wxsp.browser import browser_context
 from wxsp.config import Settings
-from wxsp.db import claim_task, get_engine, init_db, session_scope
+from wxsp.db import claim_task, get_engine, init_db, session_scope, transition_task
 from wxsp.errors import PublisherError, classify
 from wxsp.feishu import FeishuApiError, make_client, writeback_row
 from wxsp.models import Account, Task, Video
@@ -167,7 +167,26 @@ def run_publish(
 
     # 2. 加载快照
     with Session(engine) as session:
-        bundle = load_task_bundle(session, task_id)
+        try:
+            bundle = load_task_bundle(session, task_id)
+        except Exception:
+            # claim_task 已把 task 置 running;若加载快照失败(video/account 被并发删、
+            # DB 抖动等),这里不释放锁,task 会卡在 running 直到 daemon 重启才回收。
+            # 主动回退 pending + 清 lease,让下一轮调度能重新认领。
+            session.rollback()
+            try:
+                transition_task(
+                    session,
+                    task_id,
+                    status="pending",
+                    lease_token=None,
+                    lease_expires_at=None,
+                    started_at=None,
+                )
+                session.commit()
+            except Exception as rel_exc:
+                logger.error(f"加载快照失败后释放 claim 也失败 task_id={task_id}: {rel_exc}")
+            raise
 
     result = PublishResult(task_id=task_id, ok=False, dry_run=dry_run)
     ctx = PublishContext(

@@ -62,7 +62,9 @@ def _resolve_absolute(raw: str, aliases: dict[str, str]) -> Path:
 def _find(filename: str, search_root: Path) -> Path:
     """通用实现:在 search_root 下递归找 filename,多匹配取 mtime 最新。"""
     if not search_root.exists():
-        raise FileNotFoundError(filename)
+        # 账号配置的检索根都不存在 → 几乎一定是 NAS 没挂上(而非"文件不存在"),
+        # 归 nas_unreachable 走重试 + 告警,别误判成校验失败回写飞书(CLAUDE.md §5)。
+        raise NasUnreachable(f"检索根不可达(NAS 未挂载?): {search_root}")
     try:
         matches = list(search_root.rglob(filename))
         if not matches:

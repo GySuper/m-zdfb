@@ -14,14 +14,18 @@ from typing import Any
 
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import select
+from sqlmodel import col, select
 
 from wxsp.config import Settings
 from wxsp.db import get_engine, init_db, session_scope
+from wxsp.errors import NasUnreachable
 from wxsp.feishu import FeishuApiError, fetch_pending_rows, make_client, writeback_row
 from wxsp.models import Account, Task, Video
 from wxsp.nas import find_cover, find_video
 from wxsp.validator import FieldError, NasFinder, validate
+
+# 计入 daily_limit 的 task 状态(已占用当天名额的:待跑/在跑/已发/中断;failed/skipped 不算)。
+_DAILY_LIMIT_STATUSES = ("pending", "running", "success", "interrupted")
 
 
 @dataclass
@@ -108,14 +112,23 @@ def sync_now(
         }
         for row in rows:
             existing_video = session.get(Video, row.record_id)
-            v_result = validate(
-                row,
-                config=settings,
-                now=now,
-                nas_finder=nas_finder,
-                active_accounts=active_accounts,
-                platform=platform,
-            )
+            try:
+                v_result = validate(
+                    row,
+                    config=settings,
+                    now=now,
+                    nas_finder=nas_finder,
+                    active_accounts=active_accounts,
+                    platform=platform,
+                )
+            except NasUnreachable as exc:
+                # NAS 掉线:本轮没法可靠校验文件,且 NAS 不会在循环内自愈 → 中止本轮 sync。
+                # 已处理的行照常入库/回写;这行不回写"失败"(留待 NAS 恢复后下轮重试)。CLAUDE.md §5
+                logger.warning(
+                    f"[sync] NAS 不可达,中止本轮 sync"
+                    f"(已处理 {len(accepted) + len(updated)} 行): {exc}"
+                )
+                break
             if v_result.incomplete:
                 skipped_incomplete.append(row.record_id)
                 continue
@@ -124,7 +137,36 @@ def sync_now(
                 continue
 
             if existing_video is None:
-                # 全新行:与原逻辑一致,新建 Video + Task
+                # 全新行:先卡 daily_limit(超额拒绝入库 + 回写错误),再新建 Video + Task。
+                aid = v_result.account_id or ""
+                acc_cfg = settings.accounts.get(aid)
+                if acc_cfg is not None:
+                    used = len(
+                        session.exec(
+                            select(Task).where(
+                                Task.account_id == aid,
+                                Task.execute_date == v_result.execute_date,
+                                Task.platform == platform,
+                                col(Task.status).in_(_DAILY_LIMIT_STATUSES),
+                            )
+                        ).all()
+                    )
+                    if used >= acc_cfg.daily_limit:
+                        rejected.append(
+                            (
+                                row.record_id,
+                                [
+                                    FieldError(
+                                        field=feishu_cfg.field_map.account,
+                                        message=(
+                                            f"账号 {aid} 当天({v_result.execute_date})任务数"
+                                            f"已达上限 {acc_cfg.daily_limit}"
+                                        ),
+                                    )
+                                ],
+                            )
+                        )
+                        continue
                 if dry_run:
                     accepted.append(row.record_id)
                     continue

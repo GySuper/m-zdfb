@@ -149,3 +149,27 @@ def test_test_feishu_error_path(fresh_app, monkeypatch):
     )
     assert resp.status_code == 200
     assert "✗" in resp.text
+
+
+def test_test_wecom_rejects_non_https(fresh_app, monkeypatch):
+    """向导企微测试必须做 https-only 校验(CLAUDE.md「展开 ENV + https-only 校验」),
+    不能拿 http:// / 任意内网地址直接发请求。校验失败时也不该真去调 WecomNotifier。"""
+    app, _ = fresh_app
+
+    def _boom(*a, **kw):
+        raise AssertionError("不该在 https 校验失败时实例化/调用 notifier")
+
+    monkeypatch.setattr("wxsp.notify.WecomNotifier", _boom)
+    client = TestClient(app)
+    resp = client.post("/setup/test-wecom", data={"webhook": "http://172.16.0.1/internal"})
+    assert resp.status_code == 200
+    assert "✗" in resp.text
+    assert "https" in resp.text
+
+
+def test_test_wecom_rejects_empty(fresh_app):
+    app, _ = fresh_app
+    client = TestClient(app)
+    resp = client.post("/setup/test-wecom", data={"webhook": "   "})
+    assert resp.status_code == 200
+    assert "✗" in resp.text

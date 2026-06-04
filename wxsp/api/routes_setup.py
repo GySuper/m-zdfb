@@ -297,7 +297,7 @@ def _render_config(data: dict[str, Any], *, platform: str = "tencent_channel") -
             "notifiers": {
                 "wecom": {
                     "enabled": bool(webhook),
-                    "webhook": webhook or "(留空)",
+                    "webhook": webhook or "",
                 }
             },
             "notify_on": [
@@ -359,11 +359,20 @@ def probe_path(path: str = Form(...)) -> HTMLResponse:
 @router.post("/test-wecom")
 def test_wecom(webhook: str = Form(...)) -> HTMLResponse:
     """企微告警按钮:发一条测试消息。"""
+    from wxsp.config import _expand_env_vars
     from wxsp.notify import NotifyEvent, WecomNotifier
 
     if not webhook.strip():
         return HTMLResponse('<div class="check-fail">✗ 机器人地址为空</div>')
-    notifier = WecomNotifier(webhook=webhook.strip())
+    try:
+        url = _expand_env_vars(webhook.strip())
+    except ValueError as exc:
+        return HTMLResponse(
+            f'<div class="check-fail">✗ 环境变量展开失败: {html.escape(str(exc))}</div>'
+        )
+    if not url.startswith("https://"):
+        return HTMLResponse('<div class="check-fail">✗ 机器人地址必须以 https:// 开头</div>')
+    notifier = WecomNotifier(webhook=url)
     try:
         ok = notifier.send(
             NotifyEvent(

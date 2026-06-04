@@ -21,7 +21,29 @@ from wxsp.notify import (
     _format_markdown,
     build_notifiers_from_settings,
     notify,
+    step_cn,
 )
+
+
+def test_step_cn_covers_all_platform_step_names() -> None:
+    """各平台 adapter 写进 ctx.last_step 的步骤名都必须能翻成中文,
+    否则 element_not_found 等告警标题会漏成英文(CLAUDE.md「告警里步骤名会漏成英文」)。
+
+    历史漏网:open / login / wait_upload_area / products / declaration / ai / download。
+    """
+    expected = {
+        "open": "打开发布页",
+        "login": "验证登录",
+        "wait_upload_area": "等待上传区",
+        "products": "绑定商品",
+        "declaration": "创作者声明",
+        "ai": "AI 优化",
+        "download": "下载素材",
+    }
+    for key, cn in expected.items():
+        result = step_cn(key)
+        assert result == cn
+        assert result != key  # 不能原样把英文 key 透出去
 
 
 def _fake_response(payload: dict) -> object:

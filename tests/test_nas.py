@@ -83,10 +83,13 @@ def test_find_cover_same_semantics(tmp_path: Path) -> None:
     assert result == target
 
 
-def test_find_video_empty_root_raises(tmp_path: Path) -> None:
-    # search_root 不存在 → rglob 抛 OSError 或返回空,统一表现为 FileNotFoundError
+def test_find_video_missing_search_root_raises_nas_unreachable(tmp_path: Path) -> None:
+    # 账号配置的检索根整个不存在 → 几乎一定是 NAS 没挂上(而非"文件不存在"),
+    # 归 NasUnreachable 走重试 + 告警,别误判成校验失败回写飞书"文件不存在"(CLAUDE.md §5)。
+    from wxsp.errors import NasUnreachable
+
     root = tmp_path / "nonexistent"
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(NasUnreachable):
         find_video("any.mp4", search_root=root)
 
 

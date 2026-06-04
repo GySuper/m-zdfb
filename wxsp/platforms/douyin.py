@@ -80,14 +80,21 @@ def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> No
 
     # 等上传/转码完成("重新上传"标记出现 = 完成);"上传失败" → 重试一次
     deadline = time.time() + timeout_seconds
+    retried = False
     while time.time() < deadline:
         try:
             if page.locator(sel.UPLOAD_DONE_MARKER).count() > 0:
                 logger.info("[douyin] 视频上传完成")
                 return
             if page.locator(sel.UPLOAD_FAILED_MARKER).count() > 0:
-                logger.warning("[douyin] 检测到上传失败,重新上传")
+                if retried:
+                    # 已经重传过一次还失败 → 不再循环刷重传,直接判失败(文件大概率有问题)。
+                    raise UploadFailed("视频上传失败(重传一次后仍失败)")
+                logger.warning("[douyin] 检测到上传失败,重新上传(仅一次)")
                 page.locator(sel.UPLOAD_RETRY_INPUT).set_input_files(str(file_path))
+                retried = True
+        except UploadFailed:
+            raise
         except Exception:
             pass
         time.sleep(2)

@@ -518,3 +518,76 @@ def test_resync_dry_run_overwrite_writes_nothing(
         video = session.exec(select(Video)).one()
     assert video.title == original_title  # DB 未被改动
     assert writebacks == []  # dry-run 不回写
+
+
+def test_sync_rejects_rows_over_daily_limit(
+    sync_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同账号同日任务数超过 daily_limit → 多出来的行拒绝入库 + 回写"失败"。
+    CLAUDE.md「若某账号当日任务数 > daily_limit → validator 拒绝入库 + 飞书回写错误」。
+    """
+    # 把上限调到 2,给 3 行合规(同账号同执行日期)→ 只入 2 行,第 3 行超额被拒。
+    cfg_path = sync_env["tmp_path"] / "config.yaml"
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data["accounts"]["account_a"]["daily_limit"] = 2
+    cfg_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    now = datetime(2026, 5, 12, 9, 0)
+    rows = [_happy_row(i, now) for i in range(3)]  # video_0/1/2 都存在
+    fake = _FakeClient(rows)
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: fake)
+    monkeypatch.setattr("wxsp.sync.fetch_pending_rows", lambda client, **kw: list(rows))
+    monkeypatch.setattr(
+        "wxsp.sync.writeback_row",
+        lambda client, *, record_id, fields, **kw: fake.writebacks.append((record_id, fields)),
+    )
+    monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["sync"])
+    assert result.exit_code == 0, result.output
+
+    engine = get_engine(sync_env["db_path"])
+    with Session(engine) as session:
+        tasks = session.exec(select(Task)).all()
+    assert len(tasks) == 2  # 只入了 daily_limit 个
+
+    rejected = [w for w in fake.writebacks if w[1].get("状态") == "失败"]
+    assert len(rejected) == 1
+    assert "上限" in rejected[0][1].get("错误信息", "")
+
+
+def test_sync_aborts_gracefully_when_nas_unreachable(
+    sync_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """校验阶段 NAS 掉线(NasUnreachable)→ 中止本轮 sync,不崩、不入库、不回写"失败"。
+    CLAUDE.md §5:NAS 不可达走重试,不能误判成"文件不存在"回写飞书。
+    """
+    from wxsp.errors import NasUnreachable
+
+    now = datetime(2026, 5, 12, 9, 0)
+    rows = [_happy_row(i, now) for i in range(3)]
+    fake = _FakeClient(rows)
+    monkeypatch.setattr("wxsp.sync.make_client", lambda app_id, app_secret: fake)
+    monkeypatch.setattr("wxsp.sync.fetch_pending_rows", lambda client, **kw: list(rows))
+    monkeypatch.setattr(
+        "wxsp.sync.writeback_row",
+        lambda client, *, record_id, fields, **kw: fake.writebacks.append((record_id, fields)),
+    )
+    monkeypatch.setattr("wxsp.sync.datetime", _FrozenDatetime(now))
+
+    def _boom(*a: Any, **k: Any) -> None:
+        raise NasUnreachable("NAS down")
+
+    monkeypatch.setattr("wxsp.sync.validate", _boom)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["sync"])
+    assert result.exit_code == 0, result.output  # 没崩
+
+    engine = get_engine(sync_env["db_path"])
+    with Session(engine) as session:
+        tasks = session.exec(select(Task)).all()
+    assert len(tasks) == 0  # NAS 掉线 → 中止,没入库
+    # 不把任何行回写"失败"(留待 NAS 恢复后下轮重试)
+    assert not [w for w in fake.writebacks if w[1].get("状态") == "失败"]

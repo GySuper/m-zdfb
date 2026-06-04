@@ -206,8 +206,8 @@ def test_run_today_spawns_scheduler(
     assert 'class="flash ok"' in r.text
     assert "飞书未启用" in r.text
     assert calls == ["run-today"]
-    # 释放全局 _run_today_running(下一个测试可能要再点)
-    routes_tasks._run_today_running = False
+    # 释放 per-platform 锁(_spawn 被 mock 成 no-op,_run_and_release 不会跑,要手动清)
+    routes_tasks._run_today_running_platforms.clear()
 
 
 def test_run_today_sync_failure_aborts_publish(
@@ -216,6 +216,7 @@ def test_run_today_sync_failure_aborts_publish(
 ) -> None:
     """飞书 enabled + sync_now 抛异常 → 不 spawn 发布,返回 error 片段 + HX-Trigger。"""
     c, _ = client_with_data
+    routes_tasks._run_today_running_platforms.clear()  # 干净起点,避免前序测试残留
     # 把 fixture 里的 settings 的 feishu 打开
     settings = c.app.dependency_overrides[get_settings]()  # type: ignore[attr-defined]
     settings.feishu.enabled = True
@@ -241,16 +242,16 @@ def test_run_today_sync_failure_aborts_publish(
     assert hx["opError"]["title"] == "飞书同步失败"
     assert "fake feishu down" in hx["opError"]["detail"]
     assert calls == []  # 发布循环没被 spawn
-    routes_tasks._run_today_running = False
+    routes_tasks._run_today_running_platforms.clear()
 
 
 def test_run_today_sync_failure_releases_lock(
     client_with_data: tuple[TestClient, _date],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """sync_now 抛异常后,路由必须复位 _run_today_running——否则"跑今天"永久卡死。
+    """sync_now 抛异常后,路由必须复位该平台锁——否则该平台"跑今天"永久卡死。
 
-    回归 bug:旧代码在 sync 失败分支直接 return,没复位全局锁,导致此后每次点
+    回归 bug:旧代码在 sync 失败分支直接 return,没复位锁,导致此后每次点
     "跑今天"都被拒("正在跑今天"),直到进程重启。
     """
     c, _ = client_with_data
@@ -262,17 +263,17 @@ def test_run_today_sync_failure_releases_lock(
         raise RuntimeError("feishu down")
 
     monkeypatch.setattr("wxsp.sync.sync_now", _boom)
-    routes_tasks._run_today_running = False  # 干净起点
+    routes_tasks._run_today_running_platforms.clear()  # 干净起点
 
     r1 = c.post("/tasks/run-today", follow_redirects=False)
     assert r1.status_code == 200
     assert 'class="flash error"' in r1.text
-    # 关键断言:锁被路由自己复位
-    assert routes_tasks._run_today_running is False
+    # 关键断言:锁被路由自己复位(平台不再留在"正在跑"集合里)
+    assert not routes_tasks._run_today_running_platforms
     # 行为断言:第二次点不会被"正在跑今天"挡住(会再次尝试 sync 又失败)
     r2 = c.post("/tasks/run-today", follow_redirects=False)
     assert "正在跑今天" not in r2.text
-    routes_tasks._run_today_running = False  # 清理,避免影响后续测试
+    routes_tasks._run_today_running_platforms.clear()  # 清理,避免影响后续测试
 
 
 # ============== 重新入队 + backlog 过滤(M9) ==============

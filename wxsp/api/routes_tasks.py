@@ -22,7 +22,7 @@ from loguru import logger
 from sqlmodel import Session, col, select
 
 from wxsp.api.deps import get_session, get_settings, templates
-from wxsp.config import Settings
+from wxsp.config import Settings, load_settings
 from wxsp.models import (
     TASK_STATUS_INTERRUPTED,
     TASK_STATUS_PENDING,
@@ -35,7 +35,9 @@ from wxsp.models import (
 router = APIRouter()
 
 _run_today_lock = threading.Lock()
-_run_today_running = False
+# per-platform 去重:同一平台正在跑时挡住该平台的再次触发,但不阻塞其他平台
+# (视频号/淘宝/抖音是不同站点,可并发;CLAUDE.md「每平台独立调度,互不干扰」)。
+_run_today_running_platforms: set[str] = set()
 
 RETRYABLE_STATUSES = {"failed", "interrupted"}
 # 重新入队适用于"积压"的两类:还没跑(pending)+ 跑了一半挂了(interrupted)。
@@ -230,14 +232,15 @@ def task_detail(
 @router.post("/tasks/{task_id}/retry")
 def retry_task(
     task_id: int,
-    request: Request,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
     task = session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} 不存在")
-    plat = getattr(request.state, "current_platform", "") or ""
+    # 按 task 自己的平台加载配置,而不是请求上下文(Referer 推断)的平台——
+    # 否则 Referer 缺失/错误时会用错平台的账号 + 飞书表去发布。
+    plat = task.platform
+    settings = load_settings(platform=plat)
     if task.status not in RETRYABLE_STATUSES:
         return RedirectResponse(
             url=f"/tasks/{task_id}?flash={'当前状态不可重试: ' + task.status}&platform={plat}",
@@ -308,14 +311,14 @@ def run_today(request: Request, settings: Settings = Depends(get_settings)) -> H
       不进入发布阶段(避免静默继续跑旧数据)。
     - sync 成功 → spawn `run_today_pending(do_sync=False)`,发布循环异步跑,
       失败细节走 publisher 自己的截图/告警,UI 显示"已开始跑"。
-    - _run_today_running 防并发触发;sync 还在跑时第二次点会被 lock 拒。
+    - _run_today_running_platforms 按平台防并发触发;同平台 sync 还在跑时第二次点会被拒,
+      但不挡其他平台。
     """
     platform = getattr(request.state, "current_platform", "tencent_channel") or "tencent_channel"
-    global _run_today_running
     with _run_today_lock:
-        if _run_today_running:
-            return HTMLResponse(_fragment("warn", "正在跑今天,请等当前一轮完成后再触发"))
-        _run_today_running = True
+        if platform in _run_today_running_platforms:
+            return HTMLResponse(_fragment("warn", "该平台正在跑今天,请等当前一轮完成后再触发"))
+        _run_today_running_platforms.add(platform)
 
     try:
         try:
@@ -324,10 +327,10 @@ def run_today(request: Request, settings: Settings = Depends(get_settings)) -> H
             sync_result = sync_now(settings, platform=platform) if settings.feishu.enabled else None
         except Exception as exc:
             logger.exception(f"[web/run-today] sync_now 挂了,放弃发布: {exc}")
-            # 复位全局锁:这条路径直接 return,不会进入下面 spawn 的释放线程,
-            # 漏复位会让"跑今天"在一次飞书抖动后永久卡死。
+            # 复位该平台锁:这条路径直接 return,不会进入下面 spawn 的释放线程,
+            # 漏复位会让该平台的"跑今天"在一次飞书抖动后永久卡死。
             with _run_today_lock:
-                _run_today_running = False
+                _run_today_running_platforms.discard(platform)
             return HTMLResponse(
                 _fragment("error", f"飞书同步失败,未启动发布:{exc}"),
                 headers={
@@ -338,19 +341,18 @@ def run_today(request: Request, settings: Settings = Depends(get_settings)) -> H
             )
 
         def _run_and_release() -> None:
-            global _run_today_running
             try:
                 _run_today_pending(settings, platform=platform)
             finally:
                 with _run_today_lock:
-                    _run_today_running = False
+                    _run_today_running_platforms.discard(platform)
 
         _spawn("run-today", _run_and_release)
-        # 注意:这里把 sync 状态从 finally 中拿出来,不释放 _run_today_running——
+        # 注意:这里把 sync 状态从 finally 中拿出来,不释放该平台锁——
         # 发布循环结束时它自己会释放。下面 return 之前不能进 finally。
     except Exception:
         with _run_today_lock:
-            _run_today_running = False
+            _run_today_running_platforms.discard(platform)
         raise
 
     if sync_result is None:

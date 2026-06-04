@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 from zoneinfo import ZoneInfo
 
+from wxsp.errors import NasUnreachable
+
 if TYPE_CHECKING:
     from wxsp.config import Settings
     from wxsp.feishu import BitableRow
@@ -358,7 +360,12 @@ def _check_video(
             )
         )
         return None
-    size = path.stat().st_size
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        # 文件刚找到、读大小时 NAS 抖动掉线 → 裸 OSError 不能冒泡崩掉整次 sync,
+        # 归 nas_unreachable 走重试(CLAUDE.md §5)。
+        raise NasUnreachable(f"读取 {path} 大小时 NAS 不可达: {exc}") from exc
     if size > _VIDEO_MAX_BYTES:
         gib = size / 1024**3
         errors.append(FieldError(field=field_name, message=f"{gib:.2f} GiB 超出 4 GiB 上限"))

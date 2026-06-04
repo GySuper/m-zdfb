@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import pathlib
 import sys
@@ -48,6 +49,8 @@ def main() -> None:
 
     print("===== ① 凭据自检(密钥值会被 CI 打码,看判断词即可)=====")
     print("public_key 长度  :", len(public_key))
+    fp = hashlib.sha256(public_key.encode("utf-8")).hexdigest()[:12]
+    print("public_key 指纹  :", fp, " <- linux 与 windows 这行不一样 = 公钥被打包链改了")
     has_real_newline = "\n" in public_key
     has_literal_bsn = "\\n" in public_key
     looks_pem = public_key.lstrip().startswith("-----BEGIN")

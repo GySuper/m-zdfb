@@ -51,6 +51,28 @@ def test_verify_jwt_valid_token():
     assert claims["sub"] == "ap_test"
 
 
+def test_verify_jwt_future_iat_within_skew_accepted():
+    """客户端时钟比签发方慢几秒 → token 的 iat 落在客户端"未来"。
+
+    license 是签发即用、token 无 nbf;iat 未来零容忍会误判"还没生效"。验签必须
+    容忍合理时钟偏差,不能拒。回归:这正是打包版被 APC 误判 deny、伪装成抖音
+    "等待上传区域超时"的根因(实测目标机时钟慢后端约 1 秒即触发)。
+    """
+    from apc_sdk.crypto import verify_jwt
+
+    priv, pub = _keypair()
+    now = datetime.now(timezone.utc)
+    token = _make_jwt(
+        priv,
+        sub="ap_test",
+        did="dev_a",
+        iat=int((now + timedelta(seconds=90)).timestamp()),  # iat 在客户端的未来 90s
+        exp=int((now + timedelta(hours=24)).timestamp()),
+    )
+    claims = verify_jwt(token, public_key=pub, audience="ap_test")
+    assert claims["sub"] == "ap_test"
+
+
 def test_verify_jwt_wrong_subject_rejects():
     from apc_sdk.crypto import verify_jwt
     from apc_sdk.exceptions import ApcDenied

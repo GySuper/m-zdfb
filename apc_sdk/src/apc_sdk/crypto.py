@@ -10,6 +10,12 @@ import jwt as pyjwt
 
 from apc_sdk.exceptions import ApcDenied
 
+# 客户端时钟与签发方(后端)之间允许的偏差。license 是签发即用、token 不带 nbf,
+# 后端用自身时间签 iat;客户端时钟哪怕慢 1 秒,iat 就落在客户端"未来",pyjwt 默认
+# 零容忍会判"token 未生效(iat)"→ 误拒。给 exp/nbf 留 leeway,并关掉无意义的 iat
+# 未来校验(签名 + exp 过期仍严格,安全性不变)。
+CLOCK_SKEW_LEEWAY_SECONDS = 120
+
 
 def hmac_sign(secret: str, method: str, path: str, ts: str, body: str) -> str:
     """对齐 sdk-integration.md §2.3 的签名算法。返回 hex 小写字符串。
@@ -55,7 +61,8 @@ def verify_jwt(
             token,
             public_key,
             algorithms=["RS256"],
-            options={"require": ["exp", "sub"]},
+            leeway=CLOCK_SKEW_LEEWAY_SECONDS,
+            options={"require": ["exp", "sub"], "verify_iat": False},
         )
     except pyjwt.ExpiredSignatureError as exc:
         raise ApcDenied(f"JWT expired: {exc}") from exc

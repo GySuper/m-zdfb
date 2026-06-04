@@ -12,9 +12,11 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-# wxsp local
+# wxsp local —— 真实配置含明文 app_secret / webhook,绝不入 git(只跟踪 config.example.yaml)
 config.yaml
 config.yaml.*
+config_*.yaml
+config_*.yaml.*
 data/
 logs/
 

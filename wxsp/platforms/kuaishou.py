@@ -84,20 +84,21 @@ def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> No
     page.wait_for_timeout(2000)
     _dismiss_overlays(page)
 
-    # 等上传/转码完成:`上传中` 消失 = 完成;`上传失败` → 重传一次仍失败则判失败
+    # 等上传/转码完成。先判 `上传失败`(它和 `上传中` 互斥,失败时 `上传中` 已消失,
+    # 若先判完成会把失败误当成功)→ 重传一次仍失败则判失败;再判 `上传中` 消失 = 完成。
     deadline = time.time() + timeout_seconds
     retried = False
     while time.time() < deadline:
         try:
-            if page.locator(sel.UPLOADING_MARKER).count() == 0:
-                logger.info("[kuaishou] 视频上传完成")
-                return
             if page.locator(sel.UPLOAD_FAILED_MARKER).count() > 0:
                 if retried:
                     raise UploadFailed("视频上传失败(重传一次后仍失败)")
                 logger.warning("[kuaishou] 检测到上传失败,重新上传(仅一次)")
                 page.locator(sel.UPLOAD_RETRY_INPUT).set_input_files(str(file_path))
                 retried = True
+            elif page.locator(sel.UPLOADING_MARKER).count() == 0:
+                logger.info("[kuaishou] 视频上传完成")
+                return
         except UploadFailed:
             raise
         except Exception:
@@ -151,10 +152,12 @@ def _set_cover(page: Page, cover_path: Path | None) -> None:
     logger.info("[kuaishou] 自定义封面设置完成(best-effort)")
 
 
-# ant-design DatePicker 是 controlled component,必须 native value setter + 冒泡事件,普通 fill 无效
+# ant-design DatePicker 是 controlled component,必须 native value setter + 冒泡事件,普通 fill 无效。
+# selector 由调用方传入(单一来源 = sel.SCHEDULE_DATETIME_INPUT),避免和选择器常量悄悄分叉。
 _SCHEDULE_JS = """
-(newValue) => {
-    const input = document.querySelector('input[placeholder="选择日期时间"]');
+(args) => {
+    const [selector, newValue] = args;
+    const input = document.querySelector(selector);
     if (!input) return false;
     const nativeSetter = Object.getOwnPropertyDescriptor(
         window.HTMLInputElement.prototype, 'value'
@@ -172,7 +175,10 @@ def _set_schedule(page: Page, publish_at: datetime) -> None:
     page.wait_for_timeout(2000)
     page.locator(sel.SCHEDULE_DATETIME_INPUT).click()
     page.wait_for_timeout(1000)
-    ok = page.evaluate(_SCHEDULE_JS, publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT))
+    ok = page.evaluate(
+        _SCHEDULE_JS,
+        [sel.SCHEDULE_DATETIME_INPUT, publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT)],
+    )
     if not ok:
         raise ElementNotFound("找不到定时发布时间输入框")
     page.wait_for_timeout(1000)

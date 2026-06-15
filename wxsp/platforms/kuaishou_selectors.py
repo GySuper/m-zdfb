@@ -1,4 +1,3 @@
-# ruff: noqa: RUF001
 """快手创作者平台选择器 —— 快手改版时的唯一改动点。
 
 选择器移植自 _ref/social-auto-upload/uploader/ks_uploader/main.py(KSVideo),

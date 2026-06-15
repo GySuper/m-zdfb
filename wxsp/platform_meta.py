@@ -90,6 +90,20 @@ REGISTRY: dict[str, PlatformMeta] = {
         field_map_defaults={"tags": "标签", "cover": "封面文件"},
         needs_fingerprint=False,
     ),
+    "kuaishou": PlatformMeta(
+        key="kuaishou",
+        label="快手",
+        title_min=1,
+        login_meta={
+            # 未登录访问上传页会重定向到 passport.kuaishou.com 扫码;URL 含该片段 = 未登录(同淘宝 url 模式)
+            "home_url": "https://cp.kuaishou.com/article/publish/video",
+            "mode": "url",
+            "login_fragment": "passport.kuaishou.com",
+        },
+        # 快手用到的非公共字段:标签(→话题标签)、封面。其余公共字段在 base 集里。
+        field_map_defaults={"tags": "标签", "cover": "封面文件"},
+        needs_fingerprint=False,
+    ),
 }
 
 ALL_PLATFORMS: list[str] = list(REGISTRY)

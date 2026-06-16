@@ -53,6 +53,11 @@ COVER_MODAL = 'div[role="document"].ant-modal'
 COVER_UPLOAD_TAB_TEXT = "上传封面"
 COVER_CONFIRM_BUTTON_NAME = "确认"
 
+# ---- 互动设置(发布设置区,三个开关默认勾选,运营约定全部取消;写死,不接飞书字段)----
+# 实测:每个是 label.ant-checkbox-wrapper 包 input[type=checkbox],按 label 文案点即可 toggle。
+INTERACTION_WRAPPER = "label.ant-checkbox-wrapper"
+INTERACTION_CHECKBOXES = ("允许别人跟我拍同框", "允许下载此作品", "作品展示在同城页")
+
 # ---- 定时发布(ant-design DatePicker,controlled component,必须走 native setter)----
 SCHEDULE_RADIO_WRAPPER = "label.ant-radio-wrapper"
 SCHEDULE_RADIO_TEXT = "定时发布"

@@ -174,6 +174,21 @@ def _set_cover(page: Page, cover_path: Path | None) -> None:
     logger.info("[kuaishou] 自定义封面设置完成(best-effort)")
 
 
+def _disable_interactions(page: Page) -> None:
+    """互动设置三个开关(允许同框 / 允许下载 / 同城页展示)默认勾选,运营约定全部取消勾选
+    (写死,不接飞书字段,类比视频号"不显示位置")。逐个 best-effort:已勾选才点 label 取消,
+    点不动不阻断流程。"""
+    for name in sel.INTERACTION_CHECKBOXES:
+        try:
+            cb = page.get_by_role("checkbox", name=name)
+            if cb.count() and cb.first.is_checked():
+                page.locator(sel.INTERACTION_WRAPPER).filter(has_text=name).first.click()
+                page.wait_for_timeout(300)
+                logger.info(f"[kuaishou] 已取消互动设置:{name}")
+        except Exception:
+            pass
+
+
 # ant-design DatePicker 是 controlled component,必须 native value setter + 冒泡事件,普通 fill 无效。
 # selector 由调用方传入(单一来源 = sel.SCHEDULE_DATETIME_INPUT),避免和选择器常量悄悄分叉。
 _SCHEDULE_JS = """
@@ -302,6 +317,10 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
 
     ctx.last_step = "cover"
     _set_cover(page, cover_path=staged_cover)
+    random_pause(step_pause)
+
+    ctx.last_step = "interaction"
+    _disable_interactions(page)
     random_pause(step_pause)
 
     ctx.last_step = "schedule"

@@ -40,3 +40,19 @@ def test_xiaohongshu_field_map_has_fields_the_adapter_uses() -> None:
     assert "product_ids" not in fm
     assert "topic" not in fm
     assert "original_claim" not in fm
+
+
+def test_xiaohongshu_routing_returns_xiaohongshu_publisher() -> None:
+    from wxsp.platforms.xiaohongshu import XiaohongshuPublisher
+    from wxsp.publisher import _get_publisher
+
+    assert isinstance(_get_publisher("xiaohongshu"), XiaohongshuPublisher)
+
+
+def test_xiaohongshu_spec_wiring() -> None:
+    from wxsp.platforms.xiaohongshu import XIAOHONGSHU_SPEC, _post_publish, _pre_publish
+
+    assert XIAOHONGSHU_SPEC.platform_key == "xiaohongshu"
+    assert XIAOHONGSHU_SPEC.display_name == "小红书"
+    assert XIAOHONGSHU_SPEC.pre_publish is _pre_publish
+    assert XIAOHONGSHU_SPEC.post_publish is _post_publish

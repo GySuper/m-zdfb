@@ -77,7 +77,25 @@ def _dismiss_overlays(page: Page) -> None:
         pass
 
 
+def _discard_leftover_draft(page: Page) -> None:
+    """上传页若弹「还有上次未发布的视频,是否继续编辑」残稿提示,best-effort 点「放弃」清掉。
+
+    没有该提示就跳过;点不动也不阻断本次上传(失败吞掉)。残稿来源:上次上传后没发布就退出
+    (含 dry-run 跑到发布前截断)。不清掉的话残稿可能干扰本次上传的"上传完成"判定。
+    """
+    try:
+        hint = page.get_by_text(sel.LEFTOVER_DRAFT_HINT)
+        if not (hint.count() and hint.first.is_visible()):
+            return
+        page.get_by_role("button", name=sel.DISCARD_DRAFT_BUTTON, exact=True).first.click()
+        page.wait_for_timeout(1000)
+        logger.info("[kuaishou] 已放弃上次未发布的残稿")
+    except Exception:
+        pass
+
+
 def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> None:
+    _discard_leftover_draft(page)
     upload_button = page.locator(sel.UPLOAD_BUTTON)
     upload_button.wait_for(state="visible", timeout=10_000)
     with page.expect_file_chooser() as fc_info:

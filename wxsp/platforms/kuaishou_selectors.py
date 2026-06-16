@@ -36,6 +36,10 @@ KNOW_BUTTON = 'button[type="button"] span:text("我知道了")'
 # Joyride 新手引导遮罩
 JOYRIDE_TOOLTIP = 'div[id^="react-joyride-step"] div[role="alertdialog"]'
 JOYRIDE_CLOSE = '[aria-label="Skip"], [data-action="skip"], button[title="Skip"]'
+# 上传页可能弹「还有上次未发布的视频,是否继续编辑」残稿提示(继续编辑/放弃)。
+# 开场 best-effort 点「放弃」清掉,免得残稿干扰本次上传(尤其 dry-run 反复跑会留残稿)。
+LEFTOVER_DRAFT_HINT = "还有上次未发布的视频"  # 提示文案前缀(用 substring 匹配,避开全角标点)
+DISCARD_DRAFT_BUTTON = "放弃"
 
 # ---- 描述(快手无独立标题框;「作品描述」框是主文案区)----
 # 实测:发布页唯一的 contenteditable div 即描述框(class 形如 _description_xxx,placeholder

@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json as _json
 import os
+import signal
+import subprocess
 import sys
 import time as _time
 from collections.abc import Iterator
@@ -66,6 +68,65 @@ def _fingerprint_storage_dir() -> Path:
     return get_user_data_dir() / "fingerprints"
 
 
+def _process_cmdline_contains(pid: int, needle: str) -> bool:
+    """进程 pid 的命令行是否含 needle(best-effort)。dead pid / 查不到 → False。"""
+    try:
+        if sys.platform == "win32":
+            out = subprocess.run(
+                ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout
+        else:
+            out = subprocess.run(
+                ["ps", "-ww", "-p", str(pid), "-o", "command="],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout
+        return needle in out
+    except Exception:
+        return False
+
+
+def _reap_stale_profile_lock(user_data_dir: Path) -> None:
+    """launch 前清理占用该 profile 的残留 Chrome + 陈旧单例锁(posix)。
+
+    单 worker 串行模型:即将为某账号启动浏览器时 profile 仍被占用 = 上次浏览器泄漏
+    (典型:扫码续期开了 headed 浏览器、用户手动关窗口,patchright kill EPERM 没杀掉)。
+    不清理则新 launch 撞 Chromium 单例 → 把请求交给旧会话并自身退出 → patchright
+    TargetClosedError(表现为空白页卡住)。
+
+    机制:Chromium 的 SingletonLock 是指向 "<host>-<pid>" 的 symlink。读出 pid,确认它
+    确实是用着本 profile 的进程(命令行含该路径,防 PID 复用误杀),杀掉,再删单例锁文件。
+    Windows 用互斥量而非该 symlink,os.readlink 直接抛 OSError → 本函数对 Windows 无副作用。
+    """
+    try:
+        target = os.readlink(user_data_dir / "SingletonLock")
+    except OSError:
+        return  # 无残留锁(正常路径,零开销)
+    try:
+        pid: int | None = int(target.rsplit("-", 1)[-1])
+    except ValueError:
+        pid = None
+    if pid is not None and _process_cmdline_contains(pid, str(user_data_dir.resolve())):
+        sig = getattr(signal, "SIGKILL", signal.SIGTERM)
+        try:
+            os.kill(pid, sig)
+            logger.warning(
+                f"[browser] 清理残留浏览器 pid={pid}:profile {user_data_dir.name}"
+                " 被上次泄漏的会话占用(如扫码续期手动关窗口),否则新会话会撞单例卡空白页"
+            )
+        except OSError as exc:
+            logger.warning(f"[browser] 残留浏览器 pid={pid} 清理失败: {exc}")
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        try:
+            (user_data_dir / name).unlink()
+        except OSError:
+            pass
+
+
 @contextmanager
 def browser_context(
     user_data_dir: Path,
@@ -85,6 +146,8 @@ def browser_context(
     if chromium_root is not None:
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(chromium_root)
     user_data_dir.mkdir(parents=True, exist_ok=True)
+    # 启动前清掉上次泄漏的浏览器 / 陈旧单例锁,否则会撞 Chromium 单例 → 卡空白页
+    _reap_stale_profile_lock(user_data_dir)
 
     # 反检测档位由 platform_meta 声明:needs_fingerprint=True 的平台注入 per-account
     # 指纹 + AutomationControlled,靠 persistent context 持久化 cookie;False 的平台
@@ -175,7 +238,7 @@ def browser_context(
                         saved = _json.load(f)
                     context.add_cookies(saved)
                     logger.info(
-                        f"[browser] {platform} 恢复 {len(saved)} 个 cookie" f" from {_cookie_file}"
+                        f"[browser] {platform} 恢复 {len(saved)} 个 cookie from {_cookie_file}"
                     )
                 except Exception as exc:
                     logger.warning(f"[browser] 恢复 cookie 失败: {exc}")
@@ -213,8 +276,7 @@ def browser_context(
                     with open(_cookie_file, "w") as f:
                         _json.dump(all_cookies, f, ensure_ascii=False)
                     logger.info(
-                        f"[browser] {platform} 保存 {len(all_cookies)} 个 cookie"
-                        f" to {_cookie_file}"
+                        f"[browser] {platform} 保存 {len(all_cookies)} 个 cookie to {_cookie_file}"
                     )
                 except Exception as exc:
                     logger.warning(f"[browser] 保存 cookie 失败: {exc}")

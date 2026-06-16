@@ -105,6 +105,21 @@ REGISTRY: dict[str, PlatformMeta] = {
         field_map_defaults={"tags": "标签", "cover": "封面文件"},
         needs_fingerprint=False,
     ),
+    "xiaohongshu": PlatformMeta(
+        key="xiaohongshu",
+        label="小红书",
+        title_min=1,  # 小红书视频标题无最小字数硬限(上限 20,在 adapter 截断)
+        login_meta={
+            # 未登录访问视频发布页 → 重定向到 .../login;URL 含该片段 = 未登录(同淘宝 url 模式)
+            "home_url": (
+                "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video"
+            ),
+            "mode": "url",
+            "login_fragment": "creator.xiaohongshu.com/login",
+        },
+        field_map_defaults={"tags": "标签", "cover": "封面文件"},
+        needs_fingerprint=False,
+    ),
 }
 
 ALL_PLATFORMS: list[str] = list(REGISTRY)

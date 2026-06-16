@@ -44,7 +44,7 @@ REGISTRY: dict[str, PlatformMeta] = {
             "home_url": "https://channels.weixin.qq.com",
             "mode": "selector",
             "selector": (
-                'div:has-text("发表视频"), button:has-text("发表"), ' 'button:has-text("发布视频")'
+                'div:has-text("发表视频"), button:has-text("发表"), button:has-text("发布视频")'
             ),
         },
         field_map_defaults={
@@ -95,10 +95,11 @@ REGISTRY: dict[str, PlatformMeta] = {
         label="快手",
         title_min=1,
         login_meta={
-            # 未登录访问上传页会重定向到 passport.kuaishou.com 扫码;URL 含该片段 = 未登录(同淘宝 url 模式)
+            # 实测(2026-06-16):未登录【不跳】passport,而是停在 cp.kuaishou.com 落地页(无上传按钮)。
+            # 故按"上传按钮是否出现"判登录态(selector 模式);URL 片段判据会把落地页误判成已登录。
             "home_url": "https://cp.kuaishou.com/article/publish/video",
-            "mode": "url",
-            "login_fragment": "passport.kuaishou.com",
+            "mode": "selector",
+            "selector": "button[class^='_upload-btn']",
         },
         # 快手用到的非公共字段:标签(→话题标签)、封面。其余公共字段在 base 集里。
         field_map_defaults={"tags": "标签", "cover": "封面文件"},

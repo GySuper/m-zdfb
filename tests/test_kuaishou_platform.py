@@ -13,9 +13,10 @@ def test_kuaishou_registered_in_registry() -> None:
     assert m.needs_fingerprint is False
     # 快手用 tags(→话题标签)+ cover;这俩不在公共集里,放 field_map_defaults
     assert m.field_map_defaults == {"tags": "标签", "cover": "封面文件"}
-    # 未登录访问上传页会重定向到 passport,按 URL 片段判定(同淘宝 url 模式)
-    assert m.login_meta["mode"] == "url"
-    assert m.login_meta["login_fragment"] == "passport.kuaishou.com"
+    # 实测:未登录不跳 passport,停在 cp.kuaishou.com 落地页(无上传按钮),
+    # 故按"上传按钮出现"判登录态(selector 模式),而非 URL 片段
+    assert m.login_meta["mode"] == "selector"
+    assert m.login_meta["selector"] == "button[class^='_upload-btn']"
     assert "cp.kuaishou.com" in m.login_meta["home_url"]
     assert "kuaishou" in ALL_PLATFORMS
 

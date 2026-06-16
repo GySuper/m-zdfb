@@ -1,7 +1,8 @@
 """快手创作者平台选择器 —— 快手改版时的唯一改动点。
 
 选择器移植自 _ref/social-auto-upload/uploader/ks_uploader/main.py(KSVideo),
-**尚未对当前线上页实跑校验**;首次用 `wxsp run --task-id N --dry-run` 跑通后按真实页微调。
+核心路径(登录态判定 / 上传按钮 / 描述框 / 定时 DatePicker / 发布)已对真实页
+`cp.kuaishou.com` 实测校准(2026-06-16)。封面弹窗为可选 best-effort,未端到端实跑。
 优先语义化(text= / role= / placeholder=),少用脆弱 CSS class。
 """
 
@@ -14,7 +15,12 @@ UPLOAD_PAGE_GLOB = "**/article/publish/video**"
 MANAGE_URL_GLOB = "**/article/manage/video?status=2&from=publish**"
 
 # ---- 登录态 ----
-# 未登录访问上传页会重定向到 passport.kuaishou.com 扫码;URL 含该片段 = 未登录(同淘宝 url 模式)
+# 实测(2026-06-16):未登录访问上传页【不会】自动跳 passport,而是停在
+# cp.kuaishou.com 的落地页,显示「立即登录」、且没有上传按钮。登录态判定因此走
+# "上传按钮是否出现"(见 platform_meta.login_meta selector 模式 + _verify_logged_in)。
+# 落地页标记:点它跳到 passport 扫码页。
+LOGGED_OUT_MARKER = "立即登录"
+# passport 登录页 URL 片段(扫码时用来判断"是否还在登录页",而非上传页)
 LOGIN_URL_FRAGMENT = "passport.kuaishou.com"
 
 # ---- 视频上传 ----
@@ -31,8 +37,10 @@ KNOW_BUTTON = 'button[type="button"] span:text("我知道了")'
 JOYRIDE_TOOLTIP = 'div[id^="react-joyride-step"] div[role="alertdialog"]'
 JOYRIDE_CLOSE = '[aria-label="Skip"], [data-action="skip"], button[title="Skip"]'
 
-# ---- 描述(快手无独立标题框;「描述」框是主文案区)----
-DESC_LABEL_TEXT = "描述"
+# ---- 描述(快手无独立标题框;「作品描述」框是主文案区)----
+# 实测:发布页唯一的 contenteditable div 即描述框(class 形如 _description_xxx,placeholder
+# 以「作品描述」开头)。用 contenteditable 定位最稳,避开 hash class / label 文案。
+DESC_EDITOR = 'div[contenteditable="true"]'
 MAX_TAGS = 3  # 快手话题标签上限
 
 # ---- 封面(可选;弹窗 best-effort,未端到端实跑)----

@@ -43,17 +43,21 @@ from wxsp.platforms.runner import random_pause, run_publish, screenshot
 def _open_publish_page(page: Page) -> None:
     page.goto(sel.UPLOAD_PAGE, wait_until="domcontentloaded")
     try:
+        # 登录与否 URL 都停在上传页(未登录是同 URL 的落地页),正常不超时;
+        # 超时且不在 passport 才是真的加载失败,登录态留给 _verify_logged_in 判。
         page.wait_for_url(sel.UPLOAD_PAGE_GLOB, timeout=30_000)
     except Exception as err:
-        # 未登录会被重定向到 passport,wait_for_url 超时是预期 —— 交给 _verify_logged_in 判 CookieExpired。
-        # 其它 URL(既不在上传页也不在 passport)才是真的加载失败。
         if sel.LOGIN_URL_FRAGMENT not in page.url:
             raise NetworkError("快手上传页加载超时") from err
 
 
 def _verify_logged_in(page: Page) -> None:
-    if sel.LOGIN_URL_FRAGMENT in page.url:
-        raise CookieExpired("快手登录态失效,需重新扫码登录")
+    # 实测:未登录停在 cp.kuaishou.com 落地页(「立即登录」,无上传按钮),不跳 passport。
+    # 上传按钮出现 = 已登录;短等仍不出现 = 登录态失效(标 cookie_expired,账号级 halt + 等扫码)。
+    try:
+        page.locator(sel.UPLOAD_BUTTON).wait_for(state="visible", timeout=8000)
+    except Exception as err:
+        raise CookieExpired("快手登录态失效(未见上传入口,需重新扫码登录)") from err
 
 
 def _dismiss_overlays(page: Page) -> None:
@@ -111,9 +115,9 @@ def _fill_description(page: Page, description: str | None, fallback_title: str) 
     text = description or fallback_title
     if not text:
         return
-    # 快手发布页无独立标题框,「描述」框是主文案区。发布页为全新作品,描述框初始为空,
-    # 无需 select-all 清空(且 Ctrl+A 在 macOS 不是全选)。click 聚焦后键盘输入。
-    editor = page.get_by_text(sel.DESC_LABEL_TEXT).locator("xpath=following-sibling::div").first
+    # 快手发布页无独立标题框,主文案区是发布页唯一的 contenteditable div(label「作品描述」)。
+    # 发布页为全新作品,描述框初始为空,无需 select-all 清空(且 Ctrl+A 在 macOS 不是全选)。
+    editor = page.locator(sel.DESC_EDITOR).first
     editor.wait_for(state="visible", timeout=10_000)
     editor.click()
     page.keyboard.type(text)
@@ -311,7 +315,12 @@ class KuaishouPublisher:
     platform_key = "kuaishou"
 
     def login(self, account: Account) -> bool:
-        """开浏览器到快手上传页(未登录会重定向到 passport 扫码),等 URL 离开 passport = 登录成功。"""
+        """开浏览器到快手上传页等扫码。
+
+        实测:未登录停在 cp.kuaishou.com 落地页(「立即登录」,无上传按钮),不自动跳 passport。
+        所以:上传页已出现上传按钮 = 已登录(直接成功);否则点落地页「立即登录」跳 passport
+        扫码,等扫完跳回上传页、上传按钮出现 = 成功。cookie 由 browser_context 退出时落盘。
+        """
         user_data_dir = Path(account.user_data_dir)
         logger.info(f"[kuaishou] 开始登录 account={account.id}")
         try:
@@ -323,10 +332,20 @@ class KuaishouPublisher:
             ) as page:
                 page.goto(sel.UPLOAD_PAGE, wait_until="domcontentloaded")
                 deadline = time.time() + 300
+                clicked_login = False
                 while time.time() < deadline:
-                    if sel.LOGIN_URL_FRAGMENT not in page.url:
-                        logger.info(f"[kuaishou] 登录成功 account={account.id}")
-                        return True
+                    try:
+                        if page.locator(sel.UPLOAD_BUTTON).count() > 0:
+                            logger.info(f"[kuaishou] 登录成功 account={account.id}")
+                            return True
+                        # 落地页:点「立即登录」跳到 passport 扫码页(只点一次)
+                        if not clicked_login:
+                            login_link = page.get_by_text(sel.LOGGED_OUT_MARKER, exact=True).first
+                            if login_link.count() and login_link.is_visible():
+                                login_link.click()
+                                clicked_login = True
+                    except Exception:
+                        pass
                     time.sleep(2)
                 logger.warning(f"[kuaishou] 登录超时 account={account.id}")
                 return False

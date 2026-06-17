@@ -286,7 +286,7 @@
       <section id="sec-monitoring" class="cfg-section">
         <div class="cfg-section-head">
           <h2>通知告警</h2>
-          <p class="cfg-section-desc">出错时往企微推消息。任务成功不通知(80 条/天会刷屏)。</p>
+          <p class="cfg-section-desc">出错时往企微 / 飞书推消息。任务成功不通知(80 条/天会刷屏)。</p>
         </div>
         <form method="post" action="/config/section/monitoring" class="cfg-form" data-section="monitoring">
           <input type="hidden" name="platform" value="{{ platform }}">
@@ -324,6 +324,41 @@
                 <span class="cfg-hint">企微群机器人 webhook URL,建议 <code>${WECOM_BOT_WEBHOOK}</code> 引用 env;改密码框留空 → 用磁盘已存的测</span>
                 <div id="wecom-test-result" style="grid-column: 2; font-size: 12px; margin-top: 4px;"></div>
               </div>
+              <div class="cfg-row">
+                <label>启用飞书机器人</label>
+                <div class="cfg-control">
+                  <label class="switch"><input type="checkbox" name="mon_lark_enabled" {% if vm.mon_lark_enabled %}checked{% endif %}><span class="slider"></span></label>
+                </div>
+                <span class="cfg-hint">企微、飞书可同时开,各发各的</span>
+              </div>
+              <div class="cfg-row">
+                <label>飞书 Webhook</label>
+                <div class="cfg-control">
+                  <div class="secret-input">
+                    <input type="password" name="mon_lark_webhook" value="{{ vm.mon_lark_webhook_display }}" placeholder="留空 = 保持原值;或填 ${ENV_VAR}">
+                    <button type="button" class="eye-toggle" onclick="toggleSecret(this)" tabindex="-1">👁</button>
+                  </div>
+                  <button type="button" class="btn-sm"
+                          hx-post="/config/test-lark"
+                          hx-include="[name='mon_lark_webhook'], [name='mon_lark_secret'], [name='platform']"
+                          hx-target="#lark-test-result"
+                          hx-swap="innerHTML"
+                          hx-indicator="#lark-test-spinner">测试推送</button>
+                  <span class="op-spinner" id="lark-test-spinner">推送中…</span>
+                </div>
+                <span class="cfg-hint">飞书群「自定义机器人」webhook,形如 <code>https://open.feishu.cn/open-apis/bot/v2/hook/...</code></span>
+                <div id="lark-test-result" style="grid-column: 2; font-size: 12px; margin-top: 4px;"></div>
+              </div>
+              <div class="cfg-row">
+                <label>飞书签名密钥</label>
+                <div class="cfg-control">
+                  <div class="secret-input">
+                    <input type="password" name="mon_lark_secret" value="{{ vm.mon_lark_secret_display }}" placeholder="留空 = 保持原值;机器人没开签名校验就留空">
+                    <button type="button" class="eye-toggle" onclick="toggleSecret(this)" tabindex="-1">👁</button>
+                  </div>
+                </div>
+                <span class="cfg-hint">机器人安全设置选「签名校验」时填这里的密钥;选「关键词/IP 白名单」则留空</span>
+              </div>
               <div class="cfg-row cfg-row-block">
                 <label>发送告警的事件</label>
                 <div class="cfg-control" style="display: block;">
@@ -336,7 +371,7 @@
                     {% endfor %}
                   </div>
                 </div>
-                <span class="cfg-hint">勾选哪些事件类型推送企微告警。任务"成功"默认不在这里(避免刷屏)</span>
+                <span class="cfg-hint">勾选哪些事件类型推送告警(企微/飞书)。任务"成功"默认不在这里(避免刷屏)</span>
               </div>
             </div>
 

@@ -111,6 +111,10 @@ monitoring:
     wecom:
       enabled: true
       webhook: ${WECOM_BOT_WEBHOOK}
+    lark:                             # 飞书自定义机器人(可与企微同时开,各发各的)
+      enabled: false
+      webhook: ${LARK_BOT_WEBHOOK}    # https://open.feishu.cn/open-apis/bot/v2/hook/...
+      secret: ${LARK_BOT_SECRET}      # 机器人选「签名校验」时填;选「关键词/IP白名单」留空
   notify_on:
     - cookie_expired
     - cookie_warning
@@ -169,6 +173,10 @@ platforms:
         wecom:
           enabled: true
           webhook: ${WECOM_BOT_WEBHOOK}
+        lark:
+          enabled: false
+          webhook: ${LARK_BOT_WEBHOOK}
+          secret: ${LARK_BOT_SECRET}
       notify_on:
         - cookie_expired
         - cookie_warning
@@ -219,6 +227,10 @@ platforms:
         wecom:
           enabled: true
           webhook: ${WECOM_BOT_WEBHOOK_TAOBAO}
+        lark:
+          enabled: false
+          webhook: ${LARK_BOT_WEBHOOK_TAOBAO}
+          secret: ${LARK_BOT_SECRET_TAOBAO}
       notify_on:
         - cookie_expired
         - risk_control

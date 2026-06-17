@@ -239,8 +239,18 @@ class WecomNotifierConfig(BaseModel):
     webhook: str
 
 
+class LarkNotifierConfig(BaseModel):
+    """飞书自定义机器人。secret 仅在机器人开了「签名校验」时填,其它安全模式留空。"""
+
+    enabled: bool = False
+    webhook: str = ""
+    secret: str = ""
+
+
 class NotifiersConfig(BaseModel):
     wecom: WecomNotifierConfig
+    # 默认 disabled:老配置只有 wecom 块时,lark 用默认值,不破坏加载
+    lark: LarkNotifierConfig = Field(default_factory=LarkNotifierConfig)
 
 
 class MonitoringConfig(BaseModel):

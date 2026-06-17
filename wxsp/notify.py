@@ -13,7 +13,11 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -157,6 +161,65 @@ class WecomNotifier:
         return True
 
 
+def lark_sign(timestamp: str, secret: str) -> str:
+    """飞书自定义机器人「签名校验」算法:base64(hmac_sha256(key=f"{ts}\\n{secret}", msg="")).
+
+    对齐飞书官方文档:把 `timestamp + "\\n" + 密钥` 当作 HMAC-SHA256 的 *密钥*(无消息体)。
+    """
+    string_to_sign = f"{timestamp}\n{secret}"
+    digest = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+@dataclass
+class LarkNotifier:
+    """飞书自定义机器人 webhook(纯文本消息)。
+
+    飞书文本不渲染 markdown,所以这里用 `_format_plain`(无 `#`/`*`/`>` 符号),
+    避免企微那套 markdown 符号在飞书里裸露。secret 非空时附带「签名校验」。
+    """
+
+    webhook: str
+    secret: str = ""
+    name: str = "lark"
+    timeout_seconds: int = 5
+
+    def send(self, event: NotifyEvent) -> bool:
+        body: dict[str, Any] = {
+            "msg_type": "text",
+            "content": {"text": _format_plain(event)},
+        }
+        if self.secret:
+            ts = str(int(time.time()))
+            body["timestamp"] = ts
+            body["sign"] = lark_sign(ts, self.secret)
+        payload = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            self.webhook,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                raw = resp.read().decode("utf-8")
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            logger.warning(f"[notify] 飞书推送失败(network): {exc}")
+            return False
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning(f"[notify] 飞书响应非 JSON: {raw[:200]}")
+            return False
+        # 飞书新接口返回 code=0,旧接口返回 StatusCode=0;两者都接受
+        code = data.get("code", data.get("StatusCode", -1))
+        if code != 0:
+            msg = data.get("msg", data.get("StatusMessage"))
+            logger.warning(f"[notify] 飞书 code={code} msg={msg}")
+            return False
+        return True
+
+
 def _platform_tag(platform: str | None) -> str:
     """平台 key → 中文标签,用于通知 markdown 头部。
 
@@ -189,18 +252,43 @@ def _format_markdown(event: NotifyEvent) -> str:
     return "\n".join(lines)
 
 
+def _format_plain(event: NotifyEvent) -> str:
+    """纯文本渲染(飞书文本消息用)。与 `_format_markdown` 同信息,但不带 markdown 符号。
+
+    飞书文本不解析 markdown,`##`/`**`/`>` 会裸露,故单独排版成纯文本。
+    """
+    platform_label = _platform_tag(event.platform)
+    tag = {"info": "[信息]", "warn": "[警告]", "error": "[错误]"}.get(event.level, "[通知]")
+    lines = [f"【{platform_label}】{tag} {event.title}", event.content]
+    if event.task_id is not None:
+        lines.append(f"任务编号:{event.task_id}")
+    if event.account_id is not None:
+        shown = event.account_display_name or event.account_id
+        lines.append(f"账号:{shown}")
+    if event.context:
+        lines.append("")
+        for k, v in event.context.items():
+            lines.append(f"{k}:{v}")
+    return "\n".join(lines)
+
+
 def build_notifiers_from_settings(
     settings: Settings, *, platform: str = "tencent_channel"
 ) -> list[Notifier]:
     """从平台 monitoring 配置构造 enabled notifier 列表。
 
     使用 settings.monitoring 取对应平台的 notifiers 配置。
-    第一版只有 wecom;接入飞书/钉钉时在此 append 即可。
+    enabled 的渠道才构造;企微 + 飞书可同时开,各发各的。
     """
     monitoring_cfg = settings.monitoring
     notifiers: list[Notifier] = []
-    if monitoring_cfg is not None and monitoring_cfg.notifiers.wecom.enabled:
-        notifiers.append(WecomNotifier(webhook=monitoring_cfg.notifiers.wecom.webhook))
+    if monitoring_cfg is None:
+        return notifiers
+    cfg = monitoring_cfg.notifiers
+    if cfg.wecom.enabled:
+        notifiers.append(WecomNotifier(webhook=cfg.wecom.webhook))
+    if cfg.lark.enabled:
+        notifiers.append(LarkNotifier(webhook=cfg.lark.webhook, secret=cfg.lark.secret))
     return notifiers
 
 

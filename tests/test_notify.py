@@ -16,10 +16,13 @@ from tests.conftest import make_settings
 from wxsp.db import get_engine, init_db, session_scope
 from wxsp.models import Event
 from wxsp.notify import (
+    LarkNotifier,
     NotifyEvent,
     WecomNotifier,
     _format_markdown,
+    _format_plain,
     build_notifiers_from_settings,
+    lark_sign,
     notify,
     step_cn,
 )
@@ -195,6 +198,106 @@ def test_format_markdown_translates_level_warn_and_error() -> None:
     assert "[错误]" in md_err and "ERROR" not in md_err
 
 
+# ============== LarkNotifier ==============
+
+
+def test_lark_sign_matches_feishu_algorithm() -> None:
+    """飞书签名 = base64(hmac_sha256(key=f"{ts}\\n{secret}"))。固定向量防算法漂移。"""
+    assert lark_sign("1609459200", "abc") == "wpTIl7bp+SN2odG93IcRqege1WiZoyogn3R1QomxBrs="
+
+
+def test_format_plain_has_no_markdown_symbols() -> None:
+    """飞书文本消息不渲染 markdown,排版里不能出现 ## / ** / > 这些裸符号。"""
+    event = NotifyEvent(
+        type="task_failed",
+        level="error",
+        title="任务失败",
+        content="上传中断",
+        task_id=7,
+        account_id="acc_x",
+        account_display_name="美食号",
+        context={"错误类型": "上传失败"},
+    )
+    text = _format_plain(event)
+    assert "##" not in text
+    assert "**" not in text
+    assert "> " not in text
+    assert text.splitlines()[0] == "【视频号】[错误] 任务失败"
+    assert "任务编号:7" in text
+    assert "账号:美食号" in text
+    assert "错误类型:上传失败" in text
+
+
+def test_lark_notifier_send_success_text_no_sign() -> None:
+    notifier = LarkNotifier(webhook="https://open.feishu.cn/open-apis/bot/v2/hook/fake")
+    event = NotifyEvent(type="task_failed", level="error", title="任务失败", content="oops")
+    captured: dict[str, object] = {}
+
+    def fake_urlopen(req, timeout=None):  # type: ignore[no-untyped-def]
+        captured["data"] = req.data
+        captured["method"] = req.method
+        captured["timeout"] = timeout
+        return _fake_response({"code": 0, "msg": "success"})
+
+    with patch("wxsp.notify.urllib.request.urlopen", side_effect=fake_urlopen):
+        assert notifier.send(event) is True
+
+    body = json.loads(captured["data"])  # type: ignore[arg-type]
+    assert body["msg_type"] == "text"
+    assert "任务失败" in body["content"]["text"]
+    assert "sign" not in body and "timestamp" not in body  # 无 secret → 不签名
+    assert captured["method"] == "POST"
+    assert captured["timeout"] == 5
+
+
+def test_lark_notifier_send_includes_sign_when_secret_set() -> None:
+    notifier = LarkNotifier(webhook="https://x", secret="topsecret")
+    event = NotifyEvent(type="task_failed", level="error", title="T", content="C")
+    captured: dict[str, object] = {}
+
+    def fake_urlopen(req, timeout=None):  # type: ignore[no-untyped-def]
+        captured["data"] = req.data
+        return _fake_response({"code": 0})
+
+    with patch("wxsp.notify.urllib.request.urlopen", side_effect=fake_urlopen):
+        assert notifier.send(event) is True
+
+    body = json.loads(captured["data"])  # type: ignore[arg-type]
+    assert body.get("sign")
+    assert body["sign"] == lark_sign(body["timestamp"], "topsecret")
+
+
+def test_lark_notifier_send_accepts_legacy_statuscode_zero() -> None:
+    """飞书旧接口返回 StatusCode=0 也算成功。"""
+    notifier = LarkNotifier(webhook="https://x")
+    event = NotifyEvent(type="x", level="info", title="t", content="c")
+    with patch(
+        "wxsp.notify.urllib.request.urlopen",
+        return_value=_fake_response({"StatusCode": 0, "StatusMessage": "success"}),
+    ):
+        assert notifier.send(event) is True
+
+
+def test_lark_notifier_send_nonzero_code_returns_false() -> None:
+    notifier = LarkNotifier(webhook="https://x")
+    event = NotifyEvent(type="x", level="info", title="t", content="c")
+    with patch(
+        "wxsp.notify.urllib.request.urlopen",
+        return_value=_fake_response({"code": 19021, "msg": "sign match fail"}),
+    ):
+        assert notifier.send(event) is False
+
+
+def test_lark_notifier_send_network_error_returns_false() -> None:
+    notifier = LarkNotifier(webhook="https://x")
+    event = NotifyEvent(type="x", level="info", title="t", content="c")
+    with patch(
+        "wxsp.notify.urllib.request.urlopen",
+        side_effect=urllib.error.URLError("dns fail"),
+    ):
+        assert notifier.send(event) is False
+
+
 # ============== build_notifiers_from_settings ==============
 
 
@@ -211,8 +314,31 @@ def test_build_notifiers_returns_wecom_when_enabled(tmp_path: Path) -> None:
 
 def test_build_notifiers_empty_when_wecom_disabled(tmp_path: Path) -> None:
     settings = make_settings(tmp_path, tmp_path)
-    # default disabled in make_settings
+    # default disabled in make_settings(lark 默认也 disabled)
     assert build_notifiers_from_settings(settings) == []
+
+
+def test_build_notifiers_returns_lark_when_enabled(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path, tmp_path)
+    settings.monitoring.notifiers.lark.enabled = True
+    settings.monitoring.notifiers.lark.webhook = "https://open.feishu.cn/hook/fake"
+    settings.monitoring.notifiers.lark.secret = "s3cr3t"
+    notifiers = build_notifiers_from_settings(settings)
+    assert len(notifiers) == 1
+    n = notifiers[0]
+    assert isinstance(n, LarkNotifier)
+    assert n.webhook == "https://open.feishu.cn/hook/fake"
+    assert n.secret == "s3cr3t"
+
+
+def test_build_notifiers_returns_both_when_wecom_and_lark_enabled(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path, tmp_path)
+    settings.monitoring.notifiers.wecom.enabled = True
+    settings.monitoring.notifiers.wecom.webhook = "https://qyapi.fake"
+    settings.monitoring.notifiers.lark.enabled = True
+    settings.monitoring.notifiers.lark.webhook = "https://feishu.fake"
+    kinds = {type(n) for n in build_notifiers_from_settings(settings)}
+    assert kinds == {WecomNotifier, LarkNotifier}
 
 
 # ============== notify() dispatcher ==============

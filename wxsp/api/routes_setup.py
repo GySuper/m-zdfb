@@ -301,7 +301,12 @@ def _render_config(data: dict[str, Any], *, platform: str = "tencent_channel") -
                 "wecom": {
                     "enabled": bool(webhook),
                     "webhook": webhook or "",
-                }
+                },
+                "lark": {
+                    "enabled": False,
+                    "webhook": "",
+                    "secret": "",
+                },
             },
             "notify_on": [
                 "cookie_expired",

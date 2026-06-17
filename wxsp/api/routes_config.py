@@ -192,6 +192,7 @@ def _view_model(data: dict[str, Any], *, platform: str | None = None) -> dict[st
     fm = feishu.get("field_map", {}) if isinstance(feishu, dict) else {}
     sync = feishu.get("sync", {}) if isinstance(feishu, dict) else {}
     wecom = mon.get("notifiers", {}).get("wecom", {}) if isinstance(mon, dict) else {}
+    lark = mon.get("notifiers", {}).get("lark", {}) if isinstance(mon, dict) else {}
 
     step_pause = pub.get("step_pause_seconds", [1.0, 3.0]) or [1.0, 3.0]
     # path_aliases:键值序对,模板按顺序渲染。排序保证 UI 表单稳定(避免每次刷新顺序乱跳)。
@@ -233,6 +234,9 @@ def _view_model(data: dict[str, Any], *, platform: str | None = None) -> dict[st
         "mon_cookie_warn_days": mon.get("cookie_warn_days", 1.5),
         "mon_wecom_enabled": bool(wecom.get("enabled", True)),
         "mon_wecom_webhook_display": _display_secret(wecom.get("webhook", "")),
+        "mon_lark_enabled": bool(lark.get("enabled", False)),
+        "mon_lark_webhook_display": _display_secret(lark.get("webhook", "")),
+        "mon_lark_secret_display": _display_secret(lark.get("secret", "")),
         "notify_on": mon.get("notify_on", []) or [],
         # M9 归档 + 积压
         "mon_log_retention_days": mon.get("log_retention_days", 30),
@@ -349,6 +353,9 @@ def config_save(
     mon_cookie_warn_days: float = Form(...),
     mon_wecom_enabled: bool = Form(False),
     mon_wecom_webhook: str = Form(""),
+    mon_lark_enabled: bool = Form(False),
+    mon_lark_webhook: str = Form(""),
+    mon_lark_secret: str = Form(""),
     notify_on: list[str] = Form(default_factory=list),
     mon_log_retention_days: int = Form(30),
     mon_screenshot_retention_days: int = Form(90),
@@ -362,6 +369,7 @@ def config_save(
         old = _load_raw_yaml(platform)
         old_feishu = old.get("feishu", {})
         old_wecom = old.get("monitoring", {}).get("notifiers", {}).get("wecom", {})
+        old_lark = old.get("monitoring", {}).get("notifiers", {}).get("lark", {})
         # legacy 整体 POST 没 path_aliases 字段,保留旧值避免被 nas_root 边吹掉
         old_path_aliases = (old.get("paths") or {}).get("path_aliases") or {}
         paths_section: dict[str, Any] = {"nas_root": paths_nas_root}
@@ -420,6 +428,11 @@ def config_save(
                     "wecom": {
                         "enabled": mon_wecom_enabled,
                         "webhook": _merge_secret(mon_wecom_webhook, old_wecom.get("webhook", "")),
+                    },
+                    "lark": {
+                        "enabled": mon_lark_enabled,
+                        "webhook": _merge_secret(mon_lark_webhook, old_lark.get("webhook", "")),
+                        "secret": _merge_secret(mon_lark_secret, old_lark.get("secret", "")),
                     },
                 },
                 "notify_on": notify_on,
@@ -790,6 +803,9 @@ def save_monitoring(
     mon_cookie_warn_days: float = Form(...),
     mon_wecom_enabled: bool = Form(False),
     mon_wecom_webhook: str = Form(""),
+    mon_lark_enabled: bool = Form(False),
+    mon_lark_webhook: str = Form(""),
+    mon_lark_secret: str = Form(""),
     notify_on: list[str] = Form(default_factory=list),
     mon_log_retention_days: int = Form(30),
     mon_screenshot_retention_days: int = Form(90),
@@ -797,13 +813,20 @@ def save_monitoring(
     platform: str = Form("tencent_channel"),
 ) -> RedirectResponse:
     def apply(data: dict[str, Any]) -> None:
-        old_wecom = data.get("monitoring", {}).get("notifiers", {}).get("wecom", {})
+        old_notifiers = data.get("monitoring", {}).get("notifiers", {})
+        old_wecom = old_notifiers.get("wecom", {})
+        old_lark = old_notifiers.get("lark", {})
         data["monitoring"] = {
             "cookie_warn_days": mon_cookie_warn_days,
             "notifiers": {
                 "wecom": {
                     "enabled": mon_wecom_enabled,
                     "webhook": _merge_secret(mon_wecom_webhook, old_wecom.get("webhook", "")),
+                },
+                "lark": {
+                    "enabled": mon_lark_enabled,
+                    "webhook": _merge_secret(mon_lark_webhook, old_lark.get("webhook", "")),
+                    "secret": _merge_secret(mon_lark_secret, old_lark.get("secret", "")),
                 },
             },
             "notify_on": notify_on,
@@ -940,6 +963,51 @@ def test_wecom(
     if ok:
         return HTMLResponse(_flash_fragment("ok", "✓ 已发送,请到企微群查看"))
     return HTMLResponse(_flash_fragment("error", "推送失败,看后端日志(errcode/网络)"))
+
+
+@router.post("/config/test-lark", response_class=HTMLResponse)
+def test_lark(
+    mon_lark_webhook: str = Form(""),
+    mon_lark_secret: str = Form(""),
+    platform: str = Form("tencent_channel"),
+) -> HTMLResponse:
+    """飞书测试推送:webhook/secret 表单为空 → 用磁盘已存的;支持 ${ENV_VAR};
+    真发一条文本到飞书机器人;结果以片段返回,inline 展示。
+    """
+    from wxsp.notify import LarkNotifier, NotifyEvent
+
+    disk_lark = _load_raw_yaml(platform).get("monitoring", {}).get("notifiers", {}).get("lark", {})
+    submitted = (mon_lark_webhook or "").strip() or (disk_lark.get("webhook", "") or "").strip()
+    secret_raw = (mon_lark_secret or "").strip() or (disk_lark.get("secret", "") or "").strip()
+
+    if not submitted:
+        return HTMLResponse(_flash_fragment("warn", "webhook 为空,无法测试"))
+
+    try:
+        url = _expand_env_vars(submitted)
+        secret = _expand_env_vars(secret_raw) if secret_raw else ""
+    except ValueError as exc:
+        return HTMLResponse(_flash_fragment("error", f"环境变量展开失败:{exc}"))
+
+    if not url.startswith("https://"):
+        return HTMLResponse(_flash_fragment("error", "webhook URL 必须以 https:// 开头"))
+
+    notifier = LarkNotifier(webhook=url, secret=secret)
+    try:
+        ok = notifier.send(
+            NotifyEvent(
+                type="config_test",
+                level="info",
+                title="自动发布平台 · 测试推送",
+                content="如果你看到这条消息,说明飞书机器人配置正确。",
+            )
+        )
+    except Exception as exc:
+        logger.exception(f"[web/test-lark] {exc}")
+        return HTMLResponse(_flash_fragment("error", f"调用失败:{exc}"))
+    if ok:
+        return HTMLResponse(_flash_fragment("ok", "✓ 已发送,请到飞书群查看"))
+    return HTMLResponse(_flash_fragment("error", "推送失败,看后端日志(code/网络/签名)"))
 
 
 def _flash_fragment(level: str, text: str) -> str:

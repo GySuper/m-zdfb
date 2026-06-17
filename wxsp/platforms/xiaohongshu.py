@@ -33,12 +33,31 @@ from wxsp.platforms import xiaohongshu_selectors as sel
 from wxsp.platforms.base import PlatformSpec, PublishContext, PublishResult, TaskBundle
 from wxsp.platforms.runner import random_pause, run_publish
 
+# 小红书新版发布页底部「发布/暂存离开」按钮渲染在 <xhs-publish-btn> 的【闭合】shadow DOM 里,
+# patchright 的 CSS/text/role 选择器都钻不进闭合 shadow(实测 2026-06-17)。导航前注入本脚本把
+# attachShadow 强制改成 open,该 shadow 即可被 PUBLISH_BUTTON 选择器命中。仅本平台注入(不碰
+# browser.py、不影响视频号等按指纹判定的强风控平台)。幂等:重复注入只生效一次。
+_FORCE_OPEN_SHADOW_JS = """
+(() => {
+  const orig = Element.prototype.attachShadow;
+  if (!orig || orig.__xhsForcedOpen) return;
+  const patched = function (init) {
+    return orig.call(this, Object.assign({}, init, { mode: 'open' }));
+  };
+  patched.__xhsForcedOpen = true;
+  Element.prototype.attachShadow = patched;
+})();
+"""
+
 # ---------------------------------------------------------------------------
 # step functions
 # ---------------------------------------------------------------------------
 
 
 def _open_publish_page(page: Page) -> None:
+    # 必须在 goto 之前注册:add_init_script 会在该次导航的页面脚本执行前先跑,
+    # 才能赶在发布页 attachShadow 调用之前把闭合 shadow 改成 open(见 PUBLISH_BUTTON)。
+    page.add_init_script(_FORCE_OPEN_SHADOW_JS)
     page.goto(sel.PUBLISH_VIDEO_URL, wait_until="domcontentloaded")
     # 未登录会被立即重定向到 /login:提前返回,免得 wait_for_url 白等满 30s
     # (登录态由紧随其后的 _verify_logged_in 判定并抛 CookieExpired)。

@@ -64,9 +64,11 @@ SCHEDULE_DATETIME_INPUT = ".d-datepicker-input-filter input.d-text"
 SCHEDULE_DATETIME_FORMAT = "%Y-%m-%d %H:%M"
 
 # ---- 发布 / 风控 / 成功 ----
-# 新版提交按钮固定为「发布笔记」(DIV,非 <button>;实测 .publish-video 下唯一 .btn-wrapper);
-# 定时与否文案不变,定时由上面的开关+时间决定(对齐旧版"点定时发布"语义,实测 2026-06-17)。
-PUBLISH_BUTTON = ".publish-video .btn-wrapper"
+# 新版底部「发布/暂存离开」按钮在 <xhs-publish-btn> 的【闭合】shadow DOM 里(实测 2026-06-17):
+# 红色主按钮 = button.ce-btn.bg-red(定时模式文案「定时发布」/ 即时模式「发布」,用 .bg-red 类
+# 避开白色「暂存离开」button.ce-btn.white)。闭合 shadow 普通选择器钻不进 → adapter 在导航前注入
+# _FORCE_OPEN_SHADOW_JS 强制 open 后本选择器才命中。⚠️「发布笔记」是左侧栏新建入口,不是提交按钮。
+PUBLISH_BUTTON = "xhs-publish-btn button.ce-btn.bg-red"
 # 先沿用通用文案,实际风控文案待触发后补
 RISK_CONTROL_KEYWORDS = ("操作频繁", "操作过于频繁", "请稍后", "账号异常", "违规")
 SUCCESS_INDICATORS = ("发布成功",)

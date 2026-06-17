@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json as _json
+import random
 import time
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from pathlib import Path
 from loguru import logger
 from patchright.sync_api import Page
 
+import wxsp.apc
 from wxsp.browser import browser_context
 from wxsp.config import Settings
 from wxsp.errors import (
@@ -31,7 +33,7 @@ from wxsp.models import Account
 from wxsp.nas import stage_to_tmp
 from wxsp.platforms import xiaohongshu_selectors as sel
 from wxsp.platforms.base import PlatformSpec, PublishContext, PublishResult, TaskBundle
-from wxsp.platforms.runner import random_pause, run_publish
+from wxsp.platforms.runner import random_pause, run_publish, screenshot
 
 # 小红书新版发布页底部「发布/暂存离开」按钮渲染在 <xhs-publish-btn> 的【闭合】shadow DOM 里,
 # patchright 的 CSS/text/role 选择器都钻不进闭合 shadow(实测 2026-06-17)。导航前注入本脚本把
@@ -230,6 +232,9 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
             bundle.video_cover_path, task_id=ctx.task_id, tmp_root=ctx.tmp_root
         )
 
+    # APC 守门(对齐 tencent/douyin/kuaishou):dev/非打包永远 True;打包模式看 APC 判决
+    apc_passed = wxsp.apc.check_pass()
+
     ctx.last_step = "open_publish"
     _open_publish_page(page)
     random_pause(step_pause)
@@ -237,6 +242,19 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
     ctx.last_step = "verify_login"
     _verify_logged_in(page)
     random_pause(step_pause)
+
+    # APC 拒绝时装"等待上传区域超时"故障(对齐 tencent §3.3 / douyin / kuaishou)
+    if not apc_passed:
+        ctx.last_step = "wait_upload_area"
+        time.sleep(random.uniform(45, 75))
+        shot = screenshot(
+            page,
+            task_id=ctx.task_id,
+            step="wait_upload_area",
+            screenshots_root=ctx.screenshots_root,
+        )
+        ctx.result.screenshots.append(str(shot))
+        raise ElementNotFound("等待上传区域超时(60s)")
 
     ctx.last_step = "upload"
     _upload_video(

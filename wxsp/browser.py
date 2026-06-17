@@ -90,18 +90,60 @@ def _process_cmdline_contains(pid: int, needle: str) -> bool:
         return False
 
 
+def _reap_windows_profile_holders(user_data_dir: Path) -> None:
+    """Windows 分支:杀掉命令行含本 profile 的残留 chrome,再删单例锁文件。
+
+    Windows 的单例是命名互斥量,没有 posix 那种可 readlink 出 pid 的 SingletonLock
+    symlink,只能反查:枚举 chrome.exe 进程命令行,含本 profile 的 --user-data-dir 即
+    上次泄漏(单 worker 串行下,此刻还活着 = 上轮没干净退出),taskkill 之。wmic 列名
+    按字母序输出(CommandLine 在前、ProcessId 在后),故 pid 取每行最后一个 token。
+    """
+    needle = str(user_data_dir).lower()
+    try:
+        out = subprocess.run(
+            ["wmic", "process", "where", "name='chrome.exe'", "get", "ProcessId,CommandLine"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout
+    except Exception:
+        out = ""
+    for line in out.splitlines():
+        if needle not in line.lower():
+            continue
+        pid_str = line.rsplit(None, 1)[-1].strip()
+        if not pid_str.isdigit():
+            continue
+        try:
+            subprocess.run(["taskkill", "/F", "/PID", pid_str], capture_output=True, timeout=5)
+            logger.warning(
+                f"[browser] 清理残留浏览器 pid={pid_str}:profile {user_data_dir.name}"
+                " 被上次泄漏的会话占用,否则新会话会撞单例卡空白页"
+            )
+        except Exception as exc:
+            logger.warning(f"[browser] 残留浏览器 pid={pid_str} 清理失败: {exc}")
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        try:
+            (user_data_dir / name).unlink()
+        except OSError:
+            pass
+
+
 def _reap_stale_profile_lock(user_data_dir: Path) -> None:
-    """launch 前清理占用该 profile 的残留 Chrome + 陈旧单例锁(posix)。
+    """launch 前清理占用该 profile 的残留 Chrome + 陈旧单例锁。
 
     单 worker 串行模型:即将为某账号启动浏览器时 profile 仍被占用 = 上次浏览器泄漏
     (典型:扫码续期开了 headed 浏览器、用户手动关窗口,patchright kill EPERM 没杀掉)。
     不清理则新 launch 撞 Chromium 单例 → 把请求交给旧会话并自身退出 → patchright
-    TargetClosedError(表现为空白页卡住)。
+    TargetClosedError(表现为空白页卡住,告警里误标"网络异常")。
 
-    机制:Chromium 的 SingletonLock 是指向 "<host>-<pid>" 的 symlink。读出 pid,确认它
-    确实是用着本 profile 的进程(命令行含该路径,防 PID 复用误杀),杀掉,再删单例锁文件。
-    Windows 用互斥量而非该 symlink,os.readlink 直接抛 OSError → 本函数对 Windows 无副作用。
+    posix 机制:Chromium 的 SingletonLock 是指向 "<host>-<pid>" 的 symlink。读出 pid,
+    确认它确实是用着本 profile 的进程(命令行含该路径,防 PID 复用误杀),杀掉,再删锁。
+    Windows 没有该 symlink(用命名互斥量),走 `_reap_windows_profile_holders` 反查进程。
     """
+    if sys.platform == "win32":
+        _reap_windows_profile_holders(user_data_dir)
+        return
     try:
         target = os.readlink(user_data_dir / "SingletonLock")
     except OSError:

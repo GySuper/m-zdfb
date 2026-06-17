@@ -14,10 +14,12 @@ import os
 import subprocess
 import sys
 import time
+import types
 from pathlib import Path
 
 import pytest
 
+import wxsp.browser as browser
 from wxsp.browser import _reap_stale_profile_lock
 
 pytestmark = pytest.mark.skipif(
@@ -88,3 +90,35 @@ def test_live_matching_browser_is_reaped(tmp_path: Path) -> None:
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+
+
+def test_windows_reaps_only_chrome_holding_this_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows 没有可 readlink 的 SingletonLock symlink:改枚举 chrome 进程命令行,
+    只 taskkill 命令行含【本 profile】的那个,不误杀用着别的 profile 的 chrome。
+    跨 OS 无法起真 chrome,故 mock wmic/taskkill 的 subprocess 边界。"""
+    profile = tmp_path / "account_x"
+    profile.mkdir()
+    other = tmp_path / "account_y"
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> types.SimpleNamespace:
+        calls.append(cmd)
+        if cmd[0] == "wmic":
+            out = (
+                "CommandLine                                       ProcessId\n"
+                f"chrome.exe --user-data-dir={profile} about:blank   30312\n"
+                f"chrome.exe --user-data-dir={other} about:blank     40000\n"
+            )
+            return types.SimpleNamespace(stdout=out, returncode=0)
+        return types.SimpleNamespace(stdout="", returncode=0)
+
+    monkeypatch.setattr(browser.subprocess, "run", fake_run)
+
+    _reap_stale_profile_lock(profile)
+
+    killed = [c for c in calls if c and c[0] == "taskkill"]
+    assert killed == [["taskkill", "/F", "/PID", "30312"]]

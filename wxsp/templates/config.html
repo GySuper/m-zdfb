@@ -754,6 +754,17 @@
       border-top: 1px solid var(--color-border-soft);
       background: var(--color-surface-alt);
     }
+    /* 提交账号时的 loading 态(服务端推飞书单选项有几秒延迟);复用 base.html 的 op-spin */
+    .modal-foot .primary.is-submitting { pointer-events: none; opacity: 0.75; }
+    .modal-foot .primary.is-submitting::before {
+      content: "";
+      display: inline-block;
+      width: 12px; height: 12px;
+      margin-right: 6px; vertical-align: -2px;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%;
+      animation: op-spin 0.7s linear infinite;
+    }
   </style>
 
   <script>
@@ -767,6 +778,7 @@
       // data = undefined → 添加(ID 由服务端生成);data = {id, ...} → 编辑
       const platformParam = new URLSearchParams(window.location.search).get('platform') || 'tencent_channel';
       modalForm.reset();
+      submitBtn.classList.remove('is-submitting');
       if (data) {
         modalTitle.textContent = '编辑账号 · ' + data.id;
         modalForm.action = '/config/accounts/' + encodeURIComponent(data.id) + '/update?platform=' + encodeURIComponent(platformParam);
@@ -785,7 +797,10 @@
     }
     function closeAccountModal() { modal.close(); }
     function submitAccountForm(e) {
-      // 让浏览器走原生 form 提交 → 服务端 redirect
+      // 服务端要把 display_name 推到飞书单选项,有几秒延迟 —— 提交时给 loading 反馈 + 防连点。
+      // 走原生 form 提交 → 服务端 redirect 整页刷新,loading 状态随之自然重置。
+      submitBtn.classList.add('is-submitting');
+      submitBtn.textContent = '处理中…';
       return true;
     }
 

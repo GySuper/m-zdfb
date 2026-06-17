@@ -64,6 +64,18 @@ def _spawn(name: str, fn: Any, *args: Any, **kwargs: Any) -> None:
     threading.Thread(target=runner, daemon=True, name=f"web-{name}").start()
 
 
+def _reset_to_pending(task: Task) -> None:
+    """把 failed/interrupted task 清回 pending(claim_task 才会重新认领)。
+    attempts 不重置,保留累加用于审计。调用方负责 session.add + commit。"""
+    task.status = TASK_STATUS_PENDING
+    task.lease_token = None
+    task.lease_expires_at = None
+    task.started_at = None
+    task.finished_at = None
+    task.last_error_type = None
+    task.last_error_msg = None
+
+
 @router.get("/tasks", response_class=HTMLResponse)
 def tasks_page(
     request: Request,
@@ -247,13 +259,7 @@ def retry_task(
             status_code=303,
         )
     # 重置回 pending(claim_task 才会生效)。attempts 保留累加,审计用。
-    task.status = "pending"
-    task.lease_token = None
-    task.lease_expires_at = None
-    task.started_at = None
-    task.finished_at = None
-    task.last_error_type = None
-    task.last_error_msg = None
+    _reset_to_pending(task)
     session.add(task)
     _spawn("retry", _run_publish, task_id, settings)
     return RedirectResponse(
@@ -368,6 +374,67 @@ def run_today(request: Request, settings: Settings = Depends(get_settings)) -> H
         bits.append("),发布循环已开始,等任务列表自动刷新")
         msg = "".join(bits)
     return HTMLResponse(_fragment("ok", msg))
+
+
+@router.post("/tasks/retry-all", response_class=HTMLResponse)
+def retry_all(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    session: Session = Depends(get_session),
+) -> HTMLResponse:
+    """一键重试今天的失败任务:把当前平台 execute_date=今天 status=failed 的 task 全部
+    重置回 pending,再走 run_today_pending 的串行通道跑(复用风控 halt + run_summary)。
+
+    - 复用 run-today 的 per-platform 锁:和"立即跑今天"互斥,杜绝同平台两个串行循环并发
+      开浏览器(视频号风控红线)。
+    - 不 sync 飞书:重试只重跑库里已有的失败任务,跟"拉新任务"正交。
+    - 重置后显式 commit:后台线程开独立 session,必须先落库才能读到 pending。
+    """
+    platform = getattr(request.state, "current_platform", "tencent_channel") or "tencent_channel"
+    with _run_today_lock:
+        if platform in _run_today_running_platforms:
+            return HTMLResponse(_fragment("warn", "该平台正在跑,请等当前一轮完成后再重试"))
+        _run_today_running_platforms.add(platform)
+
+    try:
+        failed = list(
+            session.exec(
+                select(Task)
+                .where(Task.platform == platform)
+                .where(Task.execute_date == _date.today())
+                .where(Task.status == "failed")
+                .order_by(col(Task.publish_at).asc())
+            )
+        )
+        ids = [t.id for t in failed if t.id is not None]
+        if not ids:
+            with _run_today_lock:
+                _run_today_running_platforms.discard(platform)
+            return HTMLResponse(_fragment("warn", "今天没有失败任务可重试"))
+        for t in failed:
+            _reset_to_pending(t)
+            session.add(t)
+        session.commit()
+    except Exception:
+        with _run_today_lock:
+            _run_today_running_platforms.discard(platform)
+        raise
+
+    _spawn("retry-all", _retry_all_run, settings, platform, ids)
+    return HTMLResponse(
+        _fragment("ok", f"已重置 {len(ids)} 条失败任务,开始串行重试,等任务列表自动刷新")
+    )
+
+
+def _retry_all_run(settings: Settings, platform: str, ids: list[int]) -> None:
+    """后台串行跑指定的 task id 列表,跑完(无论成败)释放 per-platform 锁。"""
+    from wxsp.scheduler import run_today_pending
+
+    try:
+        run_today_pending(settings, do_sync=False, platform=platform, task_ids=ids)
+    finally:
+        with _run_today_lock:
+            _run_today_running_platforms.discard(platform)
 
 
 def _fragment(level: str, text: str) -> str:

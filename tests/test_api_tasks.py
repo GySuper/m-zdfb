@@ -210,6 +210,101 @@ def test_run_today_spawns_scheduler(
     routes_tasks._run_today_running_platforms.clear()
 
 
+def test_retry_all_resets_today_failed_and_spawns(
+    client_with_data: tuple[TestClient, _date],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """一键重试:今天所有 failed → pending(按 publish_at 排序),success 不动,串行跑一次。"""
+    c, today = client_with_data
+    engine = get_engine(tmp_path / "db.sqlite")
+    with session_scope(engine) as s:
+        s.add(
+            Video(
+                id="rec2",
+                file_path="/x/v2.mp4",
+                title="第二条短片",
+                tags_json="[]",
+                ingested_at=datetime.now(),
+            )
+        )
+        s.add(
+            Task(
+                id=2,
+                video_id="rec2",
+                account_id="account_a",
+                execute_date=today,
+                publish_at=datetime(today.year, today.month, today.day, 9, 0),
+                status="failed",
+                attempts=2,
+                last_error_type="network",
+                last_error_msg="x",
+            )
+        )
+        s.add(
+            Video(
+                id="rec3",
+                file_path="/x/v3.mp4",
+                title="已发短片",
+                tags_json="[]",
+                ingested_at=datetime.now(),
+            )
+        )
+        s.add(
+            Task(
+                id=3,
+                video_id="rec3",
+                account_id="account_a",
+                execute_date=today,
+                publish_at=datetime(today.year, today.month, today.day, 10, 0),
+                status="success",
+            )
+        )
+
+    calls: list[tuple[str, tuple[Any, ...]]] = []
+    monkeypatch.setattr(routes_tasks, "_spawn", lambda name, fn, *a, **kw: calls.append((name, a)))
+
+    r = c.post("/tasks/retry-all", follow_redirects=False)
+    assert r.status_code == 200
+    assert 'class="flash ok"' in r.text
+
+    with session_scope(engine) as s:
+        assert s.get(Task, 1).status == "pending"  # type: ignore[union-attr]  # 18:00 failed
+        assert s.get(Task, 2).status == "pending"  # type: ignore[union-attr]  # 09:00 failed
+        assert s.get(Task, 3).status == "success"  # type: ignore[union-attr]  # 未失败,不动
+        assert s.get(Task, 1).last_error_type is None  # type: ignore[union-attr]
+
+    assert len(calls) == 1
+    name, a = calls[0]
+    assert name == "retry-all"
+    assert a[2] == [2, 1]  # 按 publish_at 升序:09:00(id=2) 先于 18:00(id=1)
+    routes_tasks._run_today_running_platforms.clear()
+
+
+def test_retry_all_no_failed_returns_info_without_spawn(
+    client_with_data: tuple[TestClient, _date],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """今天没有 failed 时:不 spawn,返回提示,且不留下并发锁。"""
+    c, _ = client_with_data
+    engine = get_engine(tmp_path / "db.sqlite")
+    with session_scope(engine) as s:
+        t = s.get(Task, 1)
+        assert t is not None
+        t.status = "success"
+        s.add(t)
+
+    calls: list[str] = []
+    monkeypatch.setattr(routes_tasks, "_spawn", lambda name, fn, *a, **kw: calls.append(name))
+
+    r = c.post("/tasks/retry-all", follow_redirects=False)
+    assert r.status_code == 200
+    assert calls == []
+    assert "没有失败任务" in r.text
+    assert not routes_tasks._run_today_running_platforms
+
+
 def test_run_today_sync_failure_aborts_publish(
     client_with_data: tuple[TestClient, _date],
     monkeypatch: pytest.MonkeyPatch,

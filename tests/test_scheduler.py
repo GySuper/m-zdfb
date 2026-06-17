@@ -256,6 +256,51 @@ def test_run_today_pending_calls_publish_for_each_today_task_in_order(
     assert summary.skipped_paused == 0
 
 
+def test_run_today_pending_with_task_ids_runs_only_those(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """显式 task_ids 时只跑这批,忽略同日其它 pending(一键重试今天失败的通道)。"""
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    today = date.today()
+    now = datetime.now()
+
+    with session_scope(engine) as session:
+        _seed_account_video(session, video_id="v1")
+        _seed_account_video(session, video_id="v2")
+        session.add(
+            Task(
+                video_id="v1", account_id="a", execute_date=today, publish_at=now, status="pending"
+            )
+        )
+        session.add(
+            Task(
+                video_id="v2", account_id="a", execute_date=today, publish_at=now, status="pending"
+            )
+        )
+
+    with Session(engine) as session:
+        v1_task = session.exec(select(Task).where(Task.video_id == "v1")).first()
+        assert v1_task is not None
+        only_id = v1_task.id
+
+    settings = make_settings(tmp_path, tmp_path)
+    calls: list[int] = []
+
+    def fake_publish(task_id, *, dry_run, settings):
+        calls.append(task_id)
+        return PublishResult(task_id=task_id, ok=True, dry_run=False)
+
+    monkeypatch.setattr("wxsp.scheduler.publish", fake_publish)
+
+    summary = run_today_pending(settings, do_sync=False, task_ids=[only_id])
+
+    assert calls == [only_id]  # 只跑 v1,同日 pending 的 v2 不碰
+    assert summary.attempted == 1
+
+
 def test_run_today_pending_skips_tasks_when_account_paused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

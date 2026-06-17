@@ -315,7 +315,11 @@ def _emit_run_summary(
 
 
 def run_today_pending(
-    settings: Settings, *, do_sync: bool = True, platform: str | None = None
+    settings: Settings,
+    *,
+    do_sync: bool = True,
+    platform: str | None = None,
+    task_ids: list[int] | None = None,
 ) -> RunSummary:
     """worker 入口:① sync_now()(可选)② queue_today() ③ 串行跑(跳过 paused 账号)。
 
@@ -325,6 +329,10 @@ def run_today_pending(
 
     platform=None 时跑所有平台(兼容旧版命令行 `wxsp run --today`);
     platform="tencent_channel" 时只跑视频号任务(per-platform cron 路径)。
+
+    task_ids 给定时跳过 queue_today 的"今天所有 pending"扫描,只跑这批指定 task
+    (Web UI "一键重试今天失败" 用:调用方已把 failed 重置回 pending 并按 publish_at 排序),
+    串行/账号预检/halt/run_summary 全程复用,不波及同日其它 pending。
 
     任何一条 task 失败 / 抛 AlreadyClaimed 都不阻断后面的;细节走 publish 自己的回写。
     跑完后推一条 run_summary 汇总通知(attempted=0 时静默)。
@@ -344,11 +352,11 @@ def run_today_pending(
 
     # 一次性把 (task_id, account_id) 读出来,后面循环里不再持 session 跑长 publish
     with Session(engine) as session:
-        task_ids = queue_today(session, platform=platform)
-        if not task_ids:
+        ids = task_ids if task_ids is not None else queue_today(session, platform=platform)
+        if not ids:
             return summary
         plan: list[tuple[int, str]] = []
-        for tid in task_ids:
+        for tid in ids:
             t = session.get(Task, tid)
             if t is None:
                 continue

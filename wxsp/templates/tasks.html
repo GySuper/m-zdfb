@@ -16,6 +16,13 @@
       </div>
     </div>
     <div class="page-actions">
+      <span class="op-spinner" id="retry-all-spinner">重试中…</span>
+      <button type="button"
+              title="把今天所有失败任务重置后串行重跑(不拉飞书)"
+              hx-post="/tasks/retry-all?platform={{ request.state.current_platform }}"
+              hx-target="#op-status"
+              hx-swap="innerHTML"
+              hx-indicator="#retry-all-spinner">重试今天失败</button>
       <span class="op-spinner" id="run-today-spinner">同步飞书中…</span>
       <button class="primary" type="button"
               title="先同步飞书,再跑今天 pending"

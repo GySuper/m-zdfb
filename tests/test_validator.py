@@ -250,6 +250,60 @@ def test_validate_complete_row_runs_full_validation(tmp_path: Path) -> None:
     assert any(e.field == "标题" for e in result.errors)
 
 
+# ---------------------------------------------------------------------------
+# 无标题平台(快手):描述是核心字段,标题可选不校验
+# ---------------------------------------------------------------------------
+
+
+def test_kuaishou_no_title_only_description_ok(tmp_path: Path) -> None:
+    """快手页面无标题框:标题留空 + 描述填好 → ok=True(描述当主文案核心字段)。"""
+    row = _row_with(tmp_path, 标题="", 描述="这是快手作品描述")
+    nas = _stub_nas_with_video(tmp_path)
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+        platform="kuaishou",
+    )
+    assert result.incomplete is False
+    assert result.ok is True, result.errors
+    assert result.description == "这是快手作品描述"
+
+
+def test_kuaishou_incomplete_when_description_missing(tmp_path: Path) -> None:
+    """快手:描述是核心字段,描述空 → incomplete=True(草稿,跳过不回写),标题填没填都不算数。"""
+    row = _row_with(tmp_path, 标题="随便写的标题", 描述="")
+    nas = _stub_nas_with_video(tmp_path)
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+        platform="kuaishou",
+    )
+    assert result.ok is False
+    assert result.incomplete is True
+    assert result.errors == []
+
+
+def test_title_platform_still_requires_title(tmp_path: Path) -> None:
+    """回归:有标题框的平台(抖音)标题仍必填,空标题即使有描述 → incomplete。"""
+    row = _row_with(tmp_path, 标题="", 描述="有描述但没标题")
+    nas = _stub_nas_with_video(tmp_path)
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+        platform="douyin",
+    )
+    assert result.incomplete is True
+
+
 def test_validate_title_too_short(tmp_path: Path) -> None:
     row = _row_with(tmp_path, 标题="短标题")  # 3 字
     nas = _stub_nas_with_video(tmp_path)

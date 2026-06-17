@@ -33,6 +33,9 @@ class PlatformMeta:
     """browser 反检测档位:True = 注入 per-account 指纹 + AutomationControlled,靠
     persistent context 持久化 cookie;False = 不注入指纹,额外用 cookies.json 显式持久化。
     当前两平台一一对应,未来若出现别的组合再拆成独立能力位(YAGNI)。"""
+    has_title: bool = True
+    """发布页是否有独立标题框。False(快手)= 页面只有作品描述框,标题在飞书侧不必填、
+    不校验长度,校验层改判「描述」为必填核心字段。详见 validator._is_incomplete / _check_title。"""
 
 
 REGISTRY: dict[str, PlatformMeta] = {
@@ -104,6 +107,7 @@ REGISTRY: dict[str, PlatformMeta] = {
         # 快手用到的非公共字段:标签(→话题标签)、封面。其余公共字段在 base 集里。
         field_map_defaults={"tags": "标签", "cover": "封面文件"},
         needs_fingerprint=False,
+        has_title=False,  # 快手发布页无标题框,主文案是「作品描述」
     ),
     "xiaohongshu": PlatformMeta(
         key="xiaohongshu",

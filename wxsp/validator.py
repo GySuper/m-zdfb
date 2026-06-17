@@ -98,6 +98,13 @@ def _title_min_for(platform: str) -> int:
     return get_meta(platform).title_min
 
 
+def _has_title_for(platform: str) -> bool:
+    """该平台发布页是否有独立标题框,取自 wxsp.platform_meta(快手为 False)。"""
+    from wxsp.platform_meta import get_meta
+
+    return get_meta(platform).has_title
+
+
 _VIDEO_EXTENSIONS = {".mp4", ".mov"}
 _VIDEO_MAX_BYTES = 4 * 1024**3  # 4 GiB
 _PUBLISH_MIN_DELTA = timedelta(minutes=30)
@@ -130,12 +137,13 @@ def validate(
     #    业务还没填完的草稿(运营在飞书慢慢补),sync 跳过且不回写"失败",等下次再拉。
     #    其他字段(描述/标签/封面/合集/原创)允许为空走默认值;**账号必填**
     #    (空 → _check_account 判失败回写"未指定",不做 round-robin 自动分配)。
-    if _is_incomplete(row.fields, fm):
+    has_title = _has_title_for(platform)
+    if _is_incomplete(row.fields, fm, has_title=has_title):
         return ValidationResult(ok=False, incomplete=True)
 
     errors: list[FieldError] = []
 
-    title = _check_title(row.fields, fm.title, errors, platform=platform)
+    title = _check_title(row.fields, fm.title, errors, platform=platform, has_title=has_title)
     tags = _check_tags(row.fields, fm.tags, errors)
     description = _get_str(row.fields.get(fm.description))
     topic = _get_str(row.fields.get(fm.topic))
@@ -217,14 +225,17 @@ def validate(
 # ---------------------------------------------------------------------------
 
 
-def _is_incomplete(fields: dict[str, Any], fm: Any) -> bool:
+def _is_incomplete(fields: dict[str, Any], fm: Any, *, has_title: bool = True) -> bool:
     """业务尚未填完的判定:4 个核心字段任一缺 → True。
 
     判空规则:
       - 标题 / 视频文件:_get_str 返回 None(空字符串、rich-text 空数组都算空)
       - 执行日期 / 定时发布时间:原始值是 None(飞书日期字段空 → key 缺失或 None)
+
+    无标题平台(快手):页面无标题框,主文案是「描述」,故核心字段把「标题」换成「描述」。
     """
-    if _get_str(fields.get(fm.title)) is None:
+    core_text_field = fm.title if has_title else fm.description
+    if _get_str(fields.get(core_text_field)) is None:
         return True
     if _get_str(fields.get(fm.video_file)) is None:
         return True
@@ -241,8 +252,12 @@ def _check_title(
     errors: list[FieldError],
     *,
     platform: str = "tencent_channel",
+    has_title: bool = True,
 ) -> str | None:
     raw = _get_str(fields.get(field_name))
+    # 无标题平台(快手):标题可选、不校验长度(页面无标题框,仅作描述兜底),原样透传。
+    if not has_title:
+        return raw
     if not raw:
         errors.append(FieldError(field=field_name, message="未指定"))
         return None

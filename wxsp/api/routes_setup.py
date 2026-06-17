@@ -234,6 +234,9 @@ def complete(request: Request) -> RedirectResponse:
         yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
 
+    # 首次向导只配一个平台;其余已登记平台补空壳,免得切过去 500(凭证留空到 /config 填)。
+    wxsp_config.scaffold_missing_configs()
+
     request.app.state.wizard_data = {}
     return RedirectResponse(url="/accounts", status_code=302)
 

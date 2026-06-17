@@ -78,9 +78,18 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         # 发现已配置的平台,逐平台加载
         from wxsp.config import load_settings as _load
+        from wxsp.config import scaffold_missing_configs as _scaffold
         from wxsp.scheduler import _daily_cron
 
+        # 调度 / 全局 init 只认"真实已配置"的平台 —— 在补空壳之前快照,空壳不会进 cron。
         active_platforms = [p for p in ALL_PLATFORMS if get_config_path(p).exists()]
+
+        # 再为已登记但缺配置的平台补空壳(更新新增平台后,平台页不再 500;凭证留空到 /config 填)。
+        newly_scaffolded = _scaffold()
+        if newly_scaffolded:
+            logger.info(
+                f"[api] 已为缺配置平台生成空壳: {newly_scaffolded}(到 /config 填飞书凭证后启用)"
+            )
         if not active_platforms:
             logger.warning("[api] 没有找到任何平台配置文件,跳过 scheduler")
         else:

@@ -339,3 +339,51 @@ def load_settings(
     expanded2 = _expand_env_vars(raw2)
     platform_data: dict[str, Any] = yaml.safe_load(expanded2)
     return Settings.model_validate(platform_data)
+
+
+def _empty_shell_config() -> dict[str, Any]:
+    """一份字段齐全、值为空的"空壳"配置:能过 Settings 校验,但保持惰性。
+
+    feishu / scheduler 默认禁用,凭证留空 —— 不会拿空 token 去跑 sync/cron。
+    运营到 /config 填上飞书凭证 + 账号后再启用。
+    """
+    return {
+        "app": {"data_dir": "./data", "logs_dir": "./logs", "timezone": "Asia/Shanghai"},
+        "paths": {"nas_root": ""},
+        "accounts": {},
+        "scheduler": {"enabled": False, "daily_cron_hour": 9, "daily_cron_minute": 0},
+        "publisher": {"headless": False},
+        "feishu": {
+            "enabled": False,
+            "app_id": "",
+            "app_secret": "",
+            "bitable": {"app_token": "", "table_id": ""},
+            "field_map": FeishuFieldMap().model_dump(),
+            "sync": {"write_back_enabled": True},
+        },
+        "monitoring": {
+            "notifiers": {"wecom": {"enabled": False, "webhook": ""}},
+            "notify_on": [],
+        },
+        "webui": {"host": "127.0.0.1", "port": 8765, "open_browser_on_start": True},
+    }
+
+
+def scaffold_missing_configs() -> list[str]:
+    """为 REGISTRY 中尚无配置文件的平台生成空壳配置,返回新建的平台 key 列表。
+
+    场景:① 软件更新新增平台后,启动时自动补壳,平台页不再 500;
+    ② 首次向导配好一个平台后,补齐其余平台。已存在的配置文件一律不动。
+    """
+    created: list[str] = []
+    for platform in ALL_PLATFORMS:
+        path = get_config_path(platform)
+        if path.exists():
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            yaml.safe_dump(_empty_shell_config(), allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        created.append(platform)
+    return created

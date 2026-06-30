@@ -114,12 +114,14 @@ REGISTRY: dict[str, PlatformMeta] = {
         label="小红书",
         title_min=1,  # 小红书视频标题无最小字数硬限(上限 20,在 adapter 截断)
         login_meta={
-            # 未登录访问视频发布页 → 重定向到 .../login;URL 含该片段 = 未登录(同淘宝 url 模式)
-            "home_url": (
-                "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video"
-            ),
-            "mode": "url",
-            "login_fragment": "creator.xiaohongshu.com/login",
+            # 实测(2026-06-30):未登录 goto 发布页不会稳定重定向到 /login(前端 JS 延迟触发 401),
+            # 旧的 url 负面判定「URL 不含 /login = 成功」会在第一轮轮询(2s)就误判成功。
+            # 改 logged_in_url 正向判定:goto 登录页,已登录会自动跳创作者中心 /new/*,
+            # 未登录停在 /login;URL 进入 /new/ = 登录成功的唯一硬信号。无 login_markers
+            # (登录成功跳转是确定性事件,不需要登录文案兜底;_login_markers_visible([]) 恒 False)。
+            "home_url": "https://creator.xiaohongshu.com/login",
+            "mode": "logged_in_url",
+            "logged_in_fragment": "creator.xiaohongshu.com/new/",
         },
         field_map_defaults={"tags": "标签", "cover": "封面文件"},
         needs_fingerprint=False,

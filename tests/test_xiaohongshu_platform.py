@@ -13,10 +13,11 @@ def test_xiaohongshu_registered_in_registry() -> None:
     assert m.needs_fingerprint is False
     # 小红书用 tags(→话题标签)+ cover;这俩不在公共集里,放 field_map_defaults
     assert m.field_map_defaults == {"tags": "标签", "cover": "封面文件"}
-    # 未登录访问发布页会跳 /login,故用 url 模式(同淘宝)
-    assert m.login_meta["mode"] == "url"
-    assert m.login_meta["login_fragment"] == "creator.xiaohongshu.com/login"
-    assert "creator.xiaohongshu.com" in m.login_meta["home_url"]
+    # 登录态用 logged_in_url 正向判定:goto 登录页,已登录跳创作者中心 /new/* = 成功
+    # (旧 url 负面判定「URL 不含 /login」会误判,详见 platform_meta 注释)
+    assert m.login_meta["mode"] == "logged_in_url"
+    assert m.login_meta["logged_in_fragment"] == "creator.xiaohongshu.com/new/"
+    assert m.login_meta["home_url"] == "https://creator.xiaohongshu.com/login"
     assert "xiaohongshu" in ALL_PLATFORMS
 
 

@@ -15,6 +15,7 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from patchright.sync_api import Page
@@ -57,9 +58,12 @@ _FORCE_OPEN_SHADOW_JS = """
 
 
 def _open_publish_page(page: Page) -> None:
-    # 必须在 goto 之前注册:add_init_script 会在该次导航的页面脚本执行前先跑,
-    # 才能赶在发布页 attachShadow 调用之前把闭合 shadow 改成 open(见 PUBLISH_BUTTON)。
-    page.add_init_script(_FORCE_OPEN_SHADOW_JS)
+    # 不能用 page.add_init_script:patchright 1.59.1 + 当前 Chromium 下,一旦调用
+    # 后续 navigate 全部 ERR_CONNECTION_CLOSED(与 browser.py 指纹注入踩的是同一个坑,
+    # 见 browser.py 第 297-299 行注释)。改用 framenavigated 事件:navigate 完成后立即
+    # evaluate 覆写脚本。时序上 OK —— 发布按钮 <xhs-publish-btn> 要上传视频后才 mount,
+    # goto 发布页那一刻 shadow 还没创建,framenavigated 后覆写 attachShadow 来得及。
+    page.on("framenavigated", _inject_force_open_shadow)
     page.goto(sel.PUBLISH_VIDEO_URL, wait_until="domcontentloaded")
     # 未登录会被立即重定向到 /login:提前返回,免得 wait_for_url 白等满 30s
     # (登录态由紧随其后的 _verify_logged_in 判定并抛 CookieExpired)。
@@ -72,6 +76,14 @@ def _open_publish_page(page: Page) -> None:
         # 不在 /login 又超时才是真的加载失败。
         if sel.LOGIN_URL_FRAGMENT not in page.url:
             raise NetworkError("小红书发布页加载超时") from err
+
+
+def _inject_force_open_shadow(frame: Any) -> None:
+    """framenavigated 回调:对主 frame 注入闭合 shadow 强开脚本(about:blank/cross-origin 忽略)。"""
+    try:
+        frame.evaluate(_FORCE_OPEN_SHADOW_JS)
+    except Exception:
+        pass
 
 
 def _verify_logged_in(page: Page) -> None:

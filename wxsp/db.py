@@ -10,7 +10,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import update
+from loguru import logger
+from sqlalchemy import inspect, text, update
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -38,8 +39,36 @@ def get_engine(db_path: Path | None = None) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
-    """幂等地建表。SQLModel.metadata.create_all 重复调用安全。"""
+    """幂等地建表 + 老库补列。SQLModel.metadata.create_all 重复调用安全。"""
     SQLModel.metadata.create_all(engine)
+    _migrate_add_platform_column(engine)
+
+
+def _migrate_add_platform_column(engine: Engine) -> None:
+    """老库升级补列:多平台改造给 account/task/event 加了 platform 列,但
+    create_all 只建缺失的表、不会给已存在的表加列。多平台之前建的老库缺这一列,
+    会让所有按 platform 过滤的查询炸 'no such column: account.platform'。
+
+    SQLite `ALTER TABLE ADD COLUMN ... NOT NULL DEFAULT` 给老行回填 'tencent_channel'
+    (语义正确:多平台之前的数据都是视频号)。幂等:列已存在则跳过;表不存在(全新库
+    由 create_all 建好,本就带 platform 列)也跳过。
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table in ("account", "task", "event"):
+            if table not in existing_tables:
+                continue
+            cols = {c["name"] for c in inspector.get_columns(table)}
+            if "platform" in cols:
+                continue
+            conn.execute(
+                text(
+                    f'ALTER TABLE "{table}" ADD COLUMN platform VARCHAR '
+                    "NOT NULL DEFAULT 'tencent_channel'"
+                )
+            )
+            logger.info(f"[db] 老库迁移:{table} 补 platform 列(老行回填 tencent_channel)")
 
 
 @contextmanager

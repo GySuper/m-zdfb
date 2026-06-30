@@ -75,6 +75,8 @@ def _open_publish_page(page: Page) -> None:
 
 
 def _verify_logged_in(page: Page) -> None:
+    # 失效判据(负向):被重定向到 /login,或登录框仍可见 → cookie 失效。
+    # 发布页场景下 cookie 失效会被重定向到 .../login?redirectReason=401(URL 含 fragment),可靠。
     if sel.LOGIN_URL_FRAGMENT in page.url:
         raise CookieExpired("小红书登录态失效(被重定向到登录页,需重新扫码登录)")
     box = page.locator(sel.LOGIN_BOX_SELECTOR).first
@@ -85,6 +87,13 @@ def _verify_logged_in(page: Page) -> None:
         raise
     except Exception:
         pass
+    # 存活确认(正向):上传入口必须在(发布页一进就有,不依赖是否已上传视频);
+    # 标题框要上传后才渲染,不能用。URL 没到 /login 但页面是异常中间态/空白页也算失效,
+    # 避免「负面判据漏判 + 发布流程继续空跑」(与 login() 用 SIDEBAR_MARKER 的正向思路一致)。
+    try:
+        page.locator(sel.VIDEO_FILE_INPUT).first.wait_for(state="attached", timeout=8000)
+    except Exception as err:
+        raise CookieExpired("小红书登录态失效(发布页上传入口未出现,需重新扫码登录)") from err
 
 
 def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> None:
@@ -310,7 +319,9 @@ class XiaohongshuPublisher:
         """开浏览器到小红书登录页等扫码。
 
         未登录时停在 .../login(可能默认手机号登录,用户在可见浏览器里自行点切到扫一扫)。
-        扫完 URL 离开 /login 且登录框消失 = 成功;cookie 由 browser_context 退出时落盘。
+        用**正向判据**:扫码成功后小红书跳到创作者中心 /new/* 并渲染侧边栏「笔记管理」,
+        两者同时满足才算成功。避免「URL 暂离 /login + 登录框未渲染」的加载中间态被误判。
+        cookie 由 browser_context 退出时落盘。
         """
         user_data_dir = Path(account.user_data_dir)
         logger.info(f"[xiaohongshu] 开始登录 account={account.id}")
@@ -324,16 +335,14 @@ class XiaohongshuPublisher:
                 page.goto(sel.LOGIN_URL, wait_until="domcontentloaded")
                 deadline = time.time() + 300
                 while time.time() < deadline:
-                    if sel.LOGIN_URL_FRAGMENT not in page.url:
-                        box = page.locator(sel.LOGIN_BOX_SELECTOR).first
-                        box_visible = False
+                    if sel.LOGGED_IN_URL_FRAGMENT in page.url:
                         try:
-                            box_visible = bool(box.count()) and box.is_visible()
+                            sidebar = page.get_by_text(sel.SIDEBAR_MARKER_TEXT, exact=True).first
+                            if sidebar.count() and sidebar.is_visible():
+                                logger.info(f"[xiaohongshu] 登录成功 account={account.id}")
+                                return True
                         except Exception:
-                            box_visible = False
-                        if not box_visible:
-                            logger.info(f"[xiaohongshu] 登录成功 account={account.id}")
-                            return True
+                            pass
                     time.sleep(2)
                 logger.warning(f"[xiaohongshu] 登录超时 account={account.id}")
                 return False

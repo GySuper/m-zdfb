@@ -22,6 +22,11 @@ SUCCESS_URL_GLOB = "**/publish/success?**"
 # platform_meta.login_meta 用 url 模式 + 本片段;adapter _verify_logged_in 额外兜底登录框可见性。
 LOGIN_URL_FRAGMENT = "creator.xiaohongshu.com/login"
 LOGIN_BOX_SELECTOR = "div[class*='login-box']"  # 实测命中(login-box-container)
+# 登录成功的正向判据:扫码成功后小红书跳到创作者中心 /new/* (实测: /new/home),
+# 并渲染左侧导航栏(「笔记管理」只登录后才出现)。login() / _verify_logged_in 用它
+# 做"已登录"硬判定,避免「URL 暂离 /login + 登录框未渲染」的加载中间态被误判成功。
+LOGGED_IN_URL_FRAGMENT = "creator.xiaohongshu.com/new/"
+SIDEBAR_MARKER_TEXT = "笔记管理"
 
 # ---- 视频上传 ----
 VIDEO_FILE_INPUT = (

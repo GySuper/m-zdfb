@@ -32,9 +32,11 @@ SIDEBAR_MARKER_TEXT = "笔记管理"
 VIDEO_FILE_INPUT = (
     "div[class^='upload-content'] input.upload-input"  # 实测命中(隐藏 input,set_input_files)
 )
-# 上传/转码完成判据:预览区文本含任一关键词,或标题框出现(见 adapter _upload_video)
-UPLOAD_PREVIEW = 'div[class*="preview-new"]'
-UPLOAD_DONE_KEYWORDS = ("上传成功", "分辨率", "重新上传", "编辑封面", "已上传", "100%")
+# 上传完成判据:等「重新上传」按钮出现 = 完成(对齐抖音 UPLOAD_DONE_MARKER 做法)。
+# 实测(169M 大视频):上传中按钮不存在,上传完成(t≈94s)才出现,稳定可靠。
+# 旧判据已废弃——预览区文本「分辨率」会误匹配「分辨率较低」(上传刚开始就有);
+# 标题框更不能用:实测 set_input_files 后第 0 秒标题框就可见(不等上传完)。
+UPLOAD_DONE_MARKER = "text=重新上传"
 
 # ---- 标题 / 描述 / 话题 ----
 TITLE_INPUT = 'input[placeholder*="填写标题"]'  # 实测命中(placeholder「填写标题会有更多赞哦」)

@@ -111,24 +111,16 @@ def _verify_logged_in(page: Page) -> None:
 def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> None:
     page.locator(sel.VIDEO_FILE_INPUT).set_input_files(str(file_path))
 
-    # 等上传/转码完成:预览区文本含完成关键词,或标题框出现(进入编辑态)= 完成。
-    deadline = time.time() + timeout_seconds
-    while time.time() < deadline:
-        try:
-            preview = page.locator(sel.UPLOAD_PREVIEW).first
-            if preview.count():
-                txt = preview.inner_text(timeout=2000)
-                if any(k in txt for k in sel.UPLOAD_DONE_KEYWORDS):
-                    logger.info("[xiaohongshu] 视频上传完成")
-                    return
-            title_box = page.locator(sel.TITLE_INPUT).first
-            if title_box.count() and title_box.is_visible():
-                logger.info("[xiaohongshu] 视频上传完成(标题框已出现)")
-                return
-        except Exception:
-            pass
-        time.sleep(2)
-    raise UploadFailed("视频上传/处理超时")
+    # 等上传/转码完成:「重新上传」按钮出现 = 完成(对齐抖音)。实测上传中不存在、
+    # 完成后才出现。旧判据(预览区文本/标题框)会误判:文本「分辨率」匹配「分辨率较低」,
+    # 标题框 set_input_files 后第 0 秒就可见(详见 xiaohongshu_selectors 注释)。
+    try:
+        page.locator(sel.UPLOAD_DONE_MARKER).first.wait_for(
+            state="visible", timeout=timeout_seconds * 1000
+        )
+        logger.info("[xiaohongshu] 视频上传完成")
+    except Exception as err:
+        raise UploadFailed("视频上传/处理超时") from err
 
 
 def _fill_title(page: Page, title: str) -> None:

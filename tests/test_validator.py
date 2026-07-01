@@ -359,6 +359,62 @@ def test_validate_tags_too_many(tmp_path: Path) -> None:
     assert any(e.field == "标签" and "5" in e.message for e in result.errors)
 
 
+def test_xiaohongshu_title_max_20(tmp_path: Path) -> None:
+    """小红书标题上限 20 字(其余平台默认 30)。"""
+    nas = _stub_nas_with_video(tmp_path)
+    # 21 字 → 超过小红书 20 上限,应失败
+    row = _row_with(tmp_path, 标题="字" * 21)
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+        platform="xiaohongshu",
+    )
+    assert result.ok is False
+    assert any(e.field == "标题" and "20" in e.message for e in result.errors)
+    # 20 字 → 正好上限,应通过
+    row2 = _row_with(tmp_path, 标题="字" * 20)
+    result2 = validate(
+        row2,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+        platform="xiaohongshu",
+    )
+    assert all(e.field != "标题" for e in result2.errors), result2.errors
+
+
+def test_xiaohongshu_tags_max_10(tmp_path: Path) -> None:
+    """小红书话题上限 10 个(其余平台默认 5)。"""
+    nas = _stub_nas_with_video(tmp_path)
+    # 11 个 → 超过小红书 10 上限,应失败
+    row = _row_with(tmp_path, 标题="字" * 20, 标签=[{"text": f"t{i}"} for i in range(11)])
+    result = validate(
+        row,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+        platform="xiaohongshu",
+    )
+    assert result.ok is False
+    assert any(e.field == "标签" and "10" in e.message for e in result.errors)
+    # 10 个 → 正好上限,应通过
+    row2 = _row_with(tmp_path, 标题="字" * 20, 标签=[{"text": f"t{i}"} for i in range(10)])
+    result2 = validate(
+        row2,
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=nas,
+        active_accounts={"account_a": "测试号"},
+        platform="xiaohongshu",
+    )
+    assert all(e.field != "标签" for e in result2.errors), result2.errors
+
+
 def test_validate_account_empty(tmp_path: Path) -> None:
     row = _row_with(tmp_path, 标题="字" * 16, 账号="")
     nas = _stub_nas_with_video(tmp_path)

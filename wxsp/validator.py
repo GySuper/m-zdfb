@@ -87,9 +87,6 @@ class NasFinder(Protocol):
 # 常量
 # ---------------------------------------------------------------------------
 
-_TITLE_MAX = 30
-_TAGS_MAX = 5
-
 
 def _title_min_for(platform: str) -> int:
     """标题最小字数,取自 wxsp.platform_meta(视频号 16,淘宝光合无限制取 1)。"""
@@ -144,7 +141,7 @@ def validate(
     errors: list[FieldError] = []
 
     title = _check_title(row.fields, fm.title, errors, platform=platform, has_title=has_title)
-    tags = _check_tags(row.fields, fm.tags, errors)
+    tags = _check_tags(row.fields, fm.tags, errors, platform=platform)
     description = _get_str(row.fields.get(fm.description))
     topic = _get_str(row.fields.get(fm.topic))
     original_claim = bool(row.fields.get(fm.original_claim) or False)
@@ -263,17 +260,26 @@ def _check_title(
         return None
     n = len(raw)
     title_min = _title_min_for(platform)
-    if n < title_min or n > _TITLE_MAX:
+    from wxsp.platform_meta import get_meta
+
+    title_max = get_meta(platform).title_max
+    if n < title_min or n > title_max:
         if title_min > 1:
-            msg = f"{n} 字(要求 {title_min}-{_TITLE_MAX} 字)"
+            msg = f"{n} 字(要求 {title_min}-{title_max} 字)"
         else:
-            msg = f"{n} 字(最多 {_TITLE_MAX} 字)"
+            msg = f"{n} 字(最多 {title_max} 字)"
         errors.append(FieldError(field=field_name, message=msg))
         return None
     return raw
 
 
-def _check_tags(fields: dict[str, Any], field_name: str, errors: list[FieldError]) -> list[str]:
+def _check_tags(
+    fields: dict[str, Any],
+    field_name: str,
+    errors: list[FieldError],
+    *,
+    platform: str = "tencent_channel",
+) -> list[str]:
     raw = fields.get(field_name) or []
     tags: list[str] = []
     for item in raw:
@@ -283,8 +289,11 @@ def _check_tags(fields: dict[str, Any], field_name: str, errors: list[FieldError
                 tags.append(text)
         elif isinstance(item, str):
             tags.append(item)
-    if len(tags) > _TAGS_MAX:
-        errors.append(FieldError(field=field_name, message=f"{len(tags)} 个(最多 {_TAGS_MAX} 个)"))
+    from wxsp.platform_meta import get_meta
+
+    tags_max = get_meta(platform).tags_max
+    if len(tags) > tags_max:
+        errors.append(FieldError(field=field_name, message=f"{len(tags)} 个(最多 {tags_max} 个)"))
     return tags
 
 

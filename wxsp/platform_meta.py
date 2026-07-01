@@ -36,6 +36,10 @@ class PlatformMeta:
     has_title: bool = True
     """发布页是否有独立标题框。False(快手)= 页面只有作品描述框,标题在飞书侧不必填、
     不校验长度,校验层改判「描述」为必填核心字段。详见 validator._is_incomplete / _check_title。"""
+    title_max: int = 30
+    """validator 标题最大字数。各平台不同:小红书 20,其余默认 30。"""
+    tags_max: int = 5
+    """validator 话题/标签最大个数。各平台不同:小红书 10,其余默认 5。"""
 
 
 REGISTRY: dict[str, PlatformMeta] = {
@@ -113,6 +117,8 @@ REGISTRY: dict[str, PlatformMeta] = {
         key="xiaohongshu",
         label="小红书",
         title_min=1,  # 小红书视频标题无最小字数硬限(上限 20,在 adapter 截断)
+        title_max=20,  # 小红书视频标题上限 20 字
+        tags_max=10,  # 小红书话题最多 10 个
         login_meta={
             # 实测(2026-06-30):未登录 goto 发布页不会稳定重定向到 /login(前端 JS 延迟触发 401),
             # 旧的 url 负面判定「URL 不含 /login = 成功」会在第一轮轮询(2s)就误判成功。

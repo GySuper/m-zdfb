@@ -350,7 +350,9 @@ def browser_context(
         chrome_proc, chrome_port = _launch_real_chrome(user_data_dir, headless=headless)
         with sync_playwright() as p:
             try:
-                browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{chrome_port}")
+                browser = p.chromium.connect_over_cdp(
+                    f"http://127.0.0.1:{chrome_port}", is_local=True
+                )
                 context = browser.contexts[0]
                 page = context.pages[0] if context.pages else context.new_page()
                 if _cookie_file.exists():

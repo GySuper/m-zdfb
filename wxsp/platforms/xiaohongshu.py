@@ -186,13 +186,16 @@ def _set_cover(page: Page, cover_path: Path | None) -> None:
 
 def _set_schedule(page: Page, publish_at: datetime) -> None:
     # 切「定时发布」开关 → 日期时间输入框出现,fill 一次性写入(避免 Ctrl/Cmd+A 跨平台差异)。
+    # 每步留足停顿(拟人节奏,降低风控判定):开关动画 1.5s → 聚焦 0.5s → 写入消化 2s。
     page.locator(sel.SCHEDULE_SWITCH_CARD).filter(has_text=sel.SCHEDULE_SWITCH_TEXT).locator(
         sel.SCHEDULE_SWITCH
     ).click()
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(1500)
     inp = page.locator(sel.SCHEDULE_DATETIME_INPUT)
+    inp.click()  # 先聚焦(拟人:点一下再输入),再停顿
+    page.wait_for_timeout(500)
     inp.fill(publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT))
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(2000)
 
 
 def _risk_control_probe(page: Page) -> None:

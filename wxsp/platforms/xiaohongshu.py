@@ -154,9 +154,13 @@ def _add_tags(page: Page, tags: list[str]) -> None:
             first_item = page.locator(sel.TOPIC_ITEM).first
             first_item.wait_for(state="visible", timeout=2000)
             first_item.click()
+            # 选完候选后停顿(等话题绑定写入正文,拟人节奏)
+            page.wait_for_timeout(random.randint(500, 1000))
         except Exception:
             # 下拉没弹出(网络慢/无匹配话题)→ 退而求其次:敲空格让 #tag 以纯文本留在正文
             page.keyboard.press("Space")
+        # 多个话题之间停顿(避免连续 #tag 输入过密被风控判定)
+        page.wait_for_timeout(random.randint(800, 1500))
 
 
 def _set_cover(page: Page, cover_path: Path | None) -> None:

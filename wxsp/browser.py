@@ -63,6 +63,78 @@ def _chromium_root() -> Path | None:
     return exe.parent / "chromium"
 
 
+def _system_chrome_path() -> Path:
+    """按平台查找系统真实安装的 Google Chrome 可执行文件路径(CDP 模式用)。
+
+    找不到抛 FileNotFoundError(带引导文案)。开发/打包模式逻辑一致 —— 系统 Chrome
+    永远装在固定系统路径,与 wxsp 是否打包无关。
+    """
+    if sys.platform == "darwin":
+        candidates = [
+            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ]
+    elif sys.platform == "win32":
+        candidates = [
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+            / "Google/Chrome/Application/chrome.exe",
+            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+            / "Google/Chrome/Application/chrome.exe",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe",
+        ]
+    else:  # Linux
+        candidates = [Path("/usr/bin/google-chrome"), Path("/usr/bin/chromium-browser")]
+    for c in candidates:
+        if c.exists():
+            return c
+    raise FileNotFoundError(
+        "未找到系统 Google Chrome(CDP 模式需要真实 Chrome,不能用 patchright 自带的 chromium)。"
+        f"已尝试: {[str(c) for c in candidates]}。请从 https://www.google.com/chrome/ 安装 Google Chrome。"
+    )
+
+
+def _launch_real_chrome(
+    user_data_dir: Path, *, headless: bool = False
+) -> tuple[subprocess.Popen[str], int]:
+    """用 subprocess 启动系统真实 Chrome(带调试端口 + 绑定 profile),返回 (proc, port)。
+
+    --remote-debugging-port=0 让 Chrome 自选端口,从 stderr 的 "DevTools listening on" 解析。
+    调用方负责在 finally 里 proc.terminate()(CDP 的 context.close() 只断连接不杀进程)。
+    """
+    chrome = _system_chrome_path()
+    argv = [
+        str(chrome),
+        f"--user-data-dir={user_data_dir.resolve()}",
+        "--remote-debugging-port=0",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--window-position=0,0",
+        "--disable-features=AsyncDns,AsyncDnsResolver,DnsOverHttps,SecureDnsForFreshnessCheck",
+        "--dns-prefetch-disable",
+    ]
+    if headless:
+        argv.append("--headless=new")
+    # stderr=PIPE 读 DevTools 端口;stdout 不关心。text 模式方便解析。
+    proc = subprocess.Popen(argv, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
+    # 轮询 stderr 直到出现 "DevTools listening on ws://127.0.0.1:<port>"(Chrome 自选端口)
+    deadline = _time.monotonic() + 15
+    port: int | None = None
+    while _time.monotonic() < deadline and proc.poll() is None:
+        line = proc.stderr.readline() if proc.stderr else ""
+        if "DevTools listening on" in line:
+            # 形如 ...ws://127.0.0.1:9222/devtools/browser/...
+            import re
+
+            m = re.search(r"127\.0\.0\.1:(\d+)", line)
+            if m:
+                port = int(m.group(1))
+                break
+    if port is None:
+        proc.terminate()
+        raise RuntimeError("Chrome DevTools 端口就绪超时(15s 内未监听)")
+    return proc, port
+
+
 def _fingerprint_storage_dir() -> Path:
     """指纹 JSON 落盘目录,跟 chrome-profiles / db.sqlite 同处 data 根。"""
     return get_user_data_dir() / "fingerprints"
@@ -268,6 +340,68 @@ def browser_context(
             launch_kwargs["no_viewport"] = True
     else:
         launch_kwargs["viewport"] = {"width": 1280, "height": 720}
+
+    use_real_chrome = get_meta(platform).use_real_chrome
+
+    # CDP 分支:subprocess 启系统真实 Chrome + connect_over_cdp(绕 patchright patched
+    # chromium 风控指纹,小红书用)。小红书 needs_fingerprint=False,无指纹注入,故本分支
+    # 不处理 fp_init_script;cookie 走 cookies.json 显式持久化(同 launch 分支)。
+    if use_real_chrome:
+        chrome_proc, chrome_port = _launch_real_chrome(user_data_dir, headless=headless)
+        with sync_playwright() as p:
+            try:
+                browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{chrome_port}")
+                context = browser.contexts[0]
+                page = context.pages[0] if context.pages else context.new_page()
+                if _cookie_file.exists():
+                    try:
+                        with open(_cookie_file) as f:
+                            saved = _json.load(f)
+                        context.add_cookies(saved)
+                        logger.info(
+                            f"[browser] {platform} 恢复 {len(saved)} 个 cookie from {_cookie_file}"
+                        )
+                    except Exception as exc:
+                        logger.warning(f"[browser] 恢复 cookie 失败: {exc}")
+                try:
+                    loaded = context.cookies()
+                    logger.info(
+                        f"[browser] {platform} CDP context 启动(real chrome),"
+                        f" user_data_dir={user_data_dir}, cookies_loaded={len(loaded)}, port={chrome_port}"
+                    )
+                except Exception:
+                    pass
+                yield page
+            finally:
+                if _use_explicit_cookies:
+                    try:
+                        all_cookies = context.cookies()
+                        with open(_cookie_file, "w") as f:
+                            _json.dump(all_cookies, f, ensure_ascii=False)
+                        logger.info(
+                            f"[browser] {platform} 保存 {len(all_cookies)} 个 cookie to {_cookie_file}"
+                        )
+                    except Exception as exc:
+                        logger.warning(f"[browser] 保存 cookie 失败: {exc}")
+                try:
+                    page.goto("about:blank")
+                except Exception:
+                    pass
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+                # CDP 关键:context.close()/browser.close() 只断连接不杀进程,必须显式 terminate
+                # 自己 Popen 的 Chrome,否则泄漏持有 SingletonLock → 下次撞单例(见 _reap_stale_profile_lock)。
+                try:
+                    chrome_proc.terminate()
+                    chrome_proc.wait(timeout=5)
+                except Exception:
+                    try:
+                        chrome_proc.kill()
+                    except Exception:
+                        pass
+        return
 
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(**launch_kwargs)

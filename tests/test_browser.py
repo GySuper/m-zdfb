@@ -218,3 +218,39 @@ def test_chromium_root_packaged_windows(monkeypatch) -> None:
         monkeypatch.setattr(sys, "executable", str(fake_exec))
         result = browser._chromium_root()
         assert result == Path("C:/Program Files/wxsp/chromium")
+
+
+def test_system_chrome_path_mac(monkeypatch) -> None:
+    """mac:候选路径存在则返回它(第一个存在的候选)。"""
+    from wxsp import browser
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    expected = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    # 让只有目标候选"存在",其余不存在
+    monkeypatch.setattr(Path, "exists", lambda self: self == expected)
+    assert browser._system_chrome_path() == expected
+
+
+def test_system_chrome_path_windows(monkeypatch, tmp_path) -> None:
+    """win:查 %ProgramFiles%/Google/Chrome/Application/chrome.exe。"""
+    from wxsp import browser
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    monkeypatch.setenv("ProgramFiles(x86)", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    expected = tmp_path / "Google/Chrome/Application/chrome.exe"
+    monkeypatch.setattr(Path, "exists", lambda self: self == expected)
+    assert browser._system_chrome_path() == expected
+
+
+def test_system_chrome_path_not_found(monkeypatch) -> None:
+    """找不到系统 Chrome → 抛 FileNotFoundError(带引导文案)。"""
+    from wxsp import browser
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "exists", lambda self: False)  # 所有候选都不存在
+    import pytest
+
+    with pytest.raises(FileNotFoundError, match="Google Chrome"):
+        browser._system_chrome_path()

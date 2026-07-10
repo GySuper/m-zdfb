@@ -86,8 +86,15 @@ def _field_map_keys(platform: str) -> list[tuple[str, str]]:
 
 
 def _profile_dir_for(account_id: str) -> str:
-    """自动生成的 Chrome profile 目录;用户不可改。"""
-    return f"./data/chrome-profiles/{account_id}"
+    """自动生成的 Chrome profile 目录;用户不可改。
+
+    打包模式下用 get_user_data_dir() 拼绝对路径(Windows: %AppData%\\wxsp\\data,
+    macOS: ~/Library/Application Support/wxsp/data),避免相对路径 './data' 解析到
+    Program Files 等只读目录触发 [WinError 5] 拒绝访问。开发模式两者等价。
+    """
+    from wxsp.config import get_user_data_dir
+
+    return str(get_user_data_dir() / "chrome-profiles" / account_id)
 
 
 def _generate_account_id(existing: dict[str, Any]) -> str:

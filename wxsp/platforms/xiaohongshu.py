@@ -53,6 +53,29 @@ _FORCE_OPEN_SHADOW_JS = """
 """
 
 # ---------------------------------------------------------------------------
+# 拟人节奏辅助(对齐 MatrixMedia xhs.js xhsTypeDelay / waitXhs / getRandomInt)
+# ---------------------------------------------------------------------------
+
+
+def _get_random_int(min_: int, max_: int) -> int:
+    """[min, max] 闭区间随机整数(对齐 MatrixMedia getRandomInt)。"""
+    return random.randint(min_, max_)
+
+
+def _type_delay() -> int:
+    """打字每字符延迟 ms(对齐 MatrixMedia xhsTypeDelay = getRandomDelayMs(80,180))。
+
+    原 delay=30 固定值低于人类打字下限(~200ms/字符)且不随机,是典型自动化特征。
+    """
+    return _get_random_int(80, 180)
+
+
+def _wait_xhs(page: Page, min_ms: int = 1500, max_ms: int = 4000) -> None:
+    """步间随机停顿 ms(对齐 MatrixMedia waitXhs = getRandomDelayMs(1500,4000))。"""
+    page.wait_for_timeout(_get_random_int(min_ms, max_ms))
+
+
+# ---------------------------------------------------------------------------
 # step functions
 # ---------------------------------------------------------------------------
 
@@ -128,18 +151,26 @@ def _fill_title(page: Page, title: str) -> None:
         return
     inp = page.locator(sel.TITLE_INPUT).first
     inp.wait_for(state="visible", timeout=10_000)
-    inp.fill(title[: sel.TITLE_MAX_LENGTH])
+    # 对齐 MatrixMedia xhs.js:三击全选 → Backspace 清空 → keyboard.type 随机延迟打字。
+    # 原 inp.fill() 是瞬间赋值,无按键事件序列,是自动化特征。
+    inp.click(click_count=3)
+    page.keyboard.press("Backspace")
+    title_text = title[: sel.TITLE_MAX_LENGTH]
+    if title_text:
+        page.keyboard.type(title_text, delay=_type_delay())
 
 
 def _fill_description(page: Page, description: str | None) -> None:
     # 小红书有独立标题框,描述为空时直接跳过(不像抖音/快手回退到 title)。
     if not description:
         return
-    # 发布页为全新笔记,正文区初始为空,click 聚焦后直接键入(光标留末尾,供 _add_tags 追加话题)。
+    # 对齐 MatrixMedia xhs.js:双击聚焦正文 → waitXhs(1500,2500) 停顿 → keyboard.type 随机延迟。
+    # 原 editor.click() 单击 + 无延迟 type,事件序列机械。
     editor = page.locator(sel.DESC_EDITOR).first
     editor.wait_for(state="visible", timeout=10_000)
-    editor.click()
-    page.keyboard.type(description)
+    editor.click(click_count=2)
+    _wait_xhs(page, 1500, 2500)
+    page.keyboard.type(description, delay=_type_delay())
 
 
 def _add_tags(page: Page, tags: list[str]) -> None:
@@ -148,19 +179,22 @@ def _add_tags(page: Page, tags: list[str]) -> None:
     # 正文区若还没聚焦(无描述时)先点一下;话题需键入 #tag 后从下拉选第一个候选才真正绑定。
     page.locator(sel.DESC_EDITOR).first.click()
     for tag in tags:
-        page.keyboard.type("#" + tag, delay=30)
+        # 对齐 MatrixMedia:打字延迟 xhsTypeDelay(80,180) 随机;原 delay=30 固定是自动化特征。
+        page.keyboard.type("#" + tag, delay=_type_delay())
+        # 对齐 MatrixMedia:waitXhs 等话题候选弹窗弹出
+        _wait_xhs(page)
         try:
+            # 对齐 MatrixMedia:用 Enter 选候选弹窗第一条(press("Enter")),不用 click。
+            # 用户实测 click 选候选会失败(2026-07-08),Enter 是 puppeteer 体系验证可行的做法。
             page.locator(sel.TOPIC_CONTAINER).wait_for(state="visible", timeout=3000)
-            first_item = page.locator(sel.TOPIC_ITEM).first
-            first_item.wait_for(state="visible", timeout=2000)
-            first_item.click()
-            # 选完候选后停顿(等话题绑定写入正文,拟人节奏)
-            page.wait_for_timeout(random.randint(500, 1000))
+            page.keyboard.press("Enter")
+            # 对齐 MatrixMedia waitXhs(1500,3000):选完候选后停顿,等话题绑定写入正文
+            _wait_xhs(page, 1500, 3000)
         except Exception:
             # 下拉没弹出(网络慢/无匹配话题)→ 退而求其次:敲空格让 #tag 以纯文本留在正文
             page.keyboard.press("Space")
-        # 多个话题之间停顿(避免连续 #tag 输入过密被风控判定)
-        page.wait_for_timeout(random.randint(800, 1500))
+        # 对齐 MatrixMedia:多个话题之间 waitXhs(1500,4000),避免连续 #tag 输入过密被风控判定
+        _wait_xhs(page)
 
 
 def _set_cover(page: Page, cover_path: Path | None) -> None:
@@ -177,7 +211,7 @@ def _set_cover(page: Page, cover_path: Path | None) -> None:
     file_input = modal.locator(sel.COVER_FILE_INPUT).first
     file_input.wait_for(state="attached", timeout=10_000)
     file_input.set_input_files(str(cover_path))
-    page.wait_for_timeout(2000)
+    _wait_xhs(page, 1500, 2500)
 
     confirm = (
         modal.locator(sel.COVER_CONFIRM_BUTTON).filter(has_text=sel.COVER_CONFIRM_BUTTON_TEXT).first
@@ -190,16 +224,18 @@ def _set_cover(page: Page, cover_path: Path | None) -> None:
 
 def _set_schedule(page: Page, publish_at: datetime) -> None:
     # 切「定时发布」开关 → 日期时间输入框出现,fill 一次性写入(避免 Ctrl/Cmd+A 跨平台差异)。
-    # 每步留足停顿(拟人节奏,降低风控判定):开关动画 1.5s → 聚焦 0.5s → 写入消化 2s。
+    # ⚠️ 日期输入框是 d-datepicker 组件的 <input>,不能逐字符 keyboard.type —— 会触发组件
+    # 内部解析/校验状态机,焦点飞出输入框甚至连带关掉定时开关(实测 2026-07-08)。
+    # fill 对 <input> 是标准安全做法。开关点击后的停顿保留 _wait_xhs 拟人化(无害)。
     page.locator(sel.SCHEDULE_SWITCH_CARD).filter(has_text=sel.SCHEDULE_SWITCH_TEXT).locator(
         sel.SCHEDULE_SWITCH
     ).click()
-    page.wait_for_timeout(1500)
+    _wait_xhs(page, 1500, 2500)
     inp = page.locator(sel.SCHEDULE_DATETIME_INPUT)
-    inp.click()  # 先聚焦(拟人:点一下再输入),再停顿
-    page.wait_for_timeout(500)
+    inp.click()
+    _wait_xhs(page, 400, 800)
     inp.fill(publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT))
-    page.wait_for_timeout(2000)
+    _wait_xhs(page, 1500, 2500)
 
 
 def _risk_control_probe(page: Page) -> None:
@@ -213,9 +249,27 @@ def _risk_control_probe(page: Page) -> None:
 
 
 def _click_publish(page: Page) -> None:
+    # 坐标点击 + 鼠标轨迹(对齐 MatrixMedia xhs.js line 480-506 全部参数):
+    # jitterX=getRandomInt(-12,12) / jitterY=getRandomInt(-8,8) 随机抖动
+    # mouse.move steps=getRandomInt(3,8) 模拟曲线 → waitForTimeout getRandomInt(30,80) →
+    # mouse.click delay=80 按下释放间隔。点完后 waitXhs(2500,4500) 停顿。
     btn = page.locator(sel.PUBLISH_BUTTON).first
     btn.wait_for(state="visible", timeout=10_000)
-    btn.click()
+    box = btn.bounding_box()
+    if box is None:
+        # 极端兜底:boundingBox 拿不到(被遮挡/未渲染)时退回元素点击,保证流程不中断
+        btn.click()
+        return
+    cx = box["x"] + box["width"] / 2 + _get_random_int(-12, 12)
+    cy = box["y"] + box["height"] / 2 + _get_random_int(-8, 8)
+    # 先移到目标附近一个随机偏移点(steps 模拟人类鼠标曲线),停顿后再点
+    pre_x = cx + _get_random_int(-20, 20)
+    pre_y = cy + _get_random_int(-15, 15)
+    page.mouse.move(pre_x, pre_y, steps=_get_random_int(3, 8))
+    page.wait_for_timeout(_get_random_int(30, 80))
+    page.mouse.click(cx, cy, delay=80)
+    # 对齐 MatrixMedia waitXhs(2500,4500):点击发布后留足停顿,等页面响应
+    _wait_xhs(page, 2500, 4500)
 
 
 def _wait_for_success(page: Page, timeout: int = 60) -> None:

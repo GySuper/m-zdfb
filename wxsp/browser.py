@@ -267,6 +267,7 @@ def browser_context(
     headless: bool = False,
     account_id: str | None = None,
     platform: str = "tencent_channel",
+    _skip_cleanup: bool = False,
 ) -> Iterator[Page]:
     """打开账号专属 persistent Chrome context。
 
@@ -274,6 +275,9 @@ def browser_context(
     - 视频号:注入 per-account 指纹(UA/viewport/WebGL/Canvas 等)。
     - 淘宝等平台:跳过指纹,额外用 cookies.json 做显式持久化(patchright 的
       persistent context 对 session cookie 落盘不可靠)。
+    - `_skip_cleanup`:调用方已自行做 cookie 预 flush(如 _run_open_browser 每 30s),
+      跳过 finally 的 context.cookies()/goto/close —— macOS 上用户手动关窗口后
+      page.is_closed() 不返回 True,这些对死 context 的调用会阻塞数秒拖慢退出。
     """
     chromium_root = _chromium_root()
     if chromium_root is not None:
@@ -481,26 +485,30 @@ def browser_context(
                 page.on("framenavigated", _inject_on_nav)
             yield page
         finally:
-            # 显式保存 cookie(淘宝等非视频号平台)
-            if _use_explicit_cookies:
+            # _skip_cleanup:调用方已自行预 flush cookie,跳过所有 cleanup —— macOS 上
+            # 用户手动关窗口后 page.is_closed() 不返回 True,这些对死 context 的调用
+            # 会阻塞数秒拖慢退出,导致线程卡在 _login_in_flight 里。
+            if not _skip_cleanup:
+                # 显式保存 cookie(淘宝等非视频号平台)
+                if _use_explicit_cookies:
+                    try:
+                        all_cookies = context.cookies()
+                        with open(_cookie_file, "w") as f:
+                            _json.dump(all_cookies, f, ensure_ascii=False)
+                        logger.info(
+                            f"[browser] {platform} 保存 {len(all_cookies)} 个 cookie to {_cookie_file}"
+                        )
+                    except Exception as exc:
+                        logger.warning(f"[browser] 保存 cookie 失败: {exc}")
+                # 导到 about:blank 确保当前页面的 cookie 都写入,再关 context
                 try:
-                    all_cookies = context.cookies()
-                    with open(_cookie_file, "w") as f:
-                        _json.dump(all_cookies, f, ensure_ascii=False)
-                    logger.info(
-                        f"[browser] {platform} 保存 {len(all_cookies)} 个 cookie to {_cookie_file}"
-                    )
-                except Exception as exc:
-                    logger.warning(f"[browser] 保存 cookie 失败: {exc}")
-            # 导到 about:blank 确保当前页面的 cookie 都写入,再关 context
-            try:
-                page.goto("about:blank")
-            except Exception:
-                pass
-            try:
-                context.close()
-            except Exception:
-                pass  # 浏览器可能已经崩溃,close 失败不影响主流程
+                    page.goto("about:blank")
+                except Exception:
+                    pass
+                try:
+                    context.close()
+                except Exception:
+                    pass  # 浏览器可能已经崩溃,close 失败不影响主流程
 
 
 def wait_for_logged_in(page: Page, *, timeout_ms: int, platform: str = "tencent_channel") -> bool:

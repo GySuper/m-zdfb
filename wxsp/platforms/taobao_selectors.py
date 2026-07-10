@@ -25,8 +25,14 @@ LOGGED_IN_INDICATOR = "text=发布视频"
 # ============== [5] 视频上传 ==============
 FILE_INPUT = 'input[type="file"]'
 UPLOAD_AREA = "text=点击上传视频，或将视频拖放到此处"
-COVER_WAITING_TEXT = "等待视频上传"
-COVER_READY_INDICATOR = "视频封面"
+# 实测(2026-07-10 DOM 采样):平台显示"等待视频上传..."(带省略号),不带省略号永远 count=0。
+# 上传成功后该文案消失、"重新上传"按钮出现;失败则出"视频上传失败"。
+UPLOAD_WAITING_TEXT = "等待视频上传..."
+UPLOAD_FAILED_TEXT = "视频上传失败"
+COVER_READY_INDICATOR = "重新上传"  # 上传成功后出现(失败时也有,故须配合失败文案排除)
+# 封面图预览:上传成功后渲染出 <img> 封面缩略图。"视频封面"是 section 标题(一直存在,
+# 不能用作判据)。用封面区 img 元素的 src 是否含封面图路径判定渲染完成。
+COVER_IMG_PREVIEW = 'img[src*="cover"]'
 
 # ============== [7] 标题 ==============
 TITLE_INPUT = 'input[placeholder="加个标题让内容更吸引人"]'

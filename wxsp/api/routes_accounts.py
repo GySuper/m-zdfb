@@ -207,6 +207,32 @@ def _login_runner(account_id: str, user_data_dir: Path, platform: str = "tencent
             _login_in_flight.pop(account_id, None)
 
 
+def _is_browser_process_alive(user_data_dir: str) -> bool:
+    """检查是否有 chromium 进程正占用该 user_data_dir。
+
+    macOS 上用户关窗口后 page.is_closed()/close 事件长时间不触发,导致 _run_open_browser
+    线程卡在等待循环里。用进程级检查替代线程级检查来判断"浏览器是否真的还在":
+    若进程已退出,即使线程还卡着也允许重开。
+    """
+    import subprocess
+    import sys
+
+    needle = str(Path(user_data_dir).resolve())
+    if sys.platform == "win32":
+        cmd = ["wmic", "process", "where", "name='chrome.exe'", "get", "CommandLine"]
+    else:
+        cmd = ["ps", "-e", "-o", "command="]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return True  # 查询失败时保守认为还活着,避免误杀运行中的浏览器
+    # 只认 Chromium/Chrome 主进程(含 --user-data-dir),不匹配无关进程
+    for line in out.splitlines():
+        if needle in line and "--user-data-dir" in line and "Chrom" in line:
+            return True
+    return False
+
+
 @router.post("/accounts/{account_id}/open-browser")
 def open_browser_account(
     account_id: str,
@@ -217,6 +243,10 @@ def open_browser_account(
 
     与扫码登录共用 _login_in_flight 去重:同一 user_data_dir 不能被两个 chromium
     同时打开(否则后开的崩 + 互相踢登录),故 login 与手动开浏览器互斥。
+
+    macOS 上用户关窗口后 patchright 的 close 事件延迟触发(~60s),线程卡在等待循环
+    里不会立即退出 → 纯 is_alive() 检查会误判"还有窗口打开"。故额外检查 chromium 进程
+    是否真的还在:进程没了就清掉旧的 in-flight 记录,允许立即重开。
     """
     cfg = settings.accounts.get(account_id)
     if cfg is None:
@@ -227,11 +257,16 @@ def open_browser_account(
     with _login_lock:
         existing = _login_in_flight.get(account_id)
         if existing is not None and existing.is_alive():
-            return _redirect(
-                f"账号 {account_id} 已有浏览器窗口打开(扫码或手动),直接用那个窗口;"
-                "想重开先关掉它再点",
-                platform=plat,
-            )
+            # 线程还活着,但可能卡在关窗口后的等待循环里 —— 检查浏览器进程是否真还在
+            if _is_browser_process_alive(str(cfg.user_data_dir)):
+                return _redirect(
+                    f"账号 {account_id} 已有浏览器窗口打开(扫码或手动),直接用那个窗口;"
+                    "想重开先关掉它再点",
+                    platform=plat,
+                )
+            # 浏览器进程已退出但线程还在清理中:清掉旧记录,允许立即重开
+            logger.info(f"[web/open-browser] {account_id} 旧线程仍在但浏览器进程已退出,允许重开")
+            _login_in_flight.pop(account_id, None)
         thread = threading.Thread(
             target=_open_browser_runner,
             args=(account_id, Path(cfg.user_data_dir), account_platform),
@@ -346,27 +381,60 @@ def _run_open_browser(
 ) -> None:
     """开浏览器停在平台主页,不做任何操作,等用户手动关窗口(封顶 _OPEN_BROWSER_MAX_SECONDS)。
 
-    用户关掉窗口 → page.is_closed() 或 wait_for_timeout 抛错 → 退出 with → 清理。
-    封顶到点强制关浏览器释放 profile,避免线程 + profile 锁泄漏。
+    退出信号用事件驱动(page.on("close"))而非轮询 page.is_closed()——后者在 macOS 上
+    用户关窗口后长时间不返回 True,导致 while 循环不退出、线程卡在 _login_in_flight 里,
+    用户紧接着点"打开浏览器"被去重拦截。
+
+    非指纹平台(淘宝/抖音/快手/小红书)用 cookies.json 显式持久化登录态。用户手动关
+    窗口时 context 已死,browser_context 的 finally 里 context.cookies() 会抛"Target
+    closed"导致 cookie 存不上 → 下次发布恢复旧 cookie 跳登录页。故在循环里每 30s
+    在 context 仍活着时主动 flush cookie,关窗口时最近一次已落盘。
     """
+    import threading
+
     from wxsp.browser import browser_context, login_meta_for
+    from wxsp.platform_meta import get_meta
 
     home_url = login_meta_for(platform).get("home_url", "about:blank")
+    cookie_file = user_data_dir / "cookies.json"
+    use_explicit_cookies = not get_meta(platform).needs_fingerprint
     try:
         with browser_context(
-            user_data_dir, headless=False, account_id=account_id, platform=platform
+            user_data_dir,
+            headless=False,
+            account_id=account_id,
+            platform=platform,
+            _skip_cleanup=True,
         ) as page:
             try:
                 page.goto(home_url, wait_until="domcontentloaded")
             except Exception as exc:
                 logger.warning(f"[web/open-browser] {account_id} 打开主页失败: {exc}")
+
+            closed = threading.Event()
+            page.on("close", lambda *_: closed.set())
+
             deadline = time.monotonic() + _OPEN_BROWSER_MAX_SECONDS
+            last_flush = 0.0
             while time.monotonic() < deadline:
-                if page.is_closed():
+                if closed.wait(timeout=5):
                     break
+                # 周期性 flush cookie:context 活着时存,关窗口后 finally 存不上也不怕
+                if use_explicit_cookies and time.monotonic() - last_flush >= 30:
+                    last_flush = time.monotonic()
+                    try:
+                        cookies = page.context.cookies()
+                        with open(cookie_file, "w") as f:
+                            json.dump(cookies, f, ensure_ascii=False)
+                    except Exception:
+                        pass  # context 刚死 / 页面跳转中,下次轮询再试
+            # 退出前最后一次 flush(context 仍活着,确保最新 cookie 落盘)
+            if use_explicit_cookies:
                 try:
-                    page.wait_for_timeout(1000)
+                    cookies = page.context.cookies()
+                    with open(cookie_file, "w") as f:
+                        json.dump(cookies, f, ensure_ascii=False)
                 except Exception:
-                    break  # 窗口被用户关掉 = target 消失
+                    pass
     except Exception as exc:
         logger.exception(f"[web/open-browser] {account_id} 浏览器异常: {exc}")

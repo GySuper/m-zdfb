@@ -72,38 +72,22 @@ def _verify_logged_in(page: Page) -> None:
 def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> None:
     """上传视频并等待处理完成。
 
-    不能只看"等待视频上传"文字是否消失:set_input_files 后该文字尚未渲染时,首轮 count()
-    就为 0 → 立刻误判完成(竞态,大视频尤其会一传就被当成传完)。改两阶段:
-      A. 先确认真的进入"上传中"(等"等待视频上传"出现;或极快直接出"视频封面"算完成);
-      B. 确认过上传中后,再等其消失/封面就绪 → 才算完成,消除首轮竞态。
+    实测 DOM 状态机(2026-07-10):
+      - 上传中:body 含"等待视频上传..."(带省略号);"重新上传"按钮不存在
+      - 成功:"等待视频上传..."消失,"重新上传"按钮出现
+      - 失败:"视频上传失败"出现(此时"重新上传"也可能在,但失败文案优先)
     """
     iframe = _iframe(page)
     iframe.locator(sel.FILE_INPUT).set_input_files(str(file_path))
-    waiting = iframe.locator(f'text="{sel.COVER_WAITING_TEXT}"')
-    ready = iframe.locator(f'text="{sel.COVER_READY_INDICATOR}"')
+    waiting = iframe.locator(f'text="{sel.UPLOAD_WAITING_TEXT}"')
+    failed = iframe.locator(f'text="{sel.UPLOAD_FAILED_TEXT}"')
+    done = iframe.locator(f'text="{sel.COVER_READY_INDICATOR}"')
 
-    # 阶段A:给 UI 渲染时间,确认上传开始(最多 ~20s)
-    started = False
-    appear_deadline = time.time() + 20
-    while time.time() < appear_deadline:
-        if ready.count():
-            logger.info("[taobao] 视频已就绪(封面出现)")
-            return
-        if waiting.count():
-            started = True
-            break
-        time.sleep(0.5)
-
-    if not started:
-        # 没观察到"上传中":可能上传极快或文案变化。尽力而为继续(与原行为兼容,不静默 fail
-        # 也不强等),但已多给 20s 渲染窗口,比原来首轮即返回安全。
-        logger.warning("[taobao] 未观察到'等待视频上传'状态,继续(可能上传极快或文案变化)")
-        return
-
-    # 阶段B:已确认上传中 → 等"上传中"消失或封面就绪 → 完成(此时不再有竞态)
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
-        if ready.count() or not waiting.count():
+        if failed.count():
+            raise UploadFailed("视频上传失败(平台拒绝该文件)")
+        if not waiting.count() and done.count():
             logger.info("[taobao] 视频上传/处理完成")
             return
         time.sleep(3)
@@ -111,9 +95,10 @@ def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> No
 
 
 def _wait_cover_generated(page: Page) -> None:
+    """上传成功后给封面图 10s 渲染时间(best-effort)。"""
     iframe = _iframe(page)
     try:
-        iframe.locator(f'text="{sel.COVER_READY_INDICATOR}"').wait_for(timeout=10_000)
+        iframe.locator(sel.COVER_IMG_PREVIEW).wait_for(timeout=10_000)
     except Exception:
         logger.warning("[taobao] 封面区域未按预期出现，继续")
 

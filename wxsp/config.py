@@ -180,6 +180,25 @@ class AccountConfig(BaseModel):
     video_search_root: Path
     cover_search_root: Path
 
+    @model_validator(mode="after")
+    def _resolve_relative_paths(self) -> AccountConfig:
+        """打包模式下把相对路径转为基于 get_user_data_dir() 的绝对路径。
+
+        旧版 _profile_dir_for 生成 './data/chrome-profiles/<id>' 相对路径写入 YAML。
+        开发模式 cwd=项目根,相对路径 OK;打包模式(尤其 Windows)cwd 可能是
+        Program Files 等只读目录,'./data' 解析过去 → [WinError 5] 拒绝访问。
+        这里在配置加载时兜底:相对路径以 get_user_data_dir() 为基准拼绝对路径。
+        './data/chrome-profiles/<id>' → get_user_data_dir()/chrome-profiles/<id>
+        (去掉相对路径里的 data 前缀,因为 get_user_data_dir() 已含 data)。
+        """
+        if is_packaged() and not self.user_data_dir.is_absolute():
+            # 相对路径形如 ./data/chrome-profiles/<id>,去掉 ./data/ 前缀后拼到 data 根下
+            rel = str(self.user_data_dir)
+            if rel.startswith("./data/") or rel.startswith("data/"):
+                rel = rel.split("data/", 1)[1]
+            self.user_data_dir = get_user_data_dir() / rel
+        return self
+
 
 class SchedulerConfig(BaseModel):
     enabled: bool = True

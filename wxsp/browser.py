@@ -38,6 +38,21 @@ from wxsp.platform_meta import get_meta
 WECHAT_CHANNELS_HOME = "https://channels.weixin.qq.com"
 
 
+# 反自动化注入脚本(对齐 MatrixMedia puppeteerFile.js:440-445 + puppeteer-extra-plugin-stealth 核心)。
+# navigator.webdriver 已由 --disable-blink-features=AutomationControlled 在 Blink 层压成 false(最可靠);
+# 本脚本补两项 patchright CDP 连接仍可能缺失的:window.chrome.runtime + 兜底再覆写一次 webdriver。
+# 通过 CDPSession.send("Page.addScriptToEvaluateOnNewDocument") 注入 —— 这是 puppeteer
+# evaluateOnNewDocument 的底层,在 document 加载【前】生效,且绕过 patchright add_init_script 的
+# ERR_CONNECTION_CLOSED bug(见下方 CDP 分支注释)。
+_STEALTH_INIT_JS = """
+(() => {
+  try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch (_) {}
+  if (!window.chrome) window.chrome = {};
+  if (!window.chrome.runtime) window.chrome.runtime = {};
+})();
+"""
+
+
 def login_meta_for(platform: str) -> dict[str, Any]:
     """平台登录态检测配置,取自 wxsp.platform_meta(单一信息源)。
 
@@ -108,6 +123,10 @@ def _launch_real_chrome(
         "--remote-debugging-port=0",
         "--no-first-run",
         "--no-default-browser-check",
+        # 关键:CDP 连接后 Blink 默认置 navigator.webdriver=true 并暴露 AutomationControlled
+        # 特征,小红书前端检测到直接 401 拒绝登录态。对齐 MatrixMedia(puppeteerFile.js:380)
+        # 无条件加本参数压制 Blink 层自动化标记。所有走 CDP 的平台都受益(只反自动化,无副作用)。
+        "--disable-blink-features=AutomationControlled",
         "--window-position=0,0",
         "--disable-features=AsyncDns,AsyncDnsResolver,DnsOverHttps,SecureDnsForFreshnessCheck",
         "--dns-prefetch-disable",
@@ -355,6 +374,21 @@ def browser_context(
                 )
                 context = browser.contexts[0]
                 page = context.pages[0] if context.pages else context.new_page()
+
+                # 反自动化注入(对齐 MatrixMedia puppeteerFile.js:391-396)。
+                # 实测 Page.addScriptToEvaluateOnNewDocument(CDP session)在 connect_over_cdp
+                # 场景对真实 Chrome 不生效(脚本从未执行,chrome.runtime 仍 undefined)。
+                # 改用 framenavigated 事件注入 —— 与 xiaohongshu.py _FORCE_OPEN_SHADOW_JS 同款,
+                # 项目内已验证可行。navigator.webdriver 已由 --disable-blink-features 在 Blink
+                # 层压成 false(最可靠),本脚本补 window.chrome.runtime。
+                def _inject_stealth(frame: Any) -> None:
+                    try:
+                        frame.evaluate(_STEALTH_INIT_JS)
+                    except Exception:
+                        pass
+
+                page.on("framenavigated", _inject_stealth)
+                logger.info(f"[browser] {platform} stealth 注入已注册(framenavigated)")
                 if _cookie_file.exists():
                     try:
                         with open(_cookie_file) as f:

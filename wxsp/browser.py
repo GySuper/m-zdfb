@@ -393,6 +393,17 @@ def browser_context(
 
                 page.on("framenavigated", _inject_stealth)
                 logger.info(f"[browser] {platform} stealth 注入已注册(framenavigated)")
+
+                # 指纹自洽(对齐 UM7lab antidetect.go):用 CDP Emulation 原生命令统一时区/语言,
+                # 确保和中国大陆 IP 一致。这些是 CDP 协议级设置(非 JS 注入),无接缝可查。
+                # 解决"macOS UA + UTC 时区 + 英文 language + 中国大陆 IP"这类矛盾组合被风控识别。
+                try:
+                    cdp_fp = context.new_cdp_session(page)
+                    cdp_fp.send("Emulation.setTimezoneOverride", {"timezoneId": "Asia/Shanghai"})
+                    cdp_fp.send("Emulation.setLocaleOverride", {"locale": "zh-CN"})
+                    logger.info(f"[browser] {platform} 指纹自洽已设置(Asia/Shanghai, zh-CN)")
+                except Exception as exc:
+                    logger.warning(f"[browser] {platform} 指纹自洽设置失败: {exc}")
                 if _cookie_file.exists():
                     try:
                         with open(_cookie_file) as f:

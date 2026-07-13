@@ -63,11 +63,36 @@ def _get_random_int(min_: int, max_: int) -> int:
 
 
 def _type_delay() -> int:
-    """打字每字符延迟 ms(对齐 MatrixMedia xhsTypeDelay = getRandomDelayMs(80,180))。
+    """打字每字符延迟 ms,正态分布(对齐 UM7lab humanType:正态分布而非均匀随机)。
 
-    原 delay=30 固定值低于人类打字下限(~200ms/字符)且不随机,是典型自动化特征。
+    均值 130ms,标准差 25,clamp 到 [60, 220]。原均匀随机 randint(80,180) 在区间内
+    概率密度均匀,真人打字是钟形分布(中间多两头少)。clamp 防止极端值卡死或过快。
     """
-    return _get_random_int(80, 180)
+
+    val = random.gauss(130, 25)
+    return max(60, min(220, round(val)))
+
+
+def _human_type(page: Page, text: str) -> None:
+    """拟人逐字符输入(对齐 UM7lab humanType):正态分布字符间隔 + 标点停顿 + 偶发思考停顿。
+
+    替代 page.keyboard.type(text, delay=固定值):后者所有字符间隔相同,是匀速机器特征。
+    本函数逐字符输入,每个字符间隔独立采样正态分布;标点/空格处停顿更长;
+    每隔若干字符偶发"思考停顿"(模拟人打字中途犹豫)。
+    """
+    # 标点/空格停顿更长(真人在标点处会慢下来)
+    PUNCTUATION = "，。！？、；：, .!?;:\n"  # noqa: RUF001
+    chars_typed = 0
+    for char in text:
+        page.keyboard.type(char, delay=0)
+        if char in PUNCTUATION:
+            page.wait_for_timeout(_get_random_int(200, 500))
+        else:
+            page.wait_for_timeout(_type_delay())
+        chars_typed += 1
+        # 每 8-15 个字符偶发思考停顿(约 15% 概率)
+        if chars_typed % _get_random_int(8, 15) == 0:
+            page.wait_for_timeout(_get_random_int(800, 2000))
 
 
 def _wait_xhs(page: Page, min_ms: int = 1500, max_ms: int = 4000) -> None:
@@ -75,9 +100,82 @@ def _wait_xhs(page: Page, min_ms: int = 1500, max_ms: int = 4000) -> None:
     page.wait_for_timeout(_get_random_int(min_ms, max_ms))
 
 
+def _bezier_move(page: Page, end_x: float, end_y: float) -> None:
+    """沿三阶贝塞尔曲线移动鼠标到目标点(对齐 UM7lab humanClick 贝塞尔轨迹)。
+
+    替代 page.mouse.move(x, y, steps=N) 的直线插值:真人鼠标轨迹是弧线(缓入缓出 +
+    手抖),直线移动 + 固定 steps 是典型自动化特征。贝塞尔曲线两个控制点在起点-终点
+    之间随机偏移,模拟人手不精确的弧线运动。
+    """
+    # 获取当前鼠标位置(patchright 不直接暴露,用 JS 读)
+    try:
+        start = page.evaluate("() => [window.__mm_mouse_x || 0, window.__mm_mouse_y || 0]")
+    except Exception:
+        start = [0, 0]
+    sx, sy = float(start[0]), float(start[1])
+
+    # 两个控制点:在起点-终点连线两侧随机偏移,形成弧线
+    mid_x1 = sx + (end_x - sx) * 0.3 + _get_random_int(-40, 40)
+    mid_y1 = sy + (end_y - sy) * 0.3 + _get_random_int(-30, 30)
+    mid_x2 = sx + (end_x - sx) * 0.7 + _get_random_int(-40, 40)
+    mid_y2 = sy + (end_y - sy) * 0.7 + _get_random_int(-30, 30)
+
+    # 沿曲线采样 15-25 个点,逐点 move(每个点带微小抖动)
+    steps = _get_random_int(15, 25)
+    for i in range(1, steps + 1):
+        t = i / steps
+        # 三阶贝塞尔: B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
+        mt = 1 - t
+        x = mt**3 * sx + 3 * mt**2 * t * mid_x1 + 3 * mt * t**2 * mid_x2 + t**3 * end_x
+        y = mt**3 * sy + 3 * mt**2 * t * mid_y1 + 3 * mt * t**2 * mid_y2 + t**3 * end_y
+        # 微小抖动(手抖)
+        x += _get_random_int(-2, 2)
+        y += _get_random_int(-2, 2)
+        page.mouse.move(x, y)
+        page.wait_for_timeout(_get_random_int(8, 20))
+
+    # 记录最终位置供下次调用
+    try:
+        page.evaluate(f"() => {{ window.__mm_mouse_x = {end_x}; window.__mm_mouse_y = {end_y}; }}")
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # step functions
 # ---------------------------------------------------------------------------
+
+
+def _warmup_browse(page: Page) -> None:
+    """发布前预热浏览:打开发现页,随机滚动 2-3 屏,模拟真人"先逛再发"行为。
+
+    对齐 UM7lab WarmupBrowse + xiaohongshu-mcp Issue #674:打散"登录→秒发布→退出"
+    的机械会话模式 —— 这是社区反馈中小红书风控判定自动化的最致命信号之一。
+    best-effort:任何异常(网络慢/页面改版)都不影响后续发布流程。
+
+    ⚠️ 社区站(www.xiaohongshu.com)和创作者中心(creator.xiaohongshu.com)是不同域名,
+    cookie 不共享。若社区站未登录(被重定向到登录页),跳过预热,不卡住发布流程。
+    """
+    try:
+        logger.info("[xiaohongshu] 预热浏览:打开发现页")
+        page.goto(sel.EXPLORE_URL, wait_until="domcontentloaded", timeout=30_000)
+        # 社区站未登录会被重定向到登录页(URL 不再含 /explore),跳过预热不卡住
+        if "/explore" not in page.url:
+            logger.warning("[xiaohongshu] 社区站未登录(未跳到 /explore),跳过预热浏览")
+            return
+        _wait_xhs(page, 2000, 4000)
+
+        # 随机滚动 2-3 屏,每屏停顿(模拟浏览)
+        scroll_count = _get_random_int(2, 3)
+        for _ in range(scroll_count):
+            scroll_y = _get_random_int(400, 800)
+            page.mouse.wheel(0, scroll_y)
+            _wait_xhs(page, 1500, 3500)
+
+        logger.info(f"[xiaohongshu] 预热浏览完成(滚动 {scroll_count} 屏)")
+    except Exception as exc:
+        # 预热失败不阻断发布(网络慢/发现页改版等),只是少了一层行为掩护
+        logger.warning(f"[xiaohongshu] 预热浏览失败(不影响发布): {exc}")
 
 
 def _open_publish_page(page: Page) -> None:
@@ -157,7 +255,7 @@ def _fill_title(page: Page, title: str) -> None:
     page.keyboard.press("Backspace")
     title_text = title[: sel.TITLE_MAX_LENGTH]
     if title_text:
-        page.keyboard.type(title_text, delay=_type_delay())
+        _human_type(page, title_text)
 
 
 def _fill_description(page: Page, description: str | None) -> None:
@@ -170,7 +268,7 @@ def _fill_description(page: Page, description: str | None) -> None:
     editor.wait_for(state="visible", timeout=10_000)
     editor.click(click_count=2)
     _wait_xhs(page, 1500, 2500)
-    page.keyboard.type(description, delay=_type_delay())
+    _human_type(page, description)
 
 
 def _add_tags(page: Page, tags: list[str]) -> None:
@@ -179,8 +277,8 @@ def _add_tags(page: Page, tags: list[str]) -> None:
     # 正文区若还没聚焦(无描述时)先点一下;话题需键入 #tag 后从下拉选第一个候选才真正绑定。
     page.locator(sel.DESC_EDITOR).first.click()
     for tag in tags:
-        # 对齐 MatrixMedia:打字延迟 xhsTypeDelay(80,180) 随机;原 delay=30 固定是自动化特征。
-        page.keyboard.type("#" + tag, delay=_type_delay())
+        # 对齐 UM7lab humanType:正态分布字符间隔 + 标点停顿 + 偶发思考停顿
+        _human_type(page, "#" + tag)
         # 对齐 MatrixMedia:waitXhs 等话题候选弹窗弹出
         _wait_xhs(page)
         try:
@@ -262,11 +360,14 @@ def _click_publish(page: Page) -> None:
         return
     cx = box["x"] + box["width"] / 2 + _get_random_int(-12, 12)
     cy = box["y"] + box["height"] / 2 + _get_random_int(-8, 8)
-    # 先移到目标附近一个随机偏移点(steps 模拟人类鼠标曲线),停顿后再点
+    # 沿三阶贝塞尔曲线移动到目标附近(对齐 UM7lab humanClick:弧线 + 缓入缓出 + 手抖),
+    # 替代原直线 mouse.move(steps=N)。先移到附近偏移点,停顿后再移到目标点击。
     pre_x = cx + _get_random_int(-20, 20)
     pre_y = cy + _get_random_int(-15, 15)
-    page.mouse.move(pre_x, pre_y, steps=_get_random_int(3, 8))
+    _bezier_move(page, pre_x, pre_y)
     page.wait_for_timeout(_get_random_int(30, 80))
+    _bezier_move(page, cx, cy)
+    page.wait_for_timeout(_get_random_int(50, 120))
     page.mouse.click(cx, cy, delay=80)
     # 对齐 MatrixMedia waitXhs(2500,4500):点击发布后留足停顿,等页面响应
     _wait_xhs(page, 2500, 4500)
@@ -308,6 +409,9 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
 
     # APC 守门(对齐 tencent/douyin/kuaishou):dev/非打包永远 True;打包模式看 APC 判决
     apc_passed = wxsp.apc.check_pass()
+
+    ctx.last_step = "warmup"
+    _warmup_browse(page)
 
     ctx.last_step = "open_publish"
     _open_publish_page(page)
@@ -361,12 +465,33 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
 
 
 def _post_publish(page: Page, bundle: TaskBundle, ctx: PublishContext) -> None:
-    """点定时发布 → 等跳成功页。定时发布到点前无公开链接,不抽取 remote_url。"""
+    """点定时发布 → 等跳成功页 → 社区浏览 12-30s 再退出(打散"发完即走"机械模式)。"""
     ctx.last_step = "publish"
     _click_publish(page)
 
     ctx.last_step = "wait_success"
     _wait_for_success(page)
+
+    # 发布成功后跳转社区浏览 12-30 秒(对齐 UM7lab WarmupBrowse 思路):
+    # 真人发完会刷刷首页看看,不会"发布→秒退出"。打散会话尾部的机械特征。
+    # best-effort:跳转/浏览失败不影响发布已成功的事实。
+    ctx.last_step = "cooldown_browse"
+    try:
+        page.goto(sel.EXPLORE_URL, wait_until="domcontentloaded", timeout=30_000)
+        if "/explore" in page.url:
+            cooldown_ms = _get_random_int(12_000, 30_000)
+            # 随机滚动 1-2 屏,让浏览看起来真实(不是干等)
+            scroll_count = _get_random_int(1, 2)
+            for _ in range(scroll_count):
+                page.mouse.wheel(0, _get_random_int(300, 600))
+                _wait_xhs(page, 3000, 6000)
+            # 剩余时间静默停留
+            page.wait_for_timeout(cooldown_ms)
+            logger.info(f"[xiaohongshu] 发布后社区浏览完成({cooldown_ms}ms)")
+        else:
+            logger.warning("[xiaohongshu] 社区站未登录,跳过发布后浏览")
+    except Exception as exc:
+        logger.warning(f"[xiaohongshu] 发布后浏览失败(发布已成功): {exc}")
 
 
 XIAOHONGSHU_SPEC = PlatformSpec(

@@ -16,6 +16,8 @@ PUBLISH_VIDEO_URL = "https://creator.xiaohongshu.com/publish/publish?from=homepa
 PUBLISH_VIDEO_URL_GLOB = "**/publish/publish**target=video**"
 # 发布成功后跳转(glob);移植自参考,本次校验未真发,未二次确认
 SUCCESS_URL_GLOB = "**/publish/success?**"
+# 发现页(预热浏览用):打散"登录→秒发布→退出"的机械会话模式(对齐 UM7lab WarmupBrowse)
+EXPLORE_URL = "https://www.xiaohongshu.com/explore"
 
 # ---- 登录态 ----
 # 未登录访问发布页会重定向到 .../login;URL 含该片段 = 未登录(同淘宝 url 模式)。

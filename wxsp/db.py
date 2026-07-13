@@ -42,6 +42,7 @@ def init_db(engine: Engine) -> None:
     """幂等地建表 + 老库补列。SQLModel.metadata.create_all 重复调用安全。"""
     SQLModel.metadata.create_all(engine)
     _migrate_add_platform_column(engine)
+    _migrate_add_community_columns(engine)
 
 
 def _migrate_add_platform_column(engine: Engine) -> None:
@@ -69,6 +70,26 @@ def _migrate_add_platform_column(engine: Engine) -> None:
                 )
             )
             logger.info(f"[db] 老库迁移:{table} 补 platform 列(老行回填 tencent_channel)")
+
+
+def _migrate_add_community_columns(engine: Engine) -> None:
+    """老库升级补列:小红书社区站登录态字段。模式同 _migrate_add_platform_column。"""
+    inspector = inspect(engine)
+    if "account" not in set(inspector.get_table_names()):
+        return
+    cols = {c["name"] for c in inspector.get_columns("account")}
+    with engine.begin() as conn:
+        if "community_status" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE account ADD COLUMN community_status VARCHAR "
+                    "NOT NULL DEFAULT 'unknown'"
+                )
+            )
+            logger.info("[db] 老库迁移:account 补 community_status 列")
+        if "community_last_active_at" not in cols:
+            conn.execute(text("ALTER TABLE account ADD COLUMN community_last_active_at DATETIME"))
+            logger.info("[db] 老库迁移:account 补 community_last_active_at 列")
 
 
 @contextmanager

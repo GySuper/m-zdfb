@@ -53,19 +53,29 @@
 
             <div class="row-status">
               {% if r.cookie_status == "ok" %}
-                <span class="badge ok">✓ 登录正常</span>
+                <span class="badge ok">✓ 创作者登录正常</span>
                 {% if r.cookie_last_active_at %}
                   <span class="text-xs text-mute">最后活跃 {{ r.cookie_last_active_at.strftime("%Y-%m-%d %H:%M") }}</span>
                 {% endif %}
               {% elif r.cookie_status == "warn" %}
-                <span class="badge warn">⚠ Cookie 即将过期</span>
+                <span class="badge warn">⚠ 创作者 Cookie 即将过期</span>
                 <span class="text-xs text-mute">建议尽快扫码续期</span>
               {% elif r.cookie_status == "expired" %}
-                <span class="badge error">✕ 登录已过期</span>
+                <span class="badge error">✕ 创作者登录已过期</span>
                 <span class="text-xs text-mute">需要重新扫码</span>
               {% else %}
-                <span class="badge mute">未登录</span>
+                <span class="badge mute">创作者未登录</span>
                 <span class="text-xs text-mute">首次使用,请先扫码登录</span>
+              {% endif %}
+              {% if r.platform == "xiaohongshu" %}
+                <br>
+                {% if r.community_status == "ok" %}
+                  <span class="badge ok">✓ 社区登录正常</span>
+                {% elif r.community_status == "expired" %}
+                  <span class="badge error">✕ 社区登录已过期</span>
+                {% else %}
+                  <span class="badge mute">社区未登录</span>
+                {% endif %}
               {% endif %}
             </div>
 
@@ -83,6 +93,13 @@
                   {% if cookie_expired or r.cookie_status == "unknown" %}扫码登录{% else %}扫码续期{% endif %}
                 </button>
               </form>
+              {% if r.platform == "xiaohongshu" %}
+              <form method="post" action="/accounts/{{ r.id }}/community-login?platform={{ request.state.current_platform }}" style="margin:0;">
+                <button type="submit" class="{% if r.community_status != 'ok' %}primary{% endif %}">
+                  {% if r.community_status == "ok" %}社区续期{% else %}社区登录{% endif %}
+                </button>
+              </form>
+              {% endif %}
               {% if r.paused_until %}
                 <form method="post" action="/accounts/{{ r.id }}/resume?platform={{ request.state.current_platform }}" style="margin:0;">
                   <button type="submit">恢复</button>

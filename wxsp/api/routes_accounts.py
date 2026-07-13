@@ -89,6 +89,8 @@ def accounts_page(
                 "is_active": a.is_active if a else False,
                 "cookie_status": a.cookie_status if a else "unknown",
                 "cookie_last_active_at": a.cookie_last_active_at if a else None,
+                "community_status": a.community_status if a else "unknown",
+                "community_last_active_at": a.community_last_active_at if a else None,
                 "paused_until": a.paused_until if a else None,
                 "in_db": a is not None,
             }
@@ -279,6 +281,136 @@ def open_browser_account(
         f"已打开 {account_id} 的浏览器,请在窗口里手动操作;操作完直接关掉窗口即可",
         platform=plat,
     )
+
+
+@router.post("/accounts/{account_id}/community-login")
+def community_login_account(
+    account_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """小红书社区站(www.xiaohongshu.com)登录:打开浏览器到发现页,等用户手动登录。
+
+    社区站和创作者中心(creator.xiaohongshu.com)不同域名,cookie 不共享。预热浏览 /
+    发布后浏览需要社区站登录态。与扫码登录共用 _login_in_flight 去重(同一 user_data_dir)。
+    """
+    cfg = settings.accounts.get(account_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"账号 {account_id} 未配置")
+    plat = getattr(request.state, "current_platform", "") or ""
+    with _login_lock:
+        existing = _login_in_flight.get(account_id)
+        if existing is not None and existing.is_alive():
+            if _is_browser_process_alive(str(cfg.user_data_dir)):
+                return _redirect(
+                    f"账号 {account_id} 已有浏览器窗口打开,直接用那个窗口登录社区;"
+                    "想重开先关掉它再点",
+                    platform=plat,
+                )
+            _login_in_flight.pop(account_id, None)
+        thread = threading.Thread(
+            target=_community_login_runner,
+            args=(account_id, Path(cfg.user_data_dir)),
+            daemon=True,
+            name=f"web-community-login-{account_id}",
+        )
+        _login_in_flight[account_id] = thread
+        thread.start()
+    return _redirect(
+        f"已打开浏览器,请在窗口中登录小红书社区站 {account_id}(完成后状态自动刷新)",
+        platform=plat,
+    )
+
+
+def _community_login_runner(account_id: str, user_data_dir: Path) -> None:
+    """_run_community_login 的薄包装:无论成功失败,finally 里清掉 _login_in_flight。
+
+    对齐 _open_browser_runner 结构:pop 放 finally,确保关窗口/异常都能重开。
+    """
+    try:
+        _run_community_login(account_id, user_data_dir)
+    finally:
+        with _login_lock:
+            _login_in_flight.pop(account_id, None)
+
+
+def _run_community_login(account_id: str, user_data_dir: Path) -> None:
+    """开浏览器到 www.xiaohongshu.com/explore,等用户手动登录,关窗口后写 DB。
+
+    结构对齐 _run_open_browser:_skip_cleanup=True 让 browser_context 跳过 finally 的
+    cleanup(goto about:blank + browser.close + terminate),避免关窗口后 Chrome 进程
+    残留导致 _is_browser_process_alive 误判。pop 由 _community_login_runner 的 finally 负责。
+
+    检测逻辑:轮询 page.url 含 /explore = 已登录(未登录会被重定向到登录页)。
+    """
+    import threading as _th
+    from datetime import datetime as _dt
+
+    from wxsp.browser import browser_context
+    from wxsp.db import get_engine, session_scope
+    from wxsp.models import COOKIE_STATUS_EXPIRED, COOKIE_STATUS_OK, Account
+    from wxsp.platforms import xiaohongshu_selectors as sel
+
+    cookie_file = user_data_dir / "cookies.json"
+    is_logged_in = False
+    try:
+        with browser_context(
+            user_data_dir,
+            headless=False,
+            account_id=account_id,
+            platform="xiaohongshu",
+            _skip_cleanup=True,
+        ) as page:
+            try:
+                page.goto(sel.EXPLORE_URL, wait_until="domcontentloaded", timeout=30_000)
+            except Exception as exc:
+                logger.warning(f"[web/community-login] {account_id} 打开发现页失败: {exc}")
+
+            closed = _th.Event()
+            page.on("close", lambda *_: closed.set())
+
+            deadline = time.monotonic() + 300  # 5 分钟
+            last_flush = 0.0
+            while time.monotonic() < deadline:
+                if closed.wait(timeout=5):
+                    break
+                # 检测社区站登录态:URL 含 /explore = 已登录(未登录被重定向走)
+                try:
+                    if "/explore" in page.url:
+                        is_logged_in = True
+                except Exception:
+                    pass
+                # 周期性 flush cookie(同 _run_open_browser)
+                if time.monotonic() - last_flush >= 30:
+                    last_flush = time.monotonic()
+                    try:
+                        cookies = page.context.cookies()
+                        with open(cookie_file, "w") as f:
+                            json.dump(cookies, f, ensure_ascii=False)
+                    except Exception:
+                        pass
+            # 退出前最后一次 flush(context 仍活着,确保最新 cookie 落盘)
+            try:
+                cookies = page.context.cookies()
+                with open(cookie_file, "w") as f:
+                    json.dump(cookies, f, ensure_ascii=False)
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.exception(f"[web/community-login] {account_id} 浏览器异常: {exc}")
+        return
+
+    # browser_context 已退出(_skip_cleanup=True 不 terminate Chrome,进程由 patchright 自行回收)
+    # DB 写入登录态
+    engine = get_engine()
+    with session_scope(engine) as s:
+        acc = s.get(Account, account_id)
+        if acc is not None:
+            acc.community_status = COOKIE_STATUS_OK if is_logged_in else COOKIE_STATUS_EXPIRED
+            if is_logged_in:
+                acc.community_last_active_at = _dt.now()
+            s.add(acc)
+            logger.info(f"[web/community-login] {account_id} 社区登录态={acc.community_status}")
 
 
 def _open_browser_runner(

@@ -48,6 +48,10 @@ class Account(SQLModel, table=True):
     cookie_status: str = "unknown"
     cookie_last_checked_at: datetime | None = None
     cookie_last_active_at: datetime | None = None
+    # 社区站(www.xiaohongshu.com)登录态,与创作者中心(creator.xiaohongshu.com)不同域名不共享。
+    # 仅小红书平台使用;复用 COOKIE_STATUS_* 常量(ok/warn/expired/unknown)。
+    community_status: str = "unknown"
+    community_last_active_at: datetime | None = None
 
 
 class Video(SQLModel, table=True):

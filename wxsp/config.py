@@ -165,6 +165,29 @@ class AppConfig(BaseModel):
     logs_dir: Path
     timezone: str
 
+    @model_validator(mode="after")
+    def _resolve_relative_paths(self) -> AppConfig:
+        """打包模式下把相对路径转为基于 get_user_data_dir() 的绝对路径。
+
+        同 AccountConfig._resolve_relative_paths:旧 YAML 里 './data' / './logs' 相对路径
+        在打包模式(尤其 Windows Program Files)下解析到只读目录 → [WinError 5] 拒绝访问。
+        """
+        if is_packaged():
+            for attr in ("data_dir", "logs_dir"):
+                val = getattr(self, attr)
+                if not val.is_absolute():
+                    rel = str(val).lstrip("./")
+                    # './data' → data 根目录本身; './data/tmp' → data 根下 tmp
+                    if rel in ("data", "logs"):
+                        setattr(self, attr, get_user_data_dir())
+                    elif rel.startswith("data/"):
+                        setattr(self, attr, get_user_data_dir() / rel[5:])
+                    elif rel.startswith("logs/"):
+                        setattr(self, attr, get_user_data_dir() / rel[5:])
+                    else:
+                        setattr(self, attr, get_user_data_dir() / rel)
+        return self
+
 
 class PathsConfig(BaseModel):
     nas_root: Path

@@ -109,16 +109,15 @@ def _fill_title(page: Page, title: str) -> None:
     inp.fill(title[: sel.TITLE_MAX_LENGTH])
 
 
-def _fill_description(page: Page, description: str | None, fallback_title: str) -> None:
-    text = description or fallback_title
-    if not text:
+def _fill_description(page: Page, description: str | None) -> None:
+    if not description:
         return
     # 发布页是全新作品,简介编辑器初始为空,无需 select-all 清空(且 Ctrl+A 在 macOS
     # 不是全选)。click 聚焦后键盘输入,光标留在末尾,供随后的 _add_tags 追加话题标签。
     editor = page.locator(sel.DESC_EDITOR).first
     editor.wait_for(state="visible", timeout=10_000)
     editor.click()
-    page.keyboard.type(text)
+    page.keyboard.type(description)
 
 
 def _add_tags(page: Page, tags: list[str]) -> None:
@@ -269,7 +268,7 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
     random_pause(step_pause)
 
     ctx.last_step = "desc"
-    _fill_description(page, description=bundle.description, fallback_title=bundle.title)
+    _fill_description(page, description=bundle.description)
     random_pause(step_pause)
 
     ctx.last_step = "tags"

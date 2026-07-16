@@ -223,17 +223,24 @@ def validate(
 
 
 def _is_incomplete(fields: dict[str, Any], fm: Any, *, has_title: bool = True) -> bool:
-    """业务尚未填完的判定:4 个核心字段任一缺 → True。
+    """业务尚未填完的判定:核心字段任一缺 → True。
 
     判空规则:
-      - 标题 / 视频文件:_get_str 返回 None(空字符串、rich-text 空数组都算空)
+      - 有标题平台(抖音等):标题和描述**都为空**才算 incomplete(有一个即可)
+      - 无标题平台(快手):只看描述
+      - 视频文件:_get_str 返回 None(空字符串、rich-text 空数组都算空)
       - 执行日期 / 定时发布时间:原始值是 None(飞书日期字段空 → key 缺失或 None)
-
-    无标题平台(快手):页面无标题框,主文案是「描述」,故核心字段把「标题」换成「描述」。
     """
-    core_text_field = fm.title if has_title else fm.description
-    if _get_str(fields.get(core_text_field)) is None:
-        return True
+    if has_title:
+        # 标题和描述都空才算没填完(有一个不为空即可通过)
+        title_empty = _get_str(fields.get(fm.title)) is None
+        desc_empty = _get_str(fields.get(fm.description)) is None
+        if title_empty and desc_empty:
+            return True
+    else:
+        # 无标题平台(快手):页面无标题框,主文案是「描述」
+        if _get_str(fields.get(fm.description)) is None:
+            return True
     if _get_str(fields.get(fm.video_file)) is None:
         return True
     if fields.get(fm.execute_date) is None:

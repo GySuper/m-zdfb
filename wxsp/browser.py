@@ -124,18 +124,27 @@ def _launch_real_chrome(
         "--no-first-run",
         "--no-default-browser-check",
         # pyautogui 物理输入要求窗口在前台+最大化:屏幕坐标操作,窗口被遮挡会点飞。
+        # --start-maximized 在 Windows 上不可靠,额外加 --window-size 强制设窗口大小。
         "--start-maximized",
+        "--window-position=0,0",
         # 去掉"Chrome 正受到自动测试软件的控制"横幅(CDP 连接后默认显示,小红书可检测)。
-        # 对齐 MatrixMedia ignoreDefaultArgs: ['--enable-automation'] + 抑制 infobars。
         "--disable-infobars",
         # 关键:CDP 连接后 Blink 默认置 navigator.webdriver=true 并暴露 AutomationControlled
         # 特征,小红书前端检测到直接 401 拒绝登录态。
         "--disable-blink-features=AutomationControlled",
-        "--window-position=0,0",
         # --disable-features 只认最后一个,所有要禁用的 feature 合并到一行
         "--disable-features=AutomationControlled,Translate,AsyncDns,AsyncDnsResolver,DnsOverHttps,SecureDnsForFreshnessCheck",
         "--dns-prefetch-disable",
     ]
+    # 非打包/headed 模式下用屏幕尺寸设窗口大小(--start-maximized 的可靠替代)
+    if not headless:
+        try:
+            import pyautogui
+
+            screen_w, screen_h = pyautogui.size()
+            argv.append(f"--window-size={screen_w},{screen_h - 40}")
+        except Exception:
+            pass  # pyautogui 不可用时退回 --start-maximized
     if headless:
         argv.append("--headless=new")
     # stderr=PIPE 读 DevTools 端口;stdout 不关心。text 模式方便解析。

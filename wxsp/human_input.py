@@ -292,31 +292,17 @@ def bring_browser_to_front(page: Page) -> None:
         except Exception:
             pass  # best-effort
     else:
-        # Windows:先用 PowerShell 激活 Chrome 窗口到最前,再 Win+Up 最大化
-        import subprocess
-
+        # Windows:用 ctypes 直接调 user32 SetForegroundWindow(比 PowerShell 可靠,
+        # 绕过焦点窃取限制需要 AllowSetForegroundWindow,这里用 Alt+Tab 模拟切换)。
+        # 最可靠:用 pyautogui 点击屏幕左上角(Chrome --window-position=0,0 启动位置),
+        # 物理点击 Chrome 窗口标题栏区域激活它,再 Win+Up 最大化。
         try:
-            # 激活 Chrome:找 chrome.exe 主窗口并置顶
-            subprocess.run(
-                [
-                    "powershell",
-                    "-Command",
-                    # 找 Chrome 进程的主窗口句柄,用 SetForegroundWindow 激活
-                    "Add-Type @"
-                    "using System; using System.Runtime.InteropServices;"
-                    'public class Win { [DllImport("user32.dll")]'
-                    " public static extern bool SetForegroundWindow(IntPtr hWnd); }"
-                    @ "; $p = Get-Process chrome -ErrorAction SilentlyContinue"
-                    " | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1;"
-                    " if ($p) { [Win]::SetForegroundWindow($p.MainWindowHandle) }",
-                ],
-                check=False,
-                timeout=5,
-                capture_output=True,
-            )
-            time.sleep(0.5)
+            # 点击 Chrome 窗口标题栏(0,0 附近)激活窗口
+            pyautogui.click(50, 10, _pause=False)
+            time.sleep(0.3)
             # Win+Up 最大化当前焦点窗口(此时已是 Chrome)
             pyautogui.hotkey("win", "up", _pause=False)
+            time.sleep(0.3)
         except Exception:
             pass
     logger.info("[human_input] 浏览器窗口已激活+最大化")

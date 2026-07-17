@@ -21,7 +21,7 @@ dependencies = [
     "platformdirs>=4.0.0",
     "apc-sdk-python",
     "pyautogui>=0.9.54",
-    "pywin32>=306; sys_platform == 'win32'",
+    "pywin32>=306; sys_platform == 'win32'",  # win32gui/win32process/win32con:Windows 窗口激活
 ]
 
 [project.optional-dependencies]

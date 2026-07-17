@@ -292,35 +292,52 @@ def bring_browser_to_front(page: Page) -> None:
         except Exception:
             pass  # best-effort
     else:
-        # Windows:用 pygetwindow minimize→maximize 技巧 + win32gui SetForegroundWindow。
-        # 单独 SetForegroundWindow 受焦点窃取限制不可靠,minimize→maximize 强制 OS 允许切换。
-        # 参考:github.com/asweigart/PyGetWindow/issues/16 官方推荐的 workaround。
+        # Windows:用 AttachThreadInput + ShowWindow + SetForegroundWindow 组合。
+        # 这是绕过 Windows 焦点窃取限制最可靠的方法(StackOverflow 高票方案):
+        # 把当前前台窗口的线程和 Chrome 窗口的线程的输入队列 Attach 起来,
+        # 让 Windows 认为本进程有权限设前台窗口。
         try:
-            import pygetwindow as gw
+            import ctypes
+            import win32con
+            import win32gui
+            import win32process
 
-            # 找 Chrome 窗口(标题含 Chrome)
-            chrome_windows = [w for w in gw.getAllWindows() if "chrome" in w.title.lower()]
-            if chrome_windows:
-                win = chrome_windows[0]
-                # minimize→maximize 技巧:强制 OS 允许焦点切换
-                try:
-                    win.minimize()
-                    time.sleep(0.2)
-                    win.maximize()
-                    time.sleep(0.2)
-                except Exception:
-                    pass
-                # 再用 win32gui SetForegroundWindow 兜底
-                try:
-                    import win32gui
+            # 枚举所有顶层窗口,找 Chrome 的窗口句柄
+            chrome_hwnd = None
 
-                    win32gui.SetForegroundWindow(win._hWnd)
-                except Exception:
-                    pass
-            time.sleep(0.3)
-        except ImportError:
-            # pygetwindow 只在 Windows 上有(win32gui 也是),非 Windows 走不到这个分支
-            pass
-        except Exception:
-            pass
+            def _enum_handler(hwnd: int, _: Any) -> bool:
+                nonlocal chrome_hwnd
+                if win32gui.IsWindowVisible(hwnd):
+                    title = win32gui.GetWindowText(hwnd)
+                    if "chrome" in title.lower() and title.strip():
+                        chrome_hwnd = hwnd
+                        return False  # 找到了,停止枚举
+                return True
+
+            win32gui.EnumWindows(_enum_handler, None)
+
+            if chrome_hwnd:
+                # 如果窗口最小化了,先恢复
+                if win32gui.IsIconic(chrome_hwnd):
+                    win32gui.ShowWindow(chrome_hwnd, win32con.SW_RESTORE)
+                # 最大化
+                win32gui.ShowWindow(chrome_hwnd, win32con.SW_MAXIMIZE)
+
+                # AttachThreadInput 绕过焦点窃取限制
+                foreground_hwnd = win32gui.GetForegroundWindow()
+                foreground_tid = win32process.GetWindowThreadProcessId(foreground_hwnd)[0]
+                target_tid = win32process.GetWindowThreadProcessId(chrome_hwnd)[0]
+
+                if foreground_tid != target_tid:
+                    win32process.AttachThreadInput(target_tid, foreground_tid, True)
+                    try:
+                        win32gui.SetForegroundWindow(chrome_hwnd)
+                    finally:
+                        win32process.AttachThreadInput(target_tid, foreground_tid, False)
+                else:
+                    win32gui.SetForegroundWindow(chrome_hwnd)
+
+            time.sleep(0.5)
+        except Exception as exc:
+            logger.warning(f"[human_input] Windows 窗口激活失败: {exc}")
     logger.info("[human_input] 浏览器窗口已激活+最大化")

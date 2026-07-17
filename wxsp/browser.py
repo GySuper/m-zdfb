@@ -148,7 +148,19 @@ def _launch_real_chrome(
     if headless:
         argv.append("--headless=new")
     # stderr=PIPE 读 DevTools 端口;stdout 不关心。text 模式方便解析。
-    proc = subprocess.Popen(argv, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
+    # Windows:用 STARTUPINFO 设 wShowWindow=SW_SHOWNORMAL 让 Chrome 以正常窗口启动
+    # (默认子进程可能以后台方式启动,导致 Chrome 不在前台)。
+    popen_kwargs: dict[str, Any] = {
+        "stderr": subprocess.PIPE,
+        "stdout": subprocess.DEVNULL,
+        "text": True,
+    }
+    if sys.platform == "win32":
+        si = subprocess.STARTUPINFO()  # type: ignore[attr-defined]
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
+        si.wShowWindow = 1  # SW_SHOWNORMAL
+        popen_kwargs["startupinfo"] = si
+    proc = subprocess.Popen(argv, **popen_kwargs)
     # 轮询 stderr 直到出现 "DevTools listening on ws://127.0.0.1:<port>"(Chrome 自选端口)
     deadline = _time.monotonic() + 15
     port: int | None = None
@@ -165,6 +177,49 @@ def _launch_real_chrome(
     if port is None:
         proc.terminate()
         raise RuntimeError("Chrome DevTools 端口就绪超时(15s 内未监听)")
+    # 端口就绪后 Chrome 窗口可能还在后台,Windows 上需要显式激活到前台+最大化。
+    # 不依赖后续 bring_browser_to_front(那时 uvicorn 可能已抢回焦点)。
+    if not headless and sys.platform == "win32":
+        try:
+            import pyautogui
+
+            pyautogui.sleep(0.5)
+            # 用 win32gui 激活(此时 Chrome 刚启动,是最近一个窗口)
+            import win32gui
+            import win32process
+
+            chrome_hwnd = None
+
+            def _find_chrome(hwnd: int, _: Any) -> bool:
+                nonlocal chrome_hwnd
+                if win32gui.IsWindowVisible(hwnd):
+                    cls = win32gui.GetClassName(hwnd)
+                    if cls == "Chrome_WidgetWin_1":
+                        chrome_hwnd = hwnd
+                        return False
+                return True
+
+            win32gui.EnumWindows(_find_chrome, None)
+            if chrome_hwnd:
+                import win32con
+
+                if win32gui.IsIconic(chrome_hwnd):
+                    win32gui.ShowWindow(chrome_hwnd, win32con.SW_RESTORE)
+                win32gui.ShowWindow(chrome_hwnd, win32con.SW_MAXIMIZE)
+                # AttachThreadInput 绕过焦点窃取限制
+                fg = win32gui.GetForegroundWindow()
+                fg_tid = win32process.GetWindowThreadProcessId(fg)[0]
+                tgt_tid = win32process.GetWindowThreadProcessId(chrome_hwnd)[0]
+                if fg_tid != tgt_tid:
+                    win32process.AttachThreadInput(tgt_tid, fg_tid, True)
+                    try:
+                        win32gui.SetForegroundWindow(chrome_hwnd)
+                    finally:
+                        win32process.AttachThreadInput(tgt_tid, fg_tid, False)
+                else:
+                    win32gui.SetForegroundWindow(chrome_hwnd)
+        except Exception:
+            pass  # best-effort
     return proc, port
 
 

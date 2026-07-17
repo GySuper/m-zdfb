@@ -21,6 +21,7 @@ dependencies = [
     "platformdirs>=4.0.0",
     "apc-sdk-python",
     "pyautogui>=0.9.54",
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

@@ -112,6 +112,8 @@ print("==> 凭据已注入 + 校验通过:", ",".join(changed))
     --collect-all lark_oapi `
     --collect-all patchright `
     --collect-all pyautogui `
+    --collect-all pygetwindow `
+    --collect-all win32com `
     --noconfirm `
     build/launcher.py
 

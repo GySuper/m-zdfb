@@ -292,17 +292,35 @@ def bring_browser_to_front(page: Page) -> None:
         except Exception:
             pass  # best-effort
     else:
-        # Windows:用 ctypes 直接调 user32 SetForegroundWindow(比 PowerShell 可靠,
-        # 绕过焦点窃取限制需要 AllowSetForegroundWindow,这里用 Alt+Tab 模拟切换)。
-        # 最可靠:用 pyautogui 点击屏幕左上角(Chrome --window-position=0,0 启动位置),
-        # 物理点击 Chrome 窗口标题栏区域激活它,再 Win+Up 最大化。
+        # Windows:用 pygetwindow minimize→maximize 技巧 + win32gui SetForegroundWindow。
+        # 单独 SetForegroundWindow 受焦点窃取限制不可靠,minimize→maximize 强制 OS 允许切换。
+        # 参考:github.com/asweigart/PyGetWindow/issues/16 官方推荐的 workaround。
         try:
-            # 点击 Chrome 窗口标题栏(0,0 附近)激活窗口
-            pyautogui.click(50, 10, _pause=False)
+            import pygetwindow as gw
+
+            # 找 Chrome 窗口(标题含 Chrome)
+            chrome_windows = [w for w in gw.getAllWindows() if "chrome" in w.title.lower()]
+            if chrome_windows:
+                win = chrome_windows[0]
+                # minimize→maximize 技巧:强制 OS 允许焦点切换
+                try:
+                    win.minimize()
+                    time.sleep(0.2)
+                    win.maximize()
+                    time.sleep(0.2)
+                except Exception:
+                    pass
+                # 再用 win32gui SetForegroundWindow 兜底
+                try:
+                    import win32gui
+
+                    win32gui.SetForegroundWindow(win._hWnd)
+                except Exception:
+                    pass
             time.sleep(0.3)
-            # Win+Up 最大化当前焦点窗口(此时已是 Chrome)
-            pyautogui.hotkey("win", "up", _pause=False)
-            time.sleep(0.3)
+        except ImportError:
+            # pygetwindow 只在 Windows 上有(win32gui 也是),非 Windows 走不到这个分支
+            pass
         except Exception:
             pass
     logger.info("[human_input] 浏览器窗口已激活+最大化")

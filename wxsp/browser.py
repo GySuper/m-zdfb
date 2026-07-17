@@ -123,12 +123,17 @@ def _launch_real_chrome(
         "--remote-debugging-port=0",
         "--no-first-run",
         "--no-default-browser-check",
+        # pyautogui 物理输入要求窗口在前台+最大化:屏幕坐标操作,窗口被遮挡会点飞。
+        "--start-maximized",
+        # 去掉"Chrome 正受到自动测试软件的控制"横幅(CDP 连接后默认显示,小红书可检测)。
+        # 对齐 MatrixMedia ignoreDefaultArgs: ['--enable-automation'] + 抑制 infobars。
+        "--disable-infobars",
         # 关键:CDP 连接后 Blink 默认置 navigator.webdriver=true 并暴露 AutomationControlled
-        # 特征,小红书前端检测到直接 401 拒绝登录态。对齐 MatrixMedia(puppeteerFile.js:380)
-        # 无条件加本参数压制 Blink 层自动化标记。所有走 CDP 的平台都受益(只反自动化,无副作用)。
+        # 特征,小红书前端检测到直接 401 拒绝登录态。
         "--disable-blink-features=AutomationControlled",
         "--window-position=0,0",
-        "--disable-features=AsyncDns,AsyncDnsResolver,DnsOverHttps,SecureDnsForFreshnessCheck",
+        # --disable-features 只认最后一个,所有要禁用的 feature 合并到一行
+        "--disable-features=AutomationControlled,Translate,AsyncDns,AsyncDnsResolver,DnsOverHttps,SecureDnsForFreshnessCheck",
         "--dns-prefetch-disable",
     ]
     if headless:

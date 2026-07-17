@@ -160,6 +160,17 @@ def _launch_real_chrome(
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
         si.wShowWindow = 1  # SW_SHOWNORMAL
         popen_kwargs["startupinfo"] = si
+    # Windows 上如果前台已经是 Chrome(Web UI 127.0.0.1:8765),新启动的 Chrome 进程
+    # 不会自动获取前台(同应用的新窗口只在任务栏闪烁)。启动前先 Alt+Tab 把焦点切走,
+    # 释放前台窗口,让新 Chrome 能正常弹到前台。
+    if sys.platform == "win32" and not headless:
+        try:
+            import pyautogui
+
+            pyautogui.hotkey("alt", "tab", _pause=False)
+            time.sleep(0.3)
+        except Exception:
+            pass
     proc = subprocess.Popen(argv, **popen_kwargs)
     # 轮询 stderr 直到出现 "DevTools listening on ws://127.0.0.1:<port>"(Chrome 自选端口)
     deadline = _time.monotonic() + 15
@@ -177,49 +188,19 @@ def _launch_real_chrome(
     if port is None:
         proc.terminate()
         raise RuntimeError("Chrome DevTools 端口就绪超时(15s 内未监听)")
-    # 端口就绪后 Chrome 窗口可能还在后台,Windows 上需要显式激活到前台+最大化。
-    # 不依赖后续 bring_browser_to_front(那时 uvicorn 可能已抢回焦点)。
-    if not headless and sys.platform == "win32":
+    # 端口就绪后 Chrome 窗口可能还在后台。用最暴力的方式激活:
+    # pyautogui 物理点击屏幕中心区域(Chrome --window-position=0,0 + --window-size 几乎全屏,
+    # 点击屏幕中心必然落在 Chrome 窗口内)。物理点击不受 Windows 焦点窃取限制,100% 能激活窗口。
+    # 之前 SetForegroundWindow/AttachThreadInput 等方案都不可靠,物理点击最简单最可靠。
+    if not headless:
         try:
             import pyautogui
 
-            pyautogui.sleep(0.5)
-            # 用 win32gui 激活(此时 Chrome 刚启动,是最近一个窗口)
-            import win32gui
-            import win32process
-
-            chrome_hwnd = None
-
-            def _find_chrome(hwnd: int, _: Any) -> bool:
-                nonlocal chrome_hwnd
-                if win32gui.IsWindowVisible(hwnd):
-                    cls = win32gui.GetClassName(hwnd)
-                    if cls == "Chrome_WidgetWin_1":
-                        chrome_hwnd = hwnd
-                        return False
-                return True
-
-            win32gui.EnumWindows(_find_chrome, None)
-            if chrome_hwnd:
-                import win32con
-
-                if win32gui.IsIconic(chrome_hwnd):
-                    win32gui.ShowWindow(chrome_hwnd, win32con.SW_RESTORE)
-                win32gui.ShowWindow(chrome_hwnd, win32con.SW_MAXIMIZE)
-                # AttachThreadInput 绕过焦点窃取限制
-                fg = win32gui.GetForegroundWindow()
-                fg_tid = win32process.GetWindowThreadProcessId(fg)[0]
-                tgt_tid = win32process.GetWindowThreadProcessId(chrome_hwnd)[0]
-                if fg_tid != tgt_tid:
-                    win32process.AttachThreadInput(tgt_tid, fg_tid, True)
-                    try:
-                        win32gui.SetForegroundWindow(chrome_hwnd)
-                    finally:
-                        win32process.AttachThreadInput(tgt_tid, fg_tid, False)
-                else:
-                    win32gui.SetForegroundWindow(chrome_hwnd)
+            time.sleep(1)  # 等 Chrome 窗口完全渲染
+            w, h = pyautogui.size()
+            pyautogui.click(w // 2, h // 2)
         except Exception:
-            pass  # best-effort
+            pass
     return proc, port
 
 
@@ -489,6 +470,11 @@ def browser_context(
                         f"[browser] {platform} CDP context 启动(real chrome),"
                         f" user_data_dir={user_data_dir}, cookies_loaded={len(loaded)}, port={chrome_port}"
                     )
+                except Exception:
+                    pass
+                # 让 Chrome 窗口到前台(patchright 内置 API,不走 Win32 焦点系统)
+                try:
+                    page.bring_to_front()
                 except Exception:
                     pass
                 yield page

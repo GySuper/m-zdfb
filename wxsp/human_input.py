@@ -292,52 +292,17 @@ def bring_browser_to_front(page: Page) -> None:
         except Exception:
             pass  # best-effort
     else:
-        # Windows:用 AttachThreadInput + ShowWindow + SetForegroundWindow 组合。
-        # 这是绕过 Windows 焦点窃取限制最可靠的方法(StackOverflow 高票方案):
-        # 把当前前台窗口的线程和 Chrome 窗口的线程的输入队列 Attach 起来,
-        # 让 Windows 认为本进程有权限设前台窗口。
+        # Windows:物理点击屏幕中心激活 Chrome 窗口(最简单最可靠)。
+        # 之前 SetForegroundWindow / AttachThreadInput / minimize→maximize 都不可靠
+        # (焦点窃取限制)。物理点击不受此限制——点击 Chrome 窗口区域必然激活它。
+        # Chrome --window-position=0,0 + --window-size 几乎全屏,屏幕中心必然在窗口内。
         try:
-            import ctypes
-            import win32con
-            import win32gui
-            import win32process
-
-            # 枚举所有顶层窗口,找 Chrome 的窗口句柄
-            chrome_hwnd = None
-
-            def _enum_handler(hwnd: int, _: Any) -> bool:
-                nonlocal chrome_hwnd
-                if win32gui.IsWindowVisible(hwnd):
-                    title = win32gui.GetWindowText(hwnd)
-                    if "chrome" in title.lower() and title.strip():
-                        chrome_hwnd = hwnd
-                        return False  # 找到了,停止枚举
-                return True
-
-            win32gui.EnumWindows(_enum_handler, None)
-
-            if chrome_hwnd:
-                # 如果窗口最小化了,先恢复
-                if win32gui.IsIconic(chrome_hwnd):
-                    win32gui.ShowWindow(chrome_hwnd, win32con.SW_RESTORE)
-                # 最大化
-                win32gui.ShowWindow(chrome_hwnd, win32con.SW_MAXIMIZE)
-
-                # AttachThreadInput 绕过焦点窃取限制
-                foreground_hwnd = win32gui.GetForegroundWindow()
-                foreground_tid = win32process.GetWindowThreadProcessId(foreground_hwnd)[0]
-                target_tid = win32process.GetWindowThreadProcessId(chrome_hwnd)[0]
-
-                if foreground_tid != target_tid:
-                    win32process.AttachThreadInput(target_tid, foreground_tid, True)
-                    try:
-                        win32gui.SetForegroundWindow(chrome_hwnd)
-                    finally:
-                        win32process.AttachThreadInput(target_tid, foreground_tid, False)
-                else:
-                    win32gui.SetForegroundWindow(chrome_hwnd)
-
-            time.sleep(0.5)
-        except Exception as exc:
-            logger.warning(f"[human_input] Windows 窗口激活失败: {exc}")
+            w, h = pyautogui.size()
+            pyautogui.click(w // 2, h // 2, _pause=False)
+            time.sleep(0.3)
+            # Win+Up 最大化
+            pyautogui.hotkey("win", "up", _pause=False)
+            time.sleep(0.3)
+        except Exception:
+            pass
     logger.info("[human_input] 浏览器窗口已激活+最大化")

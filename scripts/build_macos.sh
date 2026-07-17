@@ -85,6 +85,7 @@ uv run pyinstaller \
   --collect-all uvicorn \
   --collect-all lark_oapi \
   --collect-all patchright \
+  --collect-all pyautogui \
   --noconfirm \
   build/launcher.py
 

@@ -34,6 +34,8 @@ SIDEBAR_MARKER_TEXT = "笔记管理"
 VIDEO_FILE_INPUT = (
     "div[class^='upload-content'] input.upload-input"  # 实测命中(隐藏 input,set_input_files)
 )
+# 上传区域的可见容器(物理点击用):隐藏 input 的父级 div.upload-content,用户看到的大区域
+VIDEO_UPLOAD_AREA = "div[class^='upload-content']"
 # 上传完成判据:等「重新上传」按钮出现 = 完成(对齐抖音 UPLOAD_DONE_MARKER 做法)。
 # 实测(169M 大视频):上传中按钮不存在,上传完成(t≈94s)才出现,稳定可靠。
 # 旧判据已废弃——预览区文本「分辨率」会误匹配「分辨率较低」(上传刚开始就有);
@@ -63,13 +65,13 @@ COVER_CONFIRM_BUTTON = "button.mojito-button"
 COVER_CONFIRM_BUTTON_TEXT = "确定"
 
 # ---- 定时发布 ----
-# 实测:两张 .custom-switch-card(原创声明 / 定时发布),按文案过滤后点 .d-switch 开关,
-# 开关打开后 .d-datepicker-input-filter input.d-text 出现(非 readonly,可 fill),
-# 预填值形如「2026-06-17 11:30」→ 印证 %Y-%m-%d %H:%M 格式。
+# 2026-07-17 改版:开关外包 .post-time-wrapper > .post-time-switch-container > .custom-switch-wrapper,
+# 日期选择器外包 .date-picker-container > .d-datepicker-wrapper > .d-datepicker > .d-datepicker-content。
+# input.d-text 仍存在但路径变了,用更宽松的定位(定时区域内找 input)。
 SCHEDULE_SWITCH_CARD = ".custom-switch-card"
 SCHEDULE_SWITCH_TEXT = "定时发布"
 SCHEDULE_SWITCH = ".d-switch"
-SCHEDULE_DATETIME_INPUT = ".d-datepicker-input-filter input.d-text"
+SCHEDULE_DATETIME_INPUT = ".date-picker-container input.d-text"
 SCHEDULE_DATETIME_FORMAT = "%Y-%m-%d %H:%M"
 
 # ---- 发布 / 风控 / 成功 ----

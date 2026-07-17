@@ -20,6 +20,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "platformdirs>=4.0.0",
     "apc-sdk-python",
+    "pyautogui>=0.9.54",
 ]
 
 [project.optional-dependencies]

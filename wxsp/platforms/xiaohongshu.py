@@ -32,6 +32,15 @@ from wxsp.errors import (
 )
 from wxsp.models import Account
 from wxsp.nas import stage_to_tmp
+from wxsp.human_input import (
+    bring_browser_to_front,
+    physical_click,
+    physical_press,
+    physical_scroll,
+    physical_select_all,
+    physical_type,
+    physical_upload,
+)
 from wxsp.platforms import xiaohongshu_selectors as sel
 from wxsp.platforms.base import PlatformSpec, PublishContext, PublishResult, TaskBundle
 from wxsp.platforms.runner import random_pause, run_publish, screenshot
@@ -53,129 +62,23 @@ _FORCE_OPEN_SHADOW_JS = """
 """
 
 # ---------------------------------------------------------------------------
-# 拟人节奏辅助(对齐 MatrixMedia xhs.js xhsTypeDelay / waitXhs / getRandomInt)
+# 拟人节奏辅助(_wait_xhs 保留;打字/点击/轨迹已移到 wxsp.human_input 物理输入层)
 # ---------------------------------------------------------------------------
 
 
 def _get_random_int(min_: int, max_: int) -> int:
-    """[min, max] 闭区间随机整数(对齐 MatrixMedia getRandomInt)。"""
+    """[min, max] 闭区间随机整数。"""
     return random.randint(min_, max_)
 
 
-def _type_delay() -> int:
-    """打字每字符延迟 ms,正态分布(对齐 UM7lab humanType:正态分布而非均匀随机)。
-
-    均值 130ms,标准差 25,clamp 到 [60, 220]。原均匀随机 randint(80,180) 在区间内
-    概率密度均匀,真人打字是钟形分布(中间多两头少)。clamp 防止极端值卡死或过快。
-    """
-
-    val = random.gauss(130, 25)
-    return max(60, min(220, round(val)))
-
-
-def _human_type(page: Page, text: str) -> None:
-    """拟人逐字符输入(对齐 UM7lab humanType):正态分布字符间隔 + 标点停顿 + 偶发思考停顿。
-
-    替代 page.keyboard.type(text, delay=固定值):后者所有字符间隔相同,是匀速机器特征。
-    本函数逐字符输入,每个字符间隔独立采样正态分布;标点/空格处停顿更长;
-    每隔若干字符偶发"思考停顿"(模拟人打字中途犹豫)。
-    """
-    # 标点/空格停顿更长(真人在标点处会慢下来)
-    PUNCTUATION = "，。！？、；：, .!?;:\n"  # noqa: RUF001
-    chars_typed = 0
-    for char in text:
-        page.keyboard.type(char, delay=0)
-        if char in PUNCTUATION:
-            page.wait_for_timeout(_get_random_int(200, 500))
-        else:
-            page.wait_for_timeout(_type_delay())
-        chars_typed += 1
-        # 每 8-15 个字符偶发思考停顿(约 15% 概率)
-        if chars_typed % _get_random_int(8, 15) == 0:
-            page.wait_for_timeout(_get_random_int(800, 2000))
-
-
 def _wait_xhs(page: Page, min_ms: int = 1500, max_ms: int = 4000) -> None:
-    """步间随机停顿 ms(对齐 MatrixMedia waitXhs = getRandomDelayMs(1500,4000))。"""
+    """步间随机停顿 ms。"""
     page.wait_for_timeout(_get_random_int(min_ms, max_ms))
-
-
-def _bezier_move(page: Page, end_x: float, end_y: float) -> None:
-    """沿三阶贝塞尔曲线移动鼠标到目标点(对齐 UM7lab humanClick 贝塞尔轨迹)。
-
-    替代 page.mouse.move(x, y, steps=N) 的直线插值:真人鼠标轨迹是弧线(缓入缓出 +
-    手抖),直线移动 + 固定 steps 是典型自动化特征。贝塞尔曲线两个控制点在起点-终点
-    之间随机偏移,模拟人手不精确的弧线运动。
-    """
-    # 获取当前鼠标位置(patchright 不直接暴露,用 JS 读)
-    try:
-        start = page.evaluate("() => [window.__mm_mouse_x || 0, window.__mm_mouse_y || 0]")
-    except Exception:
-        start = [0, 0]
-    sx, sy = float(start[0]), float(start[1])
-
-    # 两个控制点:在起点-终点连线两侧随机偏移,形成弧线
-    mid_x1 = sx + (end_x - sx) * 0.3 + _get_random_int(-40, 40)
-    mid_y1 = sy + (end_y - sy) * 0.3 + _get_random_int(-30, 30)
-    mid_x2 = sx + (end_x - sx) * 0.7 + _get_random_int(-40, 40)
-    mid_y2 = sy + (end_y - sy) * 0.7 + _get_random_int(-30, 30)
-
-    # 沿曲线采样 15-25 个点,逐点 move(每个点带微小抖动)
-    steps = _get_random_int(15, 25)
-    for i in range(1, steps + 1):
-        t = i / steps
-        # 三阶贝塞尔: B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
-        mt = 1 - t
-        x = mt**3 * sx + 3 * mt**2 * t * mid_x1 + 3 * mt * t**2 * mid_x2 + t**3 * end_x
-        y = mt**3 * sy + 3 * mt**2 * t * mid_y1 + 3 * mt * t**2 * mid_y2 + t**3 * end_y
-        # 微小抖动(手抖)
-        x += _get_random_int(-2, 2)
-        y += _get_random_int(-2, 2)
-        page.mouse.move(x, y)
-        page.wait_for_timeout(_get_random_int(8, 20))
-
-    # 记录最终位置供下次调用
-    try:
-        page.evaluate(f"() => {{ window.__mm_mouse_x = {end_x}; window.__mm_mouse_y = {end_y}; }}")
-    except Exception:
-        pass
 
 
 # ---------------------------------------------------------------------------
 # step functions
 # ---------------------------------------------------------------------------
-
-
-def _warmup_browse(page: Page) -> None:
-    """发布前预热浏览:打开发现页,随机滚动 2-3 屏,模拟真人"先逛再发"行为。
-
-    对齐 UM7lab WarmupBrowse + xiaohongshu-mcp Issue #674:打散"登录→秒发布→退出"
-    的机械会话模式 —— 这是社区反馈中小红书风控判定自动化的最致命信号之一。
-    best-effort:任何异常(网络慢/页面改版)都不影响后续发布流程。
-
-    ⚠️ 社区站(www.xiaohongshu.com)和创作者中心(creator.xiaohongshu.com)是不同域名,
-    cookie 不共享。若社区站未登录(被重定向到登录页),跳过预热,不卡住发布流程。
-    """
-    try:
-        logger.info("[xiaohongshu] 预热浏览:打开发现页")
-        page.goto(sel.EXPLORE_URL, wait_until="domcontentloaded", timeout=30_000)
-        # 社区站未登录会被重定向到登录页(URL 不再含 /explore),跳过预热不卡住
-        if "/explore" not in page.url:
-            logger.warning("[xiaohongshu] 社区站未登录(未跳到 /explore),跳过预热浏览")
-            return
-        _wait_xhs(page, 2000, 4000)
-
-        # 随机滚动 2-3 屏,每屏停顿(模拟浏览)
-        scroll_count = _get_random_int(2, 3)
-        for _ in range(scroll_count):
-            scroll_y = _get_random_int(400, 800)
-            page.mouse.wheel(0, scroll_y)
-            _wait_xhs(page, 1500, 3500)
-
-        logger.info(f"[xiaohongshu] 预热浏览完成(滚动 {scroll_count} 屏)")
-    except Exception as exc:
-        # 预热失败不阻断发布(网络慢/发现页改版等),只是少了一层行为掩护
-        logger.warning(f"[xiaohongshu] 预热浏览失败(不影响发布): {exc}")
 
 
 def _open_publish_page(page: Page) -> None:
@@ -230,11 +133,13 @@ def _verify_logged_in(page: Page) -> None:
 
 
 def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> None:
-    page.locator(sel.VIDEO_FILE_INPUT).set_input_files(str(file_path))
+    # 混合上传:物理点击上传区(产生真实 click 事件 isTrusted=true)→ ESC 关系统文件
+    # 对话框 → set_input_files 注入文件路径(不产生交互事件,避开对话框操作风险)。
+    upload_area = page.locator(sel.VIDEO_UPLOAD_AREA).first
+    file_input = page.locator(sel.VIDEO_FILE_INPUT).first
+    physical_upload(page, upload_area, file_input, str(file_path))
 
-    # 等上传/转码完成:「重新上传」按钮出现 = 完成(对齐抖音)。实测上传中不存在、
-    # 完成后才出现。旧判据(预览区文本/标题框)会误判:文本「分辨率」匹配「分辨率较低」,
-    # 标题框 set_input_files 后第 0 秒就可见(详见 xiaohongshu_selectors 注释)。
+    # 等上传/转码完成:「重新上传」按钮出现 = 完成(对齐抖音)。
     try:
         page.locator(sel.UPLOAD_DONE_MARKER).first.wait_for(
             state="visible", timeout=timeout_seconds * 1000
@@ -249,90 +154,98 @@ def _fill_title(page: Page, title: str) -> None:
         return
     inp = page.locator(sel.TITLE_INPUT).first
     inp.wait_for(state="visible", timeout=10_000)
-    # 对齐 MatrixMedia xhs.js:三击全选 → Backspace 清空 → keyboard.type 随机延迟打字。
-    # 原 inp.fill() 是瞬间赋值,无按键事件序列,是自动化特征。
-    inp.click(click_count=3)
-    page.keyboard.press("Backspace")
+    # 物理三击全选 → 物理退格清空 → 物理逐字符输入(全部 isTrusted=true)
+    physical_click(page, inp, click_count=3)
+    physical_press("Backspace")
     title_text = title[: sel.TITLE_MAX_LENGTH]
     if title_text:
-        _human_type(page, title_text)
+        physical_type(page, title_text)
 
 
 def _fill_description(page: Page, description: str | None) -> None:
-    # 小红书有独立标题框,描述为空时直接跳过(不像抖音/快手回退到 title)。
     if not description:
         return
-    # 对齐 MatrixMedia xhs.js:双击聚焦正文 → waitXhs(1500,2500) 停顿 → keyboard.type 随机延迟。
-    # 原 editor.click() 单击 + 无延迟 type,事件序列机械。
     editor = page.locator(sel.DESC_EDITOR).first
     editor.wait_for(state="visible", timeout=10_000)
-    editor.click(click_count=2)
+    # 物理双击聚焦 → 停顿 → 物理逐字符输入(全部 isTrusted=true)
+    physical_click(page, editor, click_count=2)
     _wait_xhs(page, 1500, 2500)
-    _human_type(page, description)
+    physical_type(page, description)
 
 
 def _add_tags(page: Page, tags: list[str]) -> None:
     if not tags:
         return
-    # 正文区若还没聚焦(无描述时)先点一下;话题需键入 #tag 后从下拉选第一个候选才真正绑定。
-    page.locator(sel.DESC_EDITOR).first.click()
+    # 物理点击聚焦正文 → 物理逐字符输入 #tag → 物理回车选候选(全部 isTrusted=true)
+    physical_click(page, page.locator(sel.DESC_EDITOR).first)
     for tag in tags:
-        # 对齐 UM7lab humanType:正态分布字符间隔 + 标点停顿 + 偶发思考停顿
-        _human_type(page, "#" + tag)
-        # 对齐 MatrixMedia:waitXhs 等话题候选弹窗弹出
+        physical_type(page, "#" + tag)
         _wait_xhs(page)
         try:
-            # 对齐 MatrixMedia:用 Enter 选候选弹窗第一条(press("Enter")),不用 click。
-            # 用户实测 click 选候选会失败(2026-07-08),Enter 是 puppeteer 体系验证可行的做法。
             page.locator(sel.TOPIC_CONTAINER).wait_for(state="visible", timeout=3000)
-            page.keyboard.press("Enter")
-            # 对齐 MatrixMedia waitXhs(1500,3000):选完候选后停顿,等话题绑定写入正文
+            physical_press("Enter")
             _wait_xhs(page, 1500, 3000)
         except Exception:
-            # 下拉没弹出(网络慢/无匹配话题)→ 退而求其次:敲空格让 #tag 以纯文本留在正文
-            page.keyboard.press("Space")
-        # 对齐 MatrixMedia:多个话题之间 waitXhs(1500,4000),避免连续 #tag 输入过密被风控判定
+            # 下拉没弹出 → 敲空格让 #tag 以纯文本留在正文
+            physical_press("Space")
         _wait_xhs(page)
 
 
 def _set_cover(page: Page, cover_path: Path | None) -> None:
-    """有自定义封面 → 走封面弹窗上传(可选,best-effort,未端到端实跑)。"""
+    """有自定义封面 → 走封面弹窗上传(可选,best-effort)。"""
     if cover_path is None:
         return
     cover_title = page.locator(sel.COVER_PLUGIN_TITLE).filter(has_text=sel.COVER_PLUGIN_TITLE_TEXT)
     entry = cover_title.locator(sel.COVER_PREVIEW_ANCESTOR_XPATH).locator(sel.COVER_ENTRY_INNER)
     entry.first.wait_for(state="visible", timeout=30_000)
-    entry.first.click(force=True)
+    # 物理点击封面入口(isTrusted=true)
+    physical_click(page, entry.first)
 
     modal = page.locator(sel.COVER_MODAL)
     modal.wait_for(state="visible", timeout=30_000)
     file_input = modal.locator(sel.COVER_FILE_INPUT).first
     file_input.wait_for(state="attached", timeout=10_000)
-    file_input.set_input_files(str(cover_path))
+    # 混合上传:物理点击触发对话框 → ESC 关 → set_input_files
+    physical_upload(page, entry.first, file_input, str(cover_path))
     _wait_xhs(page, 1500, 2500)
 
     confirm = (
         modal.locator(sel.COVER_CONFIRM_BUTTON).filter(has_text=sel.COVER_CONFIRM_BUTTON_TEXT).first
     )
     confirm.wait_for(state="visible", timeout=10_000)
-    confirm.click()
+    physical_click(page, confirm)
     modal.wait_for(state="hidden", timeout=30_000)
     logger.info("[xiaohongshu] 自定义封面设置完成(best-effort)")
 
 
 def _set_schedule(page: Page, publish_at: datetime) -> None:
-    # 切「定时发布」开关 → 日期时间输入框出现,fill 一次性写入(避免 Ctrl/Cmd+A 跨平台差异)。
-    # ⚠️ 日期输入框是 d-datepicker 组件的 <input>,不能逐字符 keyboard.type —— 会触发组件
-    # 内部解析/校验状态机,焦点飞出输入框甚至连带关掉定时开关(实测 2026-07-08)。
-    # fill 对 <input> 是标准安全做法。开关点击后的停顿保留 _wait_xhs 拟人化(无害)。
-    page.locator(sel.SCHEDULE_SWITCH_CARD).filter(has_text=sel.SCHEDULE_SWITCH_TEXT).locator(
-        sel.SCHEDULE_SWITCH
-    ).click()
+    # 物理点击定时开关,verify=日期框出现(没点到就重试,防止人碰鼠标)→ 输入日期。
+    switch_card = page.locator(sel.SCHEDULE_SWITCH_CARD).filter(
+        has_text=sel.SCHEDULE_SWITCH_TEXT
+    )
+    switch = switch_card.locator(sel.SCHEDULE_SWITCH)
+    inp = page.locator(sel.SCHEDULE_DATETIME_INPUT).first
+
+    def _date_input_visible() -> bool:
+        try:
+            return inp.is_visible()
+        except Exception:
+            return False
+
+    physical_click(page, switch, verify=_date_input_visible)
     _wait_xhs(page, 1500, 2500)
-    inp = page.locator(sel.SCHEDULE_DATETIME_INPUT)
-    inp.click()
+
+    try:
+        inp.wait_for(state="visible", timeout=10_000)
+    except Exception as err:
+        logger.warning(f"[xiaohongshu] 定时发布日期框未找到(可能改版): {err}")
+        return  # 定时设置失败不阻断发布(降级为即时发布)
+
+    # 物理点击日期框聚焦 → Cmd/Ctrl+A 全选 → 物理输入覆盖
+    physical_click(page, inp)
     _wait_xhs(page, 400, 800)
-    inp.fill(publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT))
+    physical_select_all()
+    physical_type(page, publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT))
     _wait_xhs(page, 1500, 2500)
 
 
@@ -347,29 +260,17 @@ def _risk_control_probe(page: Page) -> None:
 
 
 def _click_publish(page: Page) -> None:
-    # 坐标点击 + 鼠标轨迹(对齐 MatrixMedia xhs.js line 480-506 全部参数):
-    # jitterX=getRandomInt(-12,12) / jitterY=getRandomInt(-8,8) 随机抖动
-    # mouse.move steps=getRandomInt(3,8) 模拟曲线 → waitForTimeout getRandomInt(30,80) →
-    # mouse.click delay=80 按下释放间隔。点完后 waitXhs(2500,4500) 停顿。
+    # 物理点击发布按钮,verify=按钮消失(发布动作生效),没点到就重试。
     btn = page.locator(sel.PUBLISH_BUTTON).first
     btn.wait_for(state="visible", timeout=10_000)
-    box = btn.bounding_box()
-    if box is None:
-        # 极端兜底:boundingBox 拿不到(被遮挡/未渲染)时退回元素点击,保证流程不中断
-        btn.click()
-        return
-    cx = box["x"] + box["width"] / 2 + _get_random_int(-12, 12)
-    cy = box["y"] + box["height"] / 2 + _get_random_int(-8, 8)
-    # 沿三阶贝塞尔曲线移动到目标附近(对齐 UM7lab humanClick:弧线 + 缓入缓出 + 手抖),
-    # 替代原直线 mouse.move(steps=N)。先移到附近偏移点,停顿后再移到目标点击。
-    pre_x = cx + _get_random_int(-20, 20)
-    pre_y = cy + _get_random_int(-15, 15)
-    _bezier_move(page, pre_x, pre_y)
-    page.wait_for_timeout(_get_random_int(30, 80))
-    _bezier_move(page, cx, cy)
-    page.wait_for_timeout(_get_random_int(50, 120))
-    page.mouse.click(cx, cy, delay=80)
-    # 对齐 MatrixMedia waitXhs(2500,4500):点击发布后留足停顿,等页面响应
+
+    def _btn_gone() -> bool:
+        try:
+            return not btn.is_visible()
+        except Exception:
+            return True
+
+    physical_click(page, btn, delay_ms=80, verify=_btn_gone)
     _wait_xhs(page, 2500, 4500)
 
 
@@ -410,8 +311,8 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
     # APC 守门(对齐 tencent/douyin/kuaishou):dev/非打包永远 True;打包模式看 APC 判决
     apc_passed = wxsp.apc.check_pass()
 
-    ctx.last_step = "warmup"
-    _warmup_browse(page)
+    # pyautogui 物理输入要求窗口在前台:确保 Chrome 最前+最大化,否则屏幕坐标会点飞
+    bring_browser_to_front(page)
 
     ctx.last_step = "open_publish"
     _open_publish_page(page)
@@ -471,27 +372,6 @@ def _post_publish(page: Page, bundle: TaskBundle, ctx: PublishContext) -> None:
 
     ctx.last_step = "wait_success"
     _wait_for_success(page)
-
-    # 发布成功后跳转社区浏览 12-30 秒(对齐 UM7lab WarmupBrowse 思路):
-    # 真人发完会刷刷首页看看,不会"发布→秒退出"。打散会话尾部的机械特征。
-    # best-effort:跳转/浏览失败不影响发布已成功的事实。
-    ctx.last_step = "cooldown_browse"
-    try:
-        page.goto(sel.EXPLORE_URL, wait_until="domcontentloaded", timeout=30_000)
-        if "/explore" in page.url:
-            cooldown_ms = _get_random_int(12_000, 30_000)
-            # 随机滚动 1-2 屏,让浏览看起来真实(不是干等)
-            scroll_count = _get_random_int(1, 2)
-            for _ in range(scroll_count):
-                page.mouse.wheel(0, _get_random_int(300, 600))
-                _wait_xhs(page, 3000, 6000)
-            # 剩余时间静默停留
-            page.wait_for_timeout(cooldown_ms)
-            logger.info(f"[xiaohongshu] 发布后社区浏览完成({cooldown_ms}ms)")
-        else:
-            logger.warning("[xiaohongshu] 社区站未登录,跳过发布后浏览")
-    except Exception as exc:
-        logger.warning(f"[xiaohongshu] 发布后浏览失败(发布已成功): {exc}")
 
 
 XIAOHONGSHU_SPEC = PlatformSpec(

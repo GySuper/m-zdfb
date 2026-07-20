@@ -30,17 +30,16 @@ from wxsp.errors import (
     RiskControl,
     UploadFailed,
 )
-from wxsp.models import Account
-from wxsp.nas import stage_to_tmp
 from wxsp.human_input import (
     bring_browser_to_front,
     physical_click,
     physical_press,
-    physical_scroll,
     physical_select_all,
     physical_type,
     physical_upload,
 )
+from wxsp.models import Account
+from wxsp.nas import stage_to_tmp
 from wxsp.platforms import xiaohongshu_selectors as sel
 from wxsp.platforms.base import PlatformSpec, PublishContext, PublishResult, TaskBundle
 from wxsp.platforms.runner import random_pause, run_publish, screenshot
@@ -173,11 +172,49 @@ def _fill_description(page: Page, description: str | None) -> None:
     physical_type(page, description)
 
 
-def _add_tags(page: Page, tags: list[str]) -> None:
+def _add_tags(page: Page, tags: list[str], ctx: PublishContext) -> None:
     if not tags:
         return
-    # 物理点击聚焦正文 → 物理逐字符输入 #tag → 物理回车选候选(全部 isTrusted=true)
-    physical_click(page, page.locator(sel.DESC_EDITOR).first)
+    # 物理点击聚焦正文 → 物理粘贴 #tag → 等候选 → 回车选(全部 isTrusted=true)
+    editor = page.locator(sel.DESC_EDITOR).first
+    # 诊断①:点正文前 —— 拍图 + 记正文框位置和算出的屏幕坐标(排查坐标偏移)
+    try:
+        box = editor.bounding_box()
+        logger.info(f"[xiaohongshu][diag] tags 点正文前 box={box}")
+        screenshot(
+            page,
+            task_id=ctx.task_id,
+            step="tags_before_click",
+            screenshots_root=ctx.screenshots_root,
+        )
+    except Exception as diag_err:
+        logger.warning(f"[xiaohongshu][diag] tags 点正文前诊断失败: {diag_err}")
+
+    physical_click(page, editor)
+
+    # 诊断②:点正文后、输入前 —— 拍图 + 读 document.activeElement(排查焦点丢失)
+    try:
+        focus_info = page.evaluate(
+            """() => {
+                const el = document.activeElement;
+                return {
+                    tag: el ? el.tagName : null,
+                    cls: el ? el.className : null,
+                    editable: el ? el.isContentEditable : null,
+                    isDescEditor: el ? el.matches('.tiptap.ProseMirror, .tiptap.ProseMirror *') : false,
+                };
+            }"""
+        )
+        logger.info(f"[xiaohongshu][diag] tags 点正文后 焦点={focus_info}")
+        screenshot(
+            page,
+            task_id=ctx.task_id,
+            step="tags_after_click",
+            screenshots_root=ctx.screenshots_root,
+        )
+    except Exception as diag_err:
+        logger.warning(f"[xiaohongshu][diag] tags 点正文后诊断失败: {diag_err}")
+
     for tag in tags:
         physical_type(page, "#" + tag)
         _wait_xhs(page)
@@ -186,7 +223,17 @@ def _add_tags(page: Page, tags: list[str]) -> None:
             physical_press("Enter")
             _wait_xhs(page, 1500, 3000)
         except Exception:
-            # 下拉没弹出 → 敲空格让 #tag 以纯文本留在正文
+            # 诊断③:候选框没弹 —— 拍图定格此刻页面(排查候选框改版/时序)
+            try:
+                logger.info(f"[xiaohongshu][diag] tags 候选框未弹出 tag={tag},走 Space")
+                screenshot(
+                    page,
+                    task_id=ctx.task_id,
+                    step=f"tags_no_topic_{tag}",
+                    screenshots_root=ctx.screenshots_root,
+                )
+            except Exception:
+                pass
             physical_press("Space")
         _wait_xhs(page)
 
@@ -220,9 +267,7 @@ def _set_cover(page: Page, cover_path: Path | None) -> None:
 
 def _set_schedule(page: Page, publish_at: datetime) -> None:
     # 物理点击定时开关,verify=日期框出现(没点到就重试,防止人碰鼠标)→ 输入日期。
-    switch_card = page.locator(sel.SCHEDULE_SWITCH_CARD).filter(
-        has_text=sel.SCHEDULE_SWITCH_TEXT
-    )
+    switch_card = page.locator(sel.SCHEDULE_SWITCH_CARD).filter(has_text=sel.SCHEDULE_SWITCH_TEXT)
     switch = switch_card.locator(sel.SCHEDULE_SWITCH)
     inp = page.locator(sel.SCHEDULE_DATETIME_INPUT).first
 
@@ -241,12 +286,14 @@ def _set_schedule(page: Page, publish_at: datetime) -> None:
         logger.warning(f"[xiaohongshu] 定时发布日期框未找到(可能改版): {err}")
         return  # 定时设置失败不阻断发布(降级为即时发布)
 
-    # 物理点击日期框聚焦 → Cmd/Ctrl+A 全选 → 物理输入覆盖
+    # 物理点击日期框聚焦 → Cmd/Ctrl+A 全选 → 物理输入覆盖 → 回车确认
     physical_click(page, inp)
     _wait_xhs(page, 400, 800)
     physical_select_all()
     physical_type(page, publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT))
-    _wait_xhs(page, 1500, 2500)
+    _wait_xhs(page, 400, 800)
+    physical_press("Enter")
+    _wait_xhs(page, 2000, 3000)
 
 
 def _risk_control_probe(page: Page) -> None:
@@ -350,7 +397,7 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
     random_pause(step_pause)
 
     ctx.last_step = "tags"
-    _add_tags(page, tags=_json.loads(bundle.tags_json or "[]"))
+    _add_tags(page, tags=_json.loads(bundle.tags_json or "[]"), ctx=ctx)
     random_pause(step_pause)
 
     ctx.last_step = "cover"

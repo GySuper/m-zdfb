@@ -57,6 +57,9 @@ PRODUCT_SEARCH_INPUT = 'input[placeholder*="商品"]'
 # 搜索结果是商品卡片(非每商品一个独立 checkbox 列)。卡片标题链接的 href 含商品ID,
 # 是最稳的锚点(class 都是 CSS-module hash)。用 .format(pid=) 注入。
 PRODUCT_ITEM_LINK_BY_ID = 'a[href*="item.htm?id={pid}"]'
+# 弹窗默认商品列表就绪信号:click"添加商品"后默认列表还在加载,等首个商品 link
+# 出现再开始按 ID 搜索,否则搜索与列表加载竞态致 card.hover() 超时。
+PRODUCT_ITEM_LINK_ANY = 'a[href*="item.htm?id="]'
 # 从标题链接上溯到卡片容器(class 含 `--item--`,区别于 `--item-title--`/`--item-desc--` 等)。
 PRODUCT_ITEM_CARD_ANCESTOR = 'xpath=ancestor::*[contains(@class, "--item--")][1]'
 # 卡片内"商品选择"复选框的真实 input(区别于顶部"筛选近14天")。Fusion 把 opacity:0 的

@@ -163,6 +163,10 @@ def _add_products(page: Page, product_ids: list[str]) -> None:
     iframe.locator(sel.PRODUCT_TRIGGER).click()
     time.sleep(1)
     iframe.locator(sel.PRODUCT_DIALOG_HEADING).wait_for(timeout=5_000)
+    # 等默认商品列表渲染完:弹窗外壳出现时默认列表还在加载,此刻去搜索会撞上
+    # 列表重排 → card.hover() actionability 不满足 → 30s 超时(间歇性,看网络)。
+    # 等首个商品 link 出现说明列表已就绪,再开始按 ID 搜索。
+    iframe.locator(sel.PRODUCT_ITEM_LINK_ANY).first.wait_for(timeout=10_000)
     for pid in ids:
         search = iframe.locator(sel.PRODUCT_SEARCH_INPUT)
         search.fill(pid)

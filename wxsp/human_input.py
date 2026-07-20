@@ -79,6 +79,49 @@ def _type_delay() -> int:
     return max(60, min(220, round(val)))
 
 
+def _ensure_clickable(page: Page, locator: Locator) -> None:
+    """确保物理点击不会被底部 fixed bar 等遮挡。
+
+    scroll_into_view_if_needed 只保证元素进入视口边界,不知道视口底部有
+    fixed bar(如小红书发布页的发布按钮栏)挡住元素。本函数检测元素中心
+    是否被别的元素盖住(elementFromPoint),被盖就向上滚动直到露出来。
+
+    不依赖具体选择器,通用:适用于任何被 fixed/sticky 元素遮挡的场景。
+    """
+    # 用 locator 在 JS 侧的唯一标记:先取它的元素,再判断 elementFromPoint
+    # 返回的顶层元素是否是该元素或其后代。用一个 Symbol 属性做临时标记,
+    # 避免改 DOM 结构、避免和业务 class 冲突。
+    handle = locator.element_handle()
+    if handle is None:
+        return
+    for _ in range(8):  # 最多滚 8 次(每次 120px,约 1 屏,够露出来)
+        try:
+            box = locator.bounding_box()
+        except Exception:
+            return
+        if box is None:
+            return
+        cx = box["x"] + box["width"] / 2
+        cy = box["y"] + box["height"] / 2
+        # 标记目标元素,问 elementFromPoint 落点是否在它子树内
+        is_target = page.evaluate(
+            """([el, x, y]) => {
+                el.setAttribute('__click_target__', '');
+                const top = document.elementFromPoint(x, y);
+                el.removeAttribute('__click_target__');
+                if (!top) return false;
+                return top === el || el.contains(top);
+            }""",
+            [handle, cx, cy],
+        )
+        if is_target:
+            return  # 中心没被遮挡
+        # 被遮挡 → 向上滚动 120px 让元素露出 bar 之上
+        page.evaluate("window.scrollBy(0, -120)")
+        page.wait_for_timeout(250)
+
+
+
 def physical_click(
     page: Page,
     locator: Locator,
@@ -104,6 +147,9 @@ def physical_click(
         locator.scroll_into_view_if_needed(timeout=5000)
     except Exception:
         pass
+    # scroll_into_view 不考虑底部 fixed bar 遮挡:检测中心是否被盖,
+    # 被盖就向上滚(解决小红书发布页底部发布按钮栏挡住正文编辑器的问题)。
+    _ensure_clickable(page, locator)
     coord = _box_center_screen(page, locator)
     if coord is None:
         raise RuntimeError("physical_click: 无法获取元素坐标(bounding_box 为空)")
@@ -118,6 +164,7 @@ def physical_click(
                 locator.scroll_into_view_if_needed(timeout=3000)
             except Exception:
                 pass
+            _ensure_clickable(page, locator)
             new_coord = _box_center_screen(page, locator)
             if new_coord is not None:
                 cx, cy = new_coord

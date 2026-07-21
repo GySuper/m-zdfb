@@ -28,6 +28,12 @@ from patchright.sync_api import Locator, Page
 # 窗口最大化冲突(鼠标自然到 0,0),生产环境关闭。改成用 pyautogui.FAILSAFE = False。
 pyautogui.FAILSAFE = False
 
+# 底部 fixed/sticky bar 预留高度(px,CSS 视口坐标)。发布页底部常有固定的
+# 「发布/暂存」按钮栏挡住正文编辑器下沿,物理点击会点飞到 bar 上。
+# _box_center_screen 在元素中心离视口底 < 此值时,把点击点上移到 box 上 1/4 避让。
+# 按实测数据反推 bar 约 70px,取 100px 留足余量。
+_BOTTOM_BAR_RESERVE = 100
+
 # 标点/空格打字时停顿更长(真人在标点处会慢下来)
 _PUNCTUATION = set("，。！？、；：, .!?;:\n")
 
@@ -63,25 +69,37 @@ def _window_offset(page: Page) -> dict[str, float]:
 
 
 def _box_center_screen(page: Page, locator: Locator) -> tuple[float, float] | None:
-    """取 locator 元素中心的屏幕绝对坐标。拿不到 bounding_box 返回 None。"""
+    """取 locator 元素中心的屏幕绝对坐标。
+
+    底部 fixed bar 避让:若元素中心离视口底部太近(< _BOTTOM_BAR_RESERVE,
+    预留给底部固定 bar 如发布按钮栏的高度),点击点 y 上移到 box 上 1/4,
+    让点击落在 bar 之上的可见区域。仅当元素高度足以避让时才上移,
+    否则保持中心(极矮元素无避让空间,点中心最稳)。
+    """
     box = locator.bounding_box()
     if box is None:
         return None
     geo = _window_offset(page)
     cx = geo["sx"] + geo["dx"] + box["x"] + box["width"] / 2
-    cy = geo["sy"] + geo["dy"] + box["y"] + box["height"] / 2
-    # 诊断:打印全部坐标数据,排查 CSS 视口坐标与 pyautogui 屏幕坐标不一致
+    # 默认点垂直中心
+    target_cy_css = box["y"] + box["height"] / 2
+    # 底部 fixed bar 避让:元素中心离视口底太近 → 改点 box 上 1/4
+    try:
+        inner_h = page.evaluate("() => window.innerHeight")
+        center_to_bottom = inner_h - target_cy_css
+        if center_to_bottom < _BOTTOM_BAR_RESERVE and box["height"] > _BOTTOM_BAR_RESERVE:
+            target_cy_css = box["y"] + box["height"] / 4  # 上 1/4,避开底部 bar
+    except Exception:
+        pass
+    cy = geo["sy"] + geo["dy"] + target_cy_css
+    # 诊断:打印坐标数据(定位稳定后删除)
     try:
         screen_size = pyautogui.size()
-        win_info = page.evaluate(
-            "() => ({dpr: devicePixelRatio, iw: innerWidth, ih: innerHeight, ow: outerWidth, oh: outerHeight})"
-        )
         logger.info(
             f"[human_input][diag] box=({box['x']:.0f},{box['y']:.0f},{box['width']:.0f}x{box['height']:.0f}) "
-            f"css中心=({box['x']+box['width']/2:.0f},{box['y']+box['height']/2:.0f}) "
-            f"dpr={win_info['dpr']} inner={win_info['iw']}x{win_info['ih']} outer={win_info['ow']}x{win_info['oh']} "
-            f"窗口geo sx={geo['sx']} sy={geo['sy']} dx={geo['dx']} dy={geo['dy']} "
-            f"算出屏幕坐标=({cx:.0f},{cy:.0f}) "
+            f"css中心y={box['y']+box['height']/2:.0f} 实际点击css_y={target_cy_css:.0f} "
+            f"inner_h={inner_h if 'inner_h' in dir() else '?'} "
+            f"窗口geo sy={geo['sy']} dy={geo['dy']} 算出屏幕坐标=({cx:.0f},{cy:.0f}) "
             f"pyautogui.size={screen_size[0]}x{screen_size[1]}"
         )
     except Exception:
@@ -94,47 +112,6 @@ def _type_delay() -> int:
     val = random.gauss(130, 25)
     return max(60, min(220, round(val)))
 
-
-def _ensure_clickable(page: Page, locator: Locator) -> None:
-    """确保物理点击不会被底部 fixed bar 等遮挡。
-
-    scroll_into_view_if_needed 只保证元素进入视口边界,不知道视口底部有
-    fixed bar(如小红书发布页的发布按钮栏)挡住元素。本函数检测元素中心
-    是否被别的元素盖住(elementFromPoint),被盖就向上滚动直到露出来。
-
-    不依赖具体选择器,通用:适用于任何被 fixed/sticky 元素遮挡的场景。
-    """
-    # 用 locator 在 JS 侧的唯一标记:先取它的元素,再判断 elementFromPoint
-    # 返回的顶层元素是否是该元素或其后代。用一个 Symbol 属性做临时标记,
-    # 避免改 DOM 结构、避免和业务 class 冲突。
-    handle = locator.element_handle()
-    if handle is None:
-        return
-    for _ in range(8):  # 最多滚 8 次(每次 120px,约 1 屏,够露出来)
-        try:
-            box = locator.bounding_box()
-        except Exception:
-            return
-        if box is None:
-            return
-        cx = box["x"] + box["width"] / 2
-        cy = box["y"] + box["height"] / 2
-        # 标记目标元素,问 elementFromPoint 落点是否在它子树内
-        is_target = page.evaluate(
-            """([el, x, y]) => {
-                el.setAttribute('__click_target__', '');
-                const top = document.elementFromPoint(x, y);
-                el.removeAttribute('__click_target__');
-                if (!top) return false;
-                return top === el || el.contains(top);
-            }""",
-            [handle, cx, cy],
-        )
-        if is_target:
-            return  # 中心没被遮挡
-        # 被遮挡 → 向上滚动 120px 让元素露出 bar 之上
-        page.evaluate("window.scrollBy(0, -120)")
-        page.wait_for_timeout(250)
 
 
 
@@ -163,9 +140,8 @@ def physical_click(
         locator.scroll_into_view_if_needed(timeout=5000)
     except Exception:
         pass
-    # scroll_into_view 不考虑底部 fixed bar 遮挡:检测中心是否被盖,
-    # 被盖就向上滚(解决小红书发布页底部发布按钮栏挡住正文编辑器的问题)。
-    _ensure_clickable(page, locator)
+    # 底部 fixed bar 避让在 _box_center_screen 内处理(滚动对 fixed bar 无效,
+    # 改为把点击点上移到 box 上 1/4)。
     coord = _box_center_screen(page, locator)
     if coord is None:
         raise RuntimeError("physical_click: 无法获取元素坐标(bounding_box 为空)")
@@ -180,7 +156,6 @@ def physical_click(
                 locator.scroll_into_view_if_needed(timeout=3000)
             except Exception:
                 pass
-            _ensure_clickable(page, locator)
             new_coord = _box_center_screen(page, locator)
             if new_coord is not None:
                 cx, cy = new_coord

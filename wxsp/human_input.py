@@ -70,6 +70,22 @@ def _box_center_screen(page: Page, locator: Locator) -> tuple[float, float] | No
     geo = _window_offset(page)
     cx = geo["sx"] + geo["dx"] + box["x"] + box["width"] / 2
     cy = geo["sy"] + geo["dy"] + box["y"] + box["height"] / 2
+    # 诊断:打印全部坐标数据,排查 CSS 视口坐标与 pyautogui 屏幕坐标不一致
+    try:
+        screen_size = pyautogui.size()
+        win_info = page.evaluate(
+            "() => ({dpr: devicePixelRatio, iw: innerWidth, ih: innerHeight, ow: outerWidth, oh: outerHeight})"
+        )
+        logger.info(
+            f"[human_input][diag] box=({box['x']:.0f},{box['y']:.0f},{box['width']:.0f}x{box['height']:.0f}) "
+            f"css中心=({box['x']+box['width']/2:.0f},{box['y']+box['height']/2:.0f}) "
+            f"dpr={win_info['dpr']} inner={win_info['iw']}x{win_info['ih']} outer={win_info['ow']}x{win_info['oh']} "
+            f"窗口geo sx={geo['sx']} sy={geo['sy']} dx={geo['dx']} dy={geo['dy']} "
+            f"算出屏幕坐标=({cx:.0f},{cy:.0f}) "
+            f"pyautogui.size={screen_size[0]}x{screen_size[1]}"
+        )
+    except Exception:
+        pass
     return cx, cy
 
 

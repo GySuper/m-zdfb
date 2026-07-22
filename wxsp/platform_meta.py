@@ -138,6 +138,26 @@ REGISTRY: dict[str, PlatformMeta] = {
         field_map_defaults={"tags": "标签", "cover": "封面文件"},
         needs_fingerprint=False,
     ),
+    "pinduoduo": PlatformMeta(
+        key="pinduoduo",
+        label="拼多多",
+        title_min=1,  # 无标题框(同快手),title_min 仅占位
+        login_meta={
+            # SSO 登录链多跳重定向:未登录停 mms.pinduoduo.com/login;
+            # 登录成功落地 live.pinduoduo.com/n-creator/video/home。
+            "home_url": "https://live.pinduoduo.com/n-creator/video/home",
+            "mode": "logged_in_url",
+            "logged_in_fragment": "live.pinduoduo.com/n-creator/video/home",
+        },
+        field_map_defaults={
+            "tags": "标签",
+            "cover": "封面文件",
+            "declaration": "内容声明",  # 拼多多特有(同淘宝)
+            "product_ids": "商品ID",  # 拼多多特有(同淘宝)
+        },
+        needs_fingerprint=False,  # 跟抖音/快手/淘宝一致(用户确认)
+        has_title=False,  # 无独立标题框(同快手)
+    ),
 }
 
 ALL_PLATFORMS: list[str] = list(REGISTRY)

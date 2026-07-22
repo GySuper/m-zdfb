@@ -28,12 +28,12 @@ validator / setup / errors / models / feishu / TaskBundle,只新增 2 个平台�
 | 话题标签 | 描述框内键入 `#关键词` → 弹 `.caret-popover-root` 候选 → 点 `.sabo-hash-tag-item` 选中 | 实测:与抖音/小红书机制一致(输入#触发搜索下拉) |
 | **内容声明(必填*)** | **拼多多特有**,下拉 6 选项,做成**飞书字段**供运营选择 | 用户确认「做成字段,运营可选」;默认「内容无需标注」;复用 TaskBundle.declaration + 淘宝 `_set_declaration` 模式 |
 | **挂商品** | **需要**,参考淘宝光合 `_add_products` | 用户确认「需要挂商品,参考淘宝」;拼多多「商品ID」tab 输入 ID → 下一步直接绑定(比淘宝简单,无需勾选卡片) |
-| 定时发布 | **支持**(绑商品后才出现的「发布设置」radio) | 实测:绑商品后表单展开「发布设置:立即发布/定时发布」radio;选定时后填时间。不绑商品时无此选项 |
+| 定时发布 | **必走定时发布**(用户确认);绑商品后「发布设置」radio 选定时 | 实测:必挂商品才展开完整表单;选「定时发布」radio → 填日期框(`beast-core-datePicker`,格式带秒)+ 时间框 → 点确认 |
 | 平台特有飞书字段 | `declaration`(内容声明) + `product_ids`(商品ID) + `cover`(封面) | `field_map_defaults` 见 §3 |
 | remote_url 抽取 | 不抽取 | 定时发布到点前无公开链接(同抖音/快手/淘宝) |
 | 平台 key / 中文名 | `pinduoduo` / `拼多多`,配置文件 `config_pinduoduo.yaml` | 完整拼音 key,对齐 `taobao_guanghe`/`xiaohongshu` 命名惯例 |
 
-### 已实测确认的页面结构(2026-07-22 对真实账号「九阳豆浆官方旗舰店」校验)
+### 已实测确认的页面结构(2026-07-22 对真实账号「九阳豆浆官方旗舰店」校验,含真发)
 
 | 元素 | 定位 | 状态 |
 |---|---|---|
@@ -44,19 +44,35 @@ validator / setup / errors / models / feishu / TaskBundle,只新增 2 个平台�
 | 描述框 | `div[contenteditable=true].sabo-root` | ✅可写入验证 |
 | 字数上限 | 500 字(`N/500` 计数器) | ✅ |
 | 话题候选容器 | `.caret-popover-root`,单项 `.sabo-hash-tag-item` 内含 `.text-edit_topicItem__` | ✅ |
-| 内容声明下拉 | textbox「请选择」,6 选项(内容无需标注/含AI生成内容/含虚构演绎内容/内容含营销信息/内容为转载/个人观点,仅供参考) | ✅ |
-| 商品弹窗 | 「店铺商品」tab(列表+radio) / 「商品ID」tab(输入框+下一步) | ✅ |
+| 内容声明下拉 | `input[data-testid=beast-core-select-htmlInput]`,6 选项(内容无需标注/含AI生成内容/含虚构演绎内容/内容含营销信息/内容为转载/个人观点,仅供参考) | ✅ |
+| 商品弹窗 | 「店铺商品」tab(列表+radio) / 「商品ID」tab(`input[placeholder*=商品id]`) | ✅ |
 | 商品ID 绑定 | 输入 ID → 点「下一步」→ 直接绑定(无需勾选) | ✅ |
 | 绑商品后展开 | 展示悬浮窗 radio / 同步店铺动态 radio / 发布设置(立即/定时)radio | ✅ |
 | 发布按钮 | button「发布」(主) | ✅ |
-| 定时发布 | 绑商品后才出现「发布设置」radio + 时间输入 | ✅ |
+| 定时发布 radio | 绑商品后「发布设置」radio:立即发布/定时发布 | ✅ |
+| 定时日期框 | `input[data-testid=beast-core-datePicker-htmlInput]`,格式 `YYYY-MM-DD HH:MM:SS`(带秒) | ✅ |
+| 定时时间子框 | `input[data-testid=beast-core-timePicker-html-input]`,格式 `HH:MM:SS` | ✅ |
+| 定时日历面板 | table + cell 格子 + 「确认」按钮(点格子改日期,**必须点确认才生效**) | ✅ |
+| 封面弹窗 | 「编辑封面」→「本地上传」tab → `input[type=file][accept=.jpg,.jpeg,.png]` →「确定」 | ✅ |
+| **成功判定** | **点发布后跳转 `n-creator/video/mall-goods-video`(商家带货视频管理页)** | ✅真发验证 |
 
-### 仍未实测(实现时以 dry-run 对真实页校验,标注 TODO)
+### 真发实测结论(2026-07-22)
 
-- 点「发布」后的**成功判定 URL/文案**(未真发,避免污染账号)
+**成功判定**:点「发布」后,**URL 从 `n-creator/video/home` 跳转到 `n-creator/video/mall-goods-video`**
+(商家带货视频管理页,标题变「商家带货视频」)。**无 toast/文案弹窗**,是直接跳页。
+故成功判定 = **URL 离开 `home` 进入 `mall-goods-video`**(对齐淘宝「URL 离开发布页 = 成功」策略)。
+
+**定时发布填值方式**(实测踩坑):
+- beast-core 日期选择器的 `fill()` 会卡死(组件在面板打开时拦截输入)。
+- 点日历格子改日期有效,但**必须点「确认」按钮才生效**(只点格子不确认会丢失)。
+- 本项目用 `human_input` 物理输入(human_input.py 的 `physical_type`/`physical_click`)绕过组件拦截,
+  与小红书定时输入策略一致。实现时:点日期框开日历 → 物理键入日期 → 改时间框 → 物理键入时间 → 点确认。
+
+**封面上传**:与小红书封面弹窗流程一致(切本地上传 tab → set_input_files → 确定)。
+
+### 仍未实测
+
 - 风控文案(未触发,沿用通用关键词)
-- 定时发布时间输入框的具体 DOM(绑商品后选「定时发布」radio 才渲染,本次未深入)
-- 封面上传弹窗(本次未点开「编辑封面」)
 
 ---
 
@@ -118,10 +134,10 @@ URL 含 `n-creator/video/home` = 登录成功的硬信号(对齐小红书 `logge
 ```python
 """拼多多多多视频发布页选择器 —— 改版时的唯一改动点。
 
-2026-07-22 对真实账号(九阳豆浆官方旗舰店)逐项实测校验:登录态/上传/描述框/话题候选/
-内容声明下拉/商品弹窗(店铺商品+商品ID两 tab)/绑商品后展开的发布设置均已命中。
-**仍未实测**:点发布后成功判定 URL/文案(未真发)、定时发布时间输入框 DOM(选定时 radio
-后才渲染,本次未深入)、封面弹窗(未点开编辑封面)。优先语义化定位(text=/role=),少用脆弱 class。
+2026-07-22 对真实账号(九阳豆浆官方旗舰店)**真发实测**(含完整定时发布流程)校验:
+登录态/上传/描述框/话题候选/内容声明下拉/商品弹窗(店铺商品+商品ID两 tab)/绑商品后展开的
+发布设置/定时发布日历/封面弹窗/点发布后跳转均已命中并验证。
+**仍未实测**:风控文案(未触发,沿用通用关键词)。优先语义化定位(testid/text=),少用脆弱 class。
 """
 
 # ---- 登录 URL ----
@@ -164,11 +180,23 @@ PRODUCT_NEXT_BUTTON = 'button:has-text("下一步")'  # 输入ID后点下一步�
 
 # ---- 发布设置(绑商品后出现)----
 SCHEDULE_RADIO = 'radio:has-text("定时发布")'  # 发布设置 radio
+SCHEDULE_DATE_INPUT = 'input[data-testid="beast-core-datePicker-htmlInput"]'  # 格式 YYYY-MM-DD HH:MM:SS
+SCHEDULE_TIME_INPUT = 'input[data-testid="beast-core-timePicker-html-input"]'  # 格式 HH:MM:SS(日历面板内)
+SCHEDULE_CONFIRM_BUTTON = 'button:has-text("确认")'  # 日历确认(点格子后必须点确认)
+
+# ---- 封面 ----
+COVER_EDIT_BUTTON = 'button:has-text("编辑封面")'
+COVER_MODAL_TITLE = "封面选择"
+COVER_UPLOAD_TAB = "text=本地上传"
+COVER_FILE_INPUT = 'input[type="file"][accept=".jpg,.jpeg,.png"]'
+COVER_CONFIRM_BUTTON = 'button:has-text("确定")'
 
 # ---- 发布 / 风控 / 成功 ----
 PUBLISH_BUTTON = 'button:has-text("发布")'
 RISK_CONTROL_KEYWORDS = ("操作频繁", "操作过于频繁", "请稍后", "账号异常", "违规")
-SUCCESS_INDICATORS = ("发布成功",)  # 待真发校验补充
+# 真发实测(2026-07-22):点发布后跳转 mall-goods-video(无 toast),见 §6
+SUCCESS_URL_FRAGMENT = "n-creator/video/mall-goods-video"
+SUCCESS_INDICATORS = ("发布成功", "定时发布成功")  # 兜底文案(实测无,保留对齐其他平台)
 ```
 
 **注意**:拼多多样式 class 是 CSS-module hash(如 `no-video_wrap__XJ9r4`),hash 部分会随构建变。
@@ -211,13 +239,14 @@ class hash 仅在无语义锚点时用前缀模糊匹配(`div[class^="no-video_w
 
 ---
 
-## 6. 成功判定的风险点(实现时重点)
+## 6. 成功判定(真发实测,2026-07-22)
 
-拼多多有两个干扰因素,影响成功判定:
-1. **上传未发布的残留**:取消发布后视频仍在,下次进首页提示「上次有N个视频上传成功但未发布」。
-   不能用此文案判成功(它持续存在)。须用点「发布」后的跳转/「发布成功」文案。
-2. **单页应用无 URL 切换**:发布页是 SPA,点发布后可能不跳独立成功页(待真发确认)。
-   成功判定优先「发布成功」文案,辅以 URL 变化。
+点「发布」后**直接跳页**,无 toast/文案:
+- 发布页 URL `n-creator/video/home` → 跳转 `n-creator/video/mall-goods-video`(商家带货视频管理页)
+- 成功判定 = **URL 从 `home` 进入 `mall-goods-video`**(对齐淘宝「URL 离开发布页 = 成功」)
+
+**残留干扰**:取消发布后视频仍在,下次进首页提示「上次有N个视频上传成功但未发布」。
+不能用此文案判成功(它持续存在)。已用 URL 跳转规避。
 
 ---
 

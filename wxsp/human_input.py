@@ -349,3 +349,48 @@ def bring_browser_to_front(page: Page) -> None:
         except Exception:
             pass
     logger.info("[human_input] 浏览器窗口已激活+最大化")
+
+
+def block_user_input() -> None:
+    """禁用真实键盘/鼠标输入(仅 Windows)。
+
+    用 Win32 BlockInput:它只拦截真实用户硬件输入,不影响程序通过 SendInput
+    注入的输入(pyautogui Windows 底层正是 SendInput),故自动化照常运行。
+    非 Windows / 调用失败 → no-op(best-effort,不阻断主流程)。
+    紧急解锁:Ctrl+Alt+Del 始终能强制解开 BlockInput(Windows 设计保证)。
+
+    ⚠️ BlockInput 有前台/权限要求:调用线程需持有前台,否则静默返回 0 不生效。
+    本函数检查返回值并告警(调用时前台是 Chrome 不是本进程,需 Windows 实测确认)。
+    """
+    import sys
+
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ok = ctypes.windll.user32.BlockInput(True)
+        if ok:
+            logger.info("[human_input] 已禁用真实键盘/鼠标输入")
+        else:
+            # 返回 0:前台/权限不满足,BlockInput 没生效。自动化仍跑,但人碰输入仍会干扰。
+            logger.warning("[human_input] BlockInput 返回 0,未生效(前台/权限不满足)")
+    except Exception as err:
+        logger.warning(f"[human_input] 禁用输入失败(继续执行): {err}")
+
+
+def unblock_user_input() -> None:
+    """恢复真实键盘/鼠标输入(仅 Windows)。best-effort,失败仅告警。"""
+    import sys
+
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.user32.BlockInput(False)
+        logger.info("[human_input] 已恢复键盘/鼠标输入")
+    except Exception as err:
+        logger.warning(
+            f"[human_input] 恢复输入失败(可能仍锁着,Ctrl+Alt+Del 可强制解锁): {err}"
+        )

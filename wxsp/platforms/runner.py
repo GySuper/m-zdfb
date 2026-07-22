@@ -28,6 +28,7 @@ from sqlmodel import Session
 
 from wxsp.browser import browser_context
 from wxsp.config import Settings
+from wxsp.human_input import block_user_input, unblock_user_input
 from wxsp.db import claim_task, get_engine, init_db, session_scope, transition_task
 from wxsp.errors import PublisherError, classify
 from wxsp.feishu import FeishuApiError, make_client, writeback_row
@@ -212,6 +213,10 @@ def run_publish(
             account_id=bundle.account_id,
             platform=spec.platform_key,
         ) as page:
+            # 禁用真实键盘/鼠标输入:浏览器已激活,物理操作(上传/填表/发布)开始前
+            # 锁定,防人碰键盘鼠标打乱 pyautogui 屏幕坐标操作。锁不影响 pyautogui
+            # (SendInput 注入不被 BlockInput 拦),任何路径都在 finally 解锁。
+            block_user_input()
             try:
                 spec.pre_publish(page, bundle, staged, ctx)
 
@@ -252,6 +257,7 @@ def run_publish(
         logger.exception(f"[{spec.platform_key}] publish 顶层未分类异常")
         return result
     finally:
+        unblock_user_input()  # 任何路径(成功/失败/中断)都恢复输入,防锁死
         _finalize(engine, settings, ctx, bundle, spec)
 
 

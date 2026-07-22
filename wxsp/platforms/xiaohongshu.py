@@ -287,10 +287,12 @@ def _set_schedule(page: Page, publish_at: datetime) -> None:
         return  # 定时设置失败不阻断发布(降级为即时发布)
 
     # 物理点击日期框聚焦 → Cmd/Ctrl+A 全选 → 物理输入覆盖 → 回车确认
+    # force_paste:定时日期含冒号 :,中文输入法下逐字符 press 会被拦截
+    # 产出中文全角冒号 :。改走剪贴板粘贴,不受输入法影响,保证字符精确。
     physical_click(page, inp)
     _wait_xhs(page, 400, 800)
     physical_select_all()
-    physical_type(page, publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT))
+    physical_type(page, publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT), force_paste=True)
     _wait_xhs(page, 400, 800)
     physical_press("Enter")
     _wait_xhs(page, 2000, 3000)

@@ -188,18 +188,23 @@ def physical_click(
         raise RuntimeError(f"物理点击验证失败(重试 {retries} 次仍未通过),终止任务")
 
 
-def physical_type(page: Page, text: str) -> None:
+def physical_type(page: Page, text: str, *, force_paste: bool = False) -> None:
     """物理键盘输入中文/混合文本。
 
     pyautogui 的 press/typewrite 只支持 ASCII 键名,不支持中文 Unicode 字符。
     故对中文/混合文本用剪贴板粘贴(Cmd+V/Ctrl+V)——仍是 OS 级物理键盘事件
     (isTrusted=true),只是输入方式从逐字符改为一次性粘贴。
     纯英文/数字短文本保留逐字符 press(保留打字节奏特征)。
+
+    force_paste:强制走剪贴板粘贴(哪怕纯 ASCII)。用于标点会被中文输入法
+    拦截改写的场景(如定时日期的冒号 : 在中文输入法下变 :),粘贴不受
+    输入法影响,保证字符精确。代价是丢失打字节奏特征,但对原生 input
+    (日期框等)无妨。
     """
     import sys
 
     has_unicode = any(ord(c) > 127 for c in text)
-    if not has_unicode:
+    if not has_unicode and not force_paste:
         # 纯 ASCII:逐字符 press + 正态分布间隔
         chars_typed = 0
         for char in text:
@@ -212,7 +217,7 @@ def physical_type(page: Page, text: str) -> None:
             if chars_typed % random.randint(8, 15) == 0:
                 time.sleep(random.uniform(0.8, 2.0))
     else:
-        # 含中文/Unicode:剪贴板粘贴(OS 级物理快捷键,isTrusted=true)
+        # 含中文/Unicode 或 force_paste:剪贴板粘贴(OS 级物理快捷键,isTrusted=true)
         import pyperclip  # type: ignore[import-untyped]
 
         pyperclip.copy(text)

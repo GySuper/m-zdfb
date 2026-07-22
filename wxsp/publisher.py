@@ -12,6 +12,7 @@ from wxsp.platforms.base import (  # re-export for callers
 )
 from wxsp.platforms.douyin import DouyinPublisher
 from wxsp.platforms.kuaishou import KuaishouPublisher
+from wxsp.platforms.pinduoduo import PinduoduoPublisher
 from wxsp.platforms.taobao_guanghe import TaobaoGuanghePublisher
 from wxsp.platforms.tencent_channel import TencentChannelPublisher
 from wxsp.platforms.xiaohongshu import XiaohongshuPublisher
@@ -24,6 +25,7 @@ _PUBLISHERS: dict[str, PlatformPublisher] = {
     "douyin": DouyinPublisher(),
     "kuaishou": KuaishouPublisher(),
     "xiaohongshu": XiaohongshuPublisher(),
+    "pinduoduo": PinduoduoPublisher(),
 }
 
 

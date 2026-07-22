@@ -295,8 +295,10 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
             logger.warning(
                 f"[pinduoduo] 商品 ID JSON 解析失败 task_id={ctx.task_id}: {bundle.product_ids_json!r}"
             )
-    if product_ids:
-        _add_products(page, product_ids=product_ids)
+    # 必挂商品(用户要求):为空直接失败,避免后续定时发布等步骤因缺商品而误导性报错
+    if not product_ids:
+        raise ProductNotFound("拼多多必挂商品,但 product_ids 为空")
+    _add_products(page, product_ids=product_ids)
     random_pause(step_pause)
 
     ctx.last_step = "cover"

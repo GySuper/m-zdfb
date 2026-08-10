@@ -139,7 +139,7 @@ def _launch_real_chrome(
     # 非打包/headed 模式下用屏幕尺寸设窗口大小(--start-maximized 的可靠替代)
     if not headless:
         try:
-            import pyautogui
+            import pyautogui  # type: ignore[import-untyped]
 
             screen_w, screen_h = pyautogui.size()
             argv.append(f"--window-size={screen_w},{screen_h - 40}")
@@ -165,10 +165,10 @@ def _launch_real_chrome(
     # 释放前台窗口,让新 Chrome 能正常弹到前台。
     if sys.platform == "win32" and not headless:
         try:
-            import pyautogui
+            import pyautogui  # type: ignore[import-untyped]
 
             pyautogui.hotkey("alt", "tab", _pause=False)
-            time.sleep(0.3)
+            _time.sleep(0.3)
         except Exception:
             pass
     proc = subprocess.Popen(argv, **popen_kwargs)
@@ -196,7 +196,7 @@ def _launch_real_chrome(
         try:
             import pyautogui
 
-            time.sleep(1)  # 等 Chrome 窗口完全渲染
+            _time.sleep(1)  # 等 Chrome 窗口完全渲染
             w, h = pyautogui.size()
             pyautogui.click(w // 2, h // 2)
         except Exception:

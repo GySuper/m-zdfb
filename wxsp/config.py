@@ -384,8 +384,7 @@ def load_settings(
     path = get_config_path(platform)
     if not path.exists():
         raise FileNotFoundError(
-            f"找不到配置文件: {path}\n"
-            f"请创建 config_{platform}.yaml (可参考 config.example.yaml)"
+            f"找不到配置文件: {path}\n请创建 config_{platform}.yaml (可参考 config.example.yaml)"
         )
     raw2 = path.read_text(encoding="utf-8")
     expanded2 = _expand_env_vars(raw2)

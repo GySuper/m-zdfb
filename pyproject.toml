@@ -56,6 +56,8 @@ packages = ["wxsp"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# apc_sdk 是 vendored 子包(独立 pyproject.toml),不纳入主项目 lint;与 mypy 只跑 wxsp 对齐
+exclude = ["apc_sdk"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "RUF"]

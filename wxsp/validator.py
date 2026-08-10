@@ -140,9 +140,16 @@ def validate(
 
     errors: list[FieldError] = []
 
-    title = _check_title(row.fields, fm.title, errors, platform=platform, has_title=has_title)
-    tags = _check_tags(row.fields, fm.tags, errors, platform=platform)
     description = _get_str(row.fields.get(fm.description))
+    title = _check_title(
+        row.fields,
+        fm.title,
+        errors,
+        platform=platform,
+        has_title=has_title,
+        has_description=description is not None,
+    )
+    tags = _check_tags(row.fields, fm.tags, errors, platform=platform)
     topic = _get_str(row.fields.get(fm.topic))
     original_claim = bool(row.fields.get(fm.original_claim) or False)
     account_id = _check_account(row.fields, fm.account, active_accounts, errors)
@@ -257,12 +264,16 @@ def _check_title(
     *,
     platform: str = "tencent_channel",
     has_title: bool = True,
+    has_description: bool = False,
 ) -> str | None:
     raw = _get_str(fields.get(field_name))
     # 无标题平台(快手):标题可选、不校验长度(页面无标题框,仅作描述兜底),原样透传。
     if not has_title:
         return raw
     if not raw:
+        # 有标题平台:标题和描述有一个即可(对齐 _is_incomplete)。标题空但描述非空 → 放行。
+        if has_description:
+            return None
         errors.append(FieldError(field=field_name, message="未指定"))
         return None
     n = len(raw)

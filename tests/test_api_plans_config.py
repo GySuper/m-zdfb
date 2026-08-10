@@ -567,7 +567,9 @@ def test_accounts_add_generates_id_and_writes_entry(
     assert new["daily_limit"] == 15
     assert new["video_search_root"] == "/tmp/nas/videos/z"
     assert new["cover_search_root"] == "/tmp/nas/covers/z"
-    assert new["user_data_dir"] == f"./data/chrome-profiles/{aid}"
+    # _profile_dir_for 经 get_user_data_dir() 生成绝对路径(chdir(tmp_path) 下即
+    # tmp_path/data/chrome-profiles/<aid>);绝对路径不依赖 cwd,比旧的 ./data 相对路径健壮。
+    assert new["user_data_dir"] == str(tmp_path / "data" / "chrome-profiles" / aid)
 
 
 def test_accounts_add_rejects_duplicate_display_name_with_friendly_msg(

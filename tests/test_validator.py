@@ -214,11 +214,14 @@ from wxsp.validator import validate  # noqa: E402
 
 @pytest.mark.parametrize(
     "missing_field",
-    ["标题", "视频文件", "执行日期", "定时发布时间"],
+    ["视频文件", "执行日期", "定时发布时间"],
 )
 def test_validate_incomplete_when_core_field_missing(tmp_path: Path, missing_field: str) -> None:
-    """4 个核心字段(标题/视频文件/执行日期/定时发布时间)任一空 → incomplete=True,errors=[]。
-    业务还没填完的草稿,sync 该跳过且不回写飞书,不能当成"失败"。"""
+    """核心字段(视频文件/执行日期/定时发布时间)任一空 → incomplete=True,errors=[]。
+    业务还没填完的草稿,sync 该跳过且不回写飞书,不能当成"失败"。
+
+    注:标题不再单列为核心字段 —— 有标题平台标题和描述有一个即可(见
+    test_title_platform_title_or_description_ok)。"""
     empty_value: Any = None if missing_field in ("执行日期", "定时发布时间") else ""
     row = _row_with(tmp_path, **{missing_field: empty_value})
     nas = _stub_nas_with_video(tmp_path)
@@ -289,8 +292,8 @@ def test_kuaishou_incomplete_when_description_missing(tmp_path: Path) -> None:
     assert result.errors == []
 
 
-def test_title_platform_still_requires_title(tmp_path: Path) -> None:
-    """回归:有标题框的平台(抖音)标题仍必填,空标题即使有描述 → incomplete。"""
+def test_title_platform_title_or_description_ok(tmp_path: Path) -> None:
+    """有标题框的平台(抖音):标题和描述有一个即可。标题空 + 描述非空 → ok,不报"标题未指定"。"""
     row = _row_with(tmp_path, 标题="", 描述="有描述但没标题")
     nas = _stub_nas_with_video(tmp_path)
     result = validate(
@@ -301,7 +304,8 @@ def test_title_platform_still_requires_title(tmp_path: Path) -> None:
         active_accounts={"account_a": "测试号"},
         platform="douyin",
     )
-    assert result.incomplete is True
+    assert result.ok is True
+    assert not any(e.field == "标题" for e in result.errors)
 
 
 def test_validate_title_too_short(tmp_path: Path) -> None:

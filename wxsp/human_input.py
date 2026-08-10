@@ -35,7 +35,7 @@ pyautogui.FAILSAFE = False
 _BOTTOM_BAR_RESERVE = 100
 
 # 标点/空格打字时停顿更长(真人在标点处会慢下来)
-_PUNCTUATION = set("，。！？、；：, .!?;:\n")
+_PUNCTUATION = set("，。！？、；：, .!?;:\n")  # noqa: RUF001  # 含中文全角标点(有意数据)
 
 # pyautogui 按键名映射(patchright → pyautogui)
 _KEY_MAP = {
@@ -97,7 +97,7 @@ def _box_center_screen(page: Page, locator: Locator) -> tuple[float, float] | No
         screen_size = pyautogui.size()
         logger.info(
             f"[human_input][diag] box=({box['x']:.0f},{box['y']:.0f},{box['width']:.0f}x{box['height']:.0f}) "
-            f"css中心y={box['y']+box['height']/2:.0f} 实际点击css_y={target_cy_css:.0f} "
+            f"css中心y={box['y'] + box['height'] / 2:.0f} 实际点击css_y={target_cy_css:.0f} "
             f"inner_h={inner_h if 'inner_h' in dir() else '?'} "
             f"窗口geo sy={geo['sy']} dy={geo['dy']} 算出屏幕坐标=({cx:.0f},{cy:.0f}) "
             f"pyautogui.size={screen_size[0]}x{screen_size[1]}"
@@ -111,8 +111,6 @@ def _type_delay() -> int:
     """正态分布打字延迟 ms(均值 130,标准差 25,clamp 60-220)。"""
     val = random.gauss(130, 25)
     return max(60, min(220, round(val)))
-
-
 
 
 def physical_click(
@@ -391,6 +389,4 @@ def unblock_user_input() -> None:
         ctypes.windll.user32.BlockInput(False)
         logger.info("[human_input] 已恢复键盘/鼠标输入")
     except Exception as err:
-        logger.warning(
-            f"[human_input] 恢复输入失败(可能仍锁着,Ctrl+Alt+Del 可强制解锁): {err}"
-        )
+        logger.warning(f"[human_input] 恢复输入失败(可能仍锁着,Ctrl+Alt+Del 可强制解锁): {err}")

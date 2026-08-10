@@ -28,6 +28,9 @@ _ref/
 dist/
 build/
 
+# Playwright MCP 调试日志(每次浏览器调试生成一份,不应入库)
+.playwright-mcp/
+
 # Editor
 .idea/
 .vscode/

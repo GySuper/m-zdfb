@@ -31,14 +31,6 @@ from wxsp.errors import (
     RiskControl,
     UploadFailed,
 )
-from wxsp.human_input import (
-    bring_browser_to_front,
-    physical_click,
-    physical_press,
-    physical_select_all,
-    physical_type,
-    physical_upload,
-)
 from wxsp.models import Account
 from wxsp.nas import stage_to_tmp
 from wxsp.platforms import pinduoduo_selectors as sel
@@ -79,10 +71,9 @@ def _verify_logged_in(page: Page) -> None:
 
 
 def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> None:
-    # 混合上传:物理点击上传区(真实 click)→ set_input_files 注入文件路径
-    upload_area = page.locator(sel.VIDEO_UPLOAD_AREA).first
+    # set_input_files 直接注入(同抖音/淘宝,不走物理点击)
     file_input = page.locator(sel.VIDEO_FILE_INPUT).first
-    physical_upload(page, upload_area, file_input, str(file_path))
+    file_input.set_input_files(str(file_path))
     try:
         page.locator(sel.UPLOAD_DONE_MARKER).first.wait_for(
             state="visible", timeout=timeout_seconds * 1000
@@ -97,26 +88,27 @@ def _fill_description(page: Page, description: str | None) -> None:
         return
     editor = page.locator(sel.DESC_EDITOR).first
     editor.wait_for(state="visible", timeout=10_000)
-    physical_click(page, editor, click_count=2)
-    _wait(page, 1500, 2500)
-    physical_type(page, description[: sel.DESC_MAX_LENGTH])
+    editor.click()
+    _wait(page, 500, 1000)
+    page.keyboard.type(description[: sel.DESC_MAX_LENGTH])
 
 
 def _add_tags(page: Page, tags: list[str]) -> None:
     if not tags:
         return
     editor = page.locator(sel.DESC_EDITOR).first
-    physical_click(page, editor)
+    editor.click()
     for tag in tags:
-        physical_type(page, "#" + tag)
+        page.keyboard.type("#" + tag)
         _wait(page)
         try:
             page.locator(sel.TOPIC_POPOVER).wait_for(state="visible", timeout=3000)
-            page.locator(sel.TOPIC_ITEM).first.click()
+            # 用 Enter 选第一个候选(不 click 浮层 —— scrollIntoView 会导致窗口抖动)
+            page.keyboard.press("Enter")
             _wait(page, 1500, 3000)
         except Exception:
             # 候选框没弹,走空格收尾(避免 #tag 留成纯文本)
-            physical_press("Space")
+            page.keyboard.press("Space")
         _wait(page)
 
 
@@ -157,27 +149,63 @@ def _set_cover(page: Page, cover_path: Path | None) -> None:
         _wait(page, 1500, 2500)
         confirm = page.locator(sel.COVER_CONFIRM_BUTTON).first
         confirm.wait_for(state="visible", timeout=10_000)
-        physical_click(page, confirm)
+        confirm.click()
         logger.info("[pinduoduo] 自定义封面设置完成(best-effort)")
     except Exception as err:
         logger.warning(f"[pinduoduo] 封面设置失败(降级为平台默认封面): {err}")
 
 
 def _set_schedule(page: Page, publish_at: datetime) -> None:
-    # 选「定时发布」radio(绑商品后才有的发布设置)→ 填日期/时间 → 点确认
-    # beast-core datePicker 的 fill() 会卡,走物理输入(对齐小红书定时策略)
-    page.locator(sel.SCHEDULE_RADIO_CONTAINER).first.click()
+    # 选「定时发布」radio → 操作面板设日期+时分秒 → 点确认。
+    # beast-core 的 date/time input 都是 readonly(fill 会超时),必须走面板 UI:
+    # - 日期:点日历格子(role=date-cell,排除 disabled/outOfMonth)
+    # - 时间:点 timePicker-input wrapper 弹滚轮 → 三列(时/分/秒)各点目标项
+    page.get_by_text("定时发布", exact=True).first.click()
     _wait(page, 1000, 2000)
     date_input = page.locator(sel.SCHEDULE_DATE_INPUT).first
     date_input.wait_for(state="visible", timeout=10_000)
-    physical_click(page, date_input)
-    _wait(page, 500, 1000)
-    physical_select_all()
-    physical_type(page, publish_at.strftime(sel.SCHEDULE_DATETIME_FORMAT))
-    _wait(page, 500, 1000)
-    physical_press("Enter")
-    _wait(page, 1000, 2000)
-    # 点日历确认按钮(只填日期不确认会丢失)
+    date_input.click()  # 打开日历面板
+    _wait(page, 1500, 2000)
+    # 选日期格子
+    day = str(publish_at.day)
+    cell = (
+        page.locator('[role="date-cell"]:not([class*="disabled"]):not([class*="outOfMonth"])')
+        .filter(has_text=day)
+        .first
+    )
+    try:
+        cell.click()
+        _wait(page, 500, 1000)
+    except Exception as err:
+        logger.warning(f"[pinduoduo] 日历格子 day={day} 未命中(可能需切月): {err}")
+    # 点 timePicker wrapper 弹时间滚轮面板,三列(时/分/秒)各点目标项
+    hh, mm, ss = publish_at.strftime("%H"), publish_at.strftime("%M"), publish_at.strftime("%S")
+    try:
+        page.locator('[data-testid="beast-core-timePicker-input"]').first.click()
+        _wait(page, 1000, 1500)
+        result = page.evaluate(
+            """([hh, mm, ss]) => {
+                const uls = document.querySelectorAll('ul');
+                const cols = Array.from(uls).filter(ul => ul.querySelector('li.cIL_item, [class*="cIL_item"]'));
+                const tgt = [hh, mm, ss];
+                const clicked = [];
+                for (let i = 0; i < Math.min(3, cols.length); i++) {
+                    const items = cols[i].querySelectorAll('li.cIL_item, [class*="cIL_item"]');
+                    for (const li of items) {
+                        if (li.textContent.trim() === tgt[i]) { li.click(); clicked.push(tgt[i]); break; }
+                    }
+                }
+                return {colCount: cols.length, clicked};
+            }""",
+            [hh, mm, ss],
+        )
+        logger.info(
+            f"[pinduoduo] 时间滚轮 colCount={result.get('colCount')} clicked={result.get('clicked')}"
+        )
+        _wait(page, 500, 1000)
+    except Exception as err:
+        logger.warning(f"[pinduoduo] 时间滚轮设置失败(降级为默认时间): {err}")
+    # 点确认按钮(只选不确认会丢失)
     try:
         page.locator(sel.SCHEDULE_CONFIRM_BUTTON).first.click()
         _wait(page, 1500, 2500)
@@ -206,16 +234,11 @@ def _risk_control_probe(page: Page) -> None:
 
 
 def _click_publish(page: Page) -> None:
-    btn = page.locator(sel.PUBLISH_BUTTON).first
+    # 主发布按钮文案「发布」,用 get_by_role exact 精确匹配
+    # (排除顶部「发布视频」、底部「一键发布」/「取消发布」)
+    btn = page.get_by_role("button", name="发布", exact=True)
     btn.wait_for(state="visible", timeout=10_000)
-
-    def _btn_gone() -> bool:
-        try:
-            return not btn.is_visible()
-        except Exception:
-            return True
-
-    physical_click(page, btn, delay_ms=80, verify=_btn_gone)
+    btn.click()
     _wait(page, 2500, 4500)
 
 
@@ -246,7 +269,6 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
         )
 
     apc_passed = wxsp.apc.check_pass()
-    bring_browser_to_front(page)
 
     ctx.last_step = "open_publish"
     _open_publish_page(page)

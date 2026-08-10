@@ -143,9 +143,15 @@ REGISTRY: dict[str, PlatformMeta] = {
         label="拼多多",
         title_min=1,  # 无标题框(同快手),title_min 仅占位
         login_meta={
-            # SSO 登录链多跳重定向:未登录停 mms.pinduoduo.com/login;
-            # 登录成功落地 live.pinduoduo.com/n-creator/video/home。
-            "home_url": "https://live.pinduoduo.com/n-creator/video/home",
+            # 实测(2026-08-07):home 页是 SPA,未登录会先渲染 home 壳(含上传区文案)再异步弹身份选择,
+            # 故 selector/url 正面判都会在闪现窗口误判。改 goto SSO 登录入口:已登录会自动跳 home,
+            # 未登录稳定停在 mms.pinduoduo.com/login(扫码框,不闪现 home)。用 logged_in_url 判跳到 home。
+            "home_url": (
+                "https://mms.pinduoduo.com/login/sso?platform=live&accessType=auto"
+                "&redirectUrl=https://live.pinduoduo.com/login/checker%3FisNewCreatorFrom%3Dvideo"
+                "%26referUrl%3D%252Fn-creator%252Fvideo%252Fhome%253Ffrom%253Dmms"
+                "%2526msfrom%253Dmms_sidenav%26from%3Dmms"
+            ),
             "mode": "logged_in_url",
             "logged_in_fragment": "live.pinduoduo.com/n-creator/video/home",
         },

@@ -22,9 +22,10 @@ def test_pinduoduo_registered_in_registry() -> None:
         "declaration": "内容声明",
         "product_ids": "商品ID",
     }
-    # 登录态:SSO 登录链,登录成功落地 n-creator/video/home
+    # 登录态:goto SSO 入口,已登录跳 home(含 fragment),未登录停 mms/login → logged_in_url 正面判
     assert m.login_meta["mode"] == "logged_in_url"
     assert m.login_meta["logged_in_fragment"] == "live.pinduoduo.com/n-creator/video/home"
+    assert "mms.pinduoduo.com/login/sso" in m.login_meta["home_url"]
     assert "pinduoduo" in ALL_PLATFORMS
 
 

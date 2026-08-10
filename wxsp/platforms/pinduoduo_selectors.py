@@ -19,8 +19,12 @@ LOGIN_URL = (
     "%2526msfrom%253Dmms_sidenav%26from%3Dmms"
 )
 HOME_URL = "https://live.pinduoduo.com/n-creator/video/home"  # 发布页 = 首页(SPA,无独立发布页 URL)
-LOGIN_URL_FRAGMENT = "mms.pinduoduo.com/login"  # 未登录停在此
-LOGGED_IN_URL_FRAGMENT = "live.pinduoduo.com/n-creator/video/home"  # 登录成功硬信号
+# 未登录停在此(mms SSO 入口或 live 重定向到 /login);用 pinduoduo.com/login 同时覆盖两域。
+# 注意:不能用 n-creator/video/home 做正面判据——未登录页 URL 的 referUrl 参数含该串,会误判。
+LOGIN_URL_FRAGMENT = "pinduoduo.com/login"
+LOGGED_IN_URL_FRAGMENT = (
+    "live.pinduoduo.com/n-creator/video/home"  # adapter login() goto SSO 后用(不碰 referUrl 坑)
+)
 
 # ---- 视频上传 ----
 # 隐藏 input(multiple,支持批量)。实测 accept 含 .mp4/.wmv/.mov/.avi/.m4v
@@ -62,7 +66,10 @@ PRODUCT_NEXT_BUTTON = 'button:has-text("下一步")'  # 输入ID后点下一步�
 PRODUCT_BOUND_MARKER = 'button:has-text("删除商品")'
 
 # ---- 发布设置(绑商品后才出现)----
-SCHEDULE_RADIO_CONTAINER = "text=定时发布"  # 发布设置 radio 容器(label 文本)
+# 定时 radio:用 radio role + exact name 精确定位(避免匹配到"立即发布"或其他含"定时"文案)
+SCHEDULE_RADIO = (
+    'input[type="radio"][value="定时发布"], label:has-text("定时发布") input[type="radio"]'
+)
 SCHEDULE_DATE_INPUT = (
     'input[data-testid="beast-core-datePicker-htmlInput"]'  # 格式 YYYY-MM-DD HH:MM:SS(带秒)
 )
@@ -80,7 +87,9 @@ COVER_FILE_INPUT = 'input[type="file"][accept=".jpg"]'  # accept 含 .jpg/.jpeg/
 COVER_CONFIRM_BUTTON = 'button:has-text("确定")'
 
 # ---- 发布 / 风控 / 成功 ----
-PUBLISH_BUTTON = 'button:has-text("发布")'
+# 主发布按钮文案就是「发布」二字,用 get_by_role(button, name="发布", exact=True) 精确匹配
+# (排除顶部「发布视频」、底部「一键发布」)。PUBLISH_BUTTON 仅作 fallback 标记,adapter 用 role。
+PUBLISH_BUTTON = "发布"
 # 真发实测(2026-07-22):点发布后跳转 mall-goods-video(无 toast)
 SUCCESS_URL_FRAGMENT = "n-creator/video/mall-goods-video"
 RISK_CONTROL_KEYWORDS = ("操作频繁", "操作过于频繁", "请稍后", "账号异常", "违规")

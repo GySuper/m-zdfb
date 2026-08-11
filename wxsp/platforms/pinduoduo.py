@@ -70,6 +70,84 @@ def _verify_logged_in(page: Page) -> None:
         raise CookieExpired("拼多多登录态失效(上传入口未出现,需重新扫码登录)") from err
 
 
+def _wait_for_entry_popup_count_drop(page: Page, selector: str, previous_count: int) -> bool:
+    for _ in range(8):
+        page.wait_for_timeout(250)
+        if page.locator(selector).count() < previous_count:
+            return True
+    return False
+
+
+def _dismiss_entry_popups(page: Page) -> None:
+    """关闭进入发布页时出现的未知干扰弹窗。
+
+    只允许点弹窗自身的关闭控件或按 Escape,不点「确定」「参与」等业务按钮。
+    此函数只能在上传前调用,此时页面上不存在自动化主动打开的业务弹窗。
+    """
+    max_popups = 5
+    quiet_polls_required = 8  # 连续 2 秒无弹窗才认为页面稳定
+    max_polls = 40  # 最长约 10 秒(不含单次关闭等待)
+    quiet_polls = 0
+    dismissed = 0
+
+    for _ in range(max_polls):
+        dialogs = page.locator(sel.ENTRY_DIALOG)
+        dialog_count = dialogs.count()
+        close_control = None
+        if dialog_count:
+            popup = dialogs.last
+            close_controls = popup.locator(sel.ENTRY_DIALOG_CLOSE)
+            if close_controls.count():
+                close_control = close_controls.first
+            verify_selector = sel.ENTRY_DIALOG
+            previous_count = dialog_count
+        else:
+            # 部分促销浮层没有 role/aria/MDL modal 容器,只有独立的关闭 SVG。
+            # 入口阶段尚无业务弹窗,可把全局可见关闭控件作为安全 fallback。
+            close_controls = page.locator(sel.ENTRY_DIALOG_CLOSE)
+            close_count = close_controls.count()
+            if close_count:
+                close_control = close_controls.last
+            verify_selector = sel.ENTRY_DIALOG_CLOSE
+            previous_count = close_count
+
+        if previous_count == 0:
+            quiet_polls += 1
+            if quiet_polls >= quiet_polls_required:
+                if dismissed:
+                    logger.info(f"[pinduoduo] 已关闭入口干扰弹窗 count={dismissed}")
+                return
+            page.wait_for_timeout(250)
+            continue
+
+        quiet_polls = 0
+        if dismissed >= max_popups:
+            raise ElementNotFound(f"拼多多入口弹窗超过 {max_popups} 个,停止自动关闭")
+
+        closed = False
+        if close_control is not None:
+            try:
+                close_control.click(timeout=2_000)
+                closed = _wait_for_entry_popup_count_drop(page, verify_selector, previous_count)
+            except Exception:
+                pass
+
+        if not closed:
+            try:
+                page.keyboard.press("Escape")
+                closed = _wait_for_entry_popup_count_drop(page, verify_selector, previous_count)
+            except Exception as err:
+                raise ElementNotFound(
+                    "拼多多入口弹窗无法安全关闭(仅允许关闭按钮或 Escape)"
+                ) from err
+        if not closed:
+            raise ElementNotFound("拼多多入口弹窗无法安全关闭(仅允许关闭按钮或 Escape)")
+
+        dismissed += 1
+
+    raise ElementNotFound("拼多多入口弹窗持续出现,页面未在 10 秒内稳定")
+
+
 def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> None:
     # set_input_files 直接注入(同抖音/淘宝,不走物理点击)
     file_input = page.locator(sel.VIDEO_FILE_INPUT).first
@@ -100,16 +178,8 @@ def _add_tags(page: Page, tags: list[str]) -> None:
     editor.click()
     for tag in tags:
         page.keyboard.type("#" + tag)
-        _wait(page)
-        try:
-            page.locator(sel.TOPIC_POPOVER).wait_for(state="visible", timeout=3000)
-            # 用 Enter 选第一个候选(不 click 浮层 —— scrollIntoView 会导致窗口抖动)
-            page.keyboard.press("Enter")
-            _wait(page, 1500, 3000)
-        except Exception:
-            # 候选框没弹,走空格收尾(避免 #tag 留成纯文本)
-            page.keyboard.press("Space")
-        _wait(page)
+        page.wait_for_timeout(1500)
+        page.keyboard.press("Space")
 
 
 def _add_products(page: Page, product_ids: list[str]) -> None:
@@ -282,6 +352,10 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
 
     ctx.last_step = "verify_login"
     _verify_logged_in(page)
+    random_pause(step_pause)
+
+    ctx.last_step = "entry_popups"
+    _dismiss_entry_popups(page)
     random_pause(step_pause)
 
     # APC 拒绝时装"等待上传区域超时"故障(对齐其他平台)

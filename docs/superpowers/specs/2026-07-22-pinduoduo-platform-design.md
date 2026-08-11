@@ -25,7 +25,7 @@ validator / setup / errors / models / feishu / TaskBundle,只新增 2 个平台�
 | 反检测档位 | `needs_fingerprint=False`(跟抖音/快手/淘宝一致) | 用户确认「和抖音一样不注入指纹」;先 patchright persistent context,实测若一天触发风控再切 `use_real_chrome=True`(同小红书演进路线) |
 | 标题 | **无独立标题框**,`has_title=False`(同快手) | 实测:发布页只有「添加视频描述」一个 contenteditable 框,无标题 input;`title_min=1`,描述框为必填核心字段,validator 改判「描述」必填 |
 | 描述框 | `div[contenteditable=true].sabo-root`(DraftJS 风格),上限 500 字 | 实测可写入;字数计数器显示 `N/500` |
-| 话题标签 | 描述框内键入 `#关键词` → 弹 `.caret-popover-root` 候选 → 点 `.sabo-hash-tag-item` 选中 | 实测:与抖音/小红书机制一致(输入#触发搜索下拉) |
+| 话题标签 | 描述框内逐个键入 `#关键词` → 等 1.5 秒 → 输入空格 | 2026-08-11 按实际运行结果调整,不再选择候选项 |
 | **内容声明(必填*)** | **拼多多特有**,下拉 6 选项,做成**飞书字段**供运营选择 | 用户确认「做成字段,运营可选」;默认「内容无需标注」;复用 TaskBundle.declaration + 淘宝 `_set_declaration` 模式 |
 | **挂商品** | **需要**,参考淘宝光合 `_add_products` | 用户确认「需要挂商品,参考淘宝」;拼多多「商品ID」tab 输入 ID → 下一步直接绑定(比淘宝简单,无需勾选卡片) |
 | 定时发布 | **必走定时发布**(用户确认);绑商品后「发布设置」radio 选定时 | 实测:必挂商品才展开完整表单;选「定时发布」radio → 填日期框(`beast-core-datePicker`,格式带秒)+ 时间框 → 点确认 |
@@ -155,10 +155,6 @@ UPLOAD_DONE_MARKER = "text=视频上传成功"  # 上传成功文案
 DESC_EDITOR = 'div[contenteditable="true"].sabo-root'  # DraftJS 风格,实测可写入
 DESC_MAX_LENGTH = 500
 
-# ---- 话题 ----
-TOPIC_POPOVER = ".caret-popover-root"  # 输入#关键词后弹出
-TOPIC_ITEM = ".sabo-hash-tag-item"  # 候选项(点选才真正绑定)
-
 # ---- 内容声明(必填下拉)----
 DECLARATION_TRIGGER = 'div:has-text("内容声明")'  # *内容声明 区域
 DECLARATION_DROPDOWN = '[data-testid="beast-core-select-htmlInput"]'  # 下拉触发(testId 稳定)
@@ -215,7 +211,7 @@ class hash 仅在无语义锚点时用前缀模糊匹配(`div[class^="no-video_w
 | verify_login | `_verify_logged_in` | URL 含 `mms.pinduoduo.com/login` → CookieExpired;否则查上传区在 |
 | upload | `_upload_video` | set_input_files + 等「视频上传成功」文案 |
 | desc | `_fill_description` | 点 `sabo-root` → keyboard.type(描述[:500]) |
-| tags | `_add_tags` | 逐个 type(`#tag`) → 等 `.caret-popover-root` → 点首项 |
+| tags | `_add_tags` | 逐个 type(`#tag`) → 等 1.5 秒 → 输入空格 |
 | **products** | `_add_products` | 点「添加商品」→ 切「商品ID」tab → 逐个填 ID → 下一步绑定 |
 | cover | `_set_cover` | best-effort(自定义封面,未实测弹窗,标 TODO) |
 | schedule | `_set_schedule` | **绑商品后才有效**:选「定时发布」radio + 填时间(降级:未绑商品/无定时选项则跳过) |

@@ -37,6 +37,7 @@ def test_step_cn_covers_all_platform_step_names() -> None:
     expected = {
         "open": "打开发布页",
         "login": "验证登录",
+        "entry_popups": "清理入口弹窗",
         "wait_upload_area": "等待上传区",
         "products": "绑定商品",
         "declaration": "创作者声明",

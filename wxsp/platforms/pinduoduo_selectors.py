@@ -26,6 +26,17 @@ LOGGED_IN_URL_FRAGMENT = (
     "live.pinduoduo.com/n-creator/video/home"  # adapter login() goto SSO 后用(不碰 referUrl 坑)
 )
 
+# ---- 入口干扰弹窗 ----
+# 仅在上传前使用:此时自动化尚未打开商品/封面/日期等业务弹窗,可安全处理所有可见 modal。
+# Beast Modal 的版本号/hash 会变化,只匹配稳定的 MDL_ 语义前缀。
+ENTRY_DIALOG = '[role="dialog"]:visible, [aria-modal="true"]:visible, [class*="MDL_modal_"]:visible'
+ENTRY_DIALOG_CLOSE = (
+    'button[aria-label*="关闭"]:visible, [role="button"][aria-label*="关闭"]:visible, '
+    'button[aria-label*="close" i]:visible, [role="button"][aria-label*="close" i]:visible, '
+    '[class*="MDL_closeBtn_"]:visible, [class*="MDL_headerCloseIcon_"]:visible, '
+    '[data-testid="beast-core-icon-close"]:visible'
+)
+
 # ---- 视频上传 ----
 # 隐藏 input(multiple,支持批量)。实测 accept 含 .mp4/.wmv/.mov/.avi/.m4v
 VIDEO_FILE_INPUT = 'input[type="file"][accept*=".mp4"]'
@@ -38,10 +49,6 @@ UPLOAD_DONE_MARKER = "text=视频上传成功"  # 上传成功文案(实测出�
 # DraftJS 风格 contenteditable(实测可写入)。sabo-root 是 sabo 编辑器根 class。
 DESC_EDITOR = 'div[contenteditable="true"].sabo-root'
 DESC_MAX_LENGTH = 500  # 页内计数器 N/500
-
-# ---- 话题(描述框内输入 #关键词 弹候选)----
-TOPIC_POPOVER = ".caret-popover-root"  # 输入 #关键词 后弹出
-TOPIC_ITEM = ".sabo-hash-tag-item"  # 候选项(点选才真正绑定话题)
 
 # ---- 内容声明(必填下拉;拼多多特有,同淘宝 declaration)----
 # beast-core select 组件,下拉触发器 testId 稳定

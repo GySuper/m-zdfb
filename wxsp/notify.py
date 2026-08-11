@@ -81,6 +81,7 @@ _STEP_CN: dict[str, str] = {
     "open_publish": "打开发布页",
     "login": "验证登录",
     "verify_login": "验证登录",
+    "entry_popups": "清理入口弹窗",
     "wait_upload_area": "等待上传区",
     "upload": "上传视频",
     "title": "填标题",

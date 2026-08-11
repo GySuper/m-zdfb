@@ -7,8 +7,9 @@ from textwrap import dedent
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
-from wxsp.config import Settings, load_settings
+from wxsp.config import PublisherConfig, Settings, WebUIConfig, load_settings
 
 
 @pytest.fixture
@@ -95,6 +96,13 @@ def test_load_valid_yaml(
     assert settings.publisher.max_concurrent_accounts == 1
     assert "account_a" in settings.accounts
     assert settings.accounts["account_a"].display_name == "测试号"
+
+
+def test_runtime_safety_config_rejects_parallel_publish_and_nonlocal_webui() -> None:
+    with pytest.raises(ValidationError):
+        PublisherConfig(max_concurrent_accounts=2)
+    with pytest.raises(ValidationError):
+        WebUIConfig(host="0.0.0.0")
 
 
 def test_env_var_substitution(

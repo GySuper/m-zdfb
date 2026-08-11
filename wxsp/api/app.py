@@ -1,7 +1,4 @@
-"""FastAPI 入口:挂载路由 + 模板。
-
-不做用户登录(本地单用户),不做 CORS(单进程同源)。
-"""
+"""FastAPI 入口:挂载路由 + 模板。本地单用户,写操作强制同源。"""
 
 from __future__ import annotations
 
@@ -14,6 +11,7 @@ from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-untyped
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
 from loguru import logger
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from wxsp.api.log_stream import log_stream
 from wxsp.api.routes_accounts import router as accounts_router
@@ -39,6 +37,18 @@ from wxsp.scheduler import (
 
 _SETUP_PREFIX = "/setup"
 _STATIC_PREFIX = "/static"
+_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _is_same_origin(request: Request) -> bool:
+    source = request.headers.get("Origin") or request.headers.get("Referer")
+    if not source:
+        return True  # 保留 curl/本地客户端兼容;浏览器跨站写请求会携带 Origin。
+    parsed = urlparse(source)
+    return (
+        parsed.scheme == request.url.scheme
+        and parsed.netloc.lower() == request.headers.get("Host", "").lower()
+    )
 
 
 def _infer_platform_from_request(request: Request, platforms: Mapping[str, object]) -> str | None:
@@ -182,6 +192,14 @@ def create_app() -> FastAPI:
     log_stream.emit_for_test("Web UI 启动,日志流就绪。任务运行时会自动推送 logger 输出。")
 
     @app.middleware("http")
+    async def same_origin_writes(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        if request.method in _UNSAFE_METHODS and not _is_same_origin(request):
+            return Response("Forbidden: cross-origin write request", status_code=403)
+        return await call_next(request)
+
+    @app.middleware("http")
     async def platform_context(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
@@ -241,6 +259,12 @@ def create_app() -> FastAPI:
         ):
             return RedirectResponse(url="/setup/step/1", status_code=302)
         return await call_next(request)
+
+    # 最后注册使其位于自定义 middleware 外层,不可信 Host 在任何配置/重定向逻辑前拒绝。
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
+    )
 
     app.include_router(setup_router)
     app.include_router(dashboard_router)

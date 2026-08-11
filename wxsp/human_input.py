@@ -173,17 +173,19 @@ def physical_click(
         return
     # 点击后验证,失败则重试
     time.sleep(0.5)
-    for attempt in range(retries):
+    for attempt in range(retries + 1):
         try:
             if verify():
                 return
         except Exception:
             pass
+        if attempt == retries:
+            break
         logger.warning(f"[human_input] 点击验证失败,重试 {attempt + 1}/{retries}")
         time.sleep(random.uniform(0.8, 1.5))
         _do_click()
         time.sleep(0.5)
-        raise RuntimeError(f"物理点击验证失败(重试 {retries} 次仍未通过),终止任务")
+    raise RuntimeError(f"物理点击验证失败(重试 {retries} 次仍未通过),终止任务")
 
 
 def physical_type(page: Page, text: str, *, force_paste: bool = False) -> None:

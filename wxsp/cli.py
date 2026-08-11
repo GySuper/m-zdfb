@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -27,6 +28,19 @@ from wxsp.sync import sync_now
 
 # 平台列表助记串(CLI 帮助文案动态生成,加平台不再改 cli.py)
 _PLATFORM_LIST = " | ".join(ALL_PLATFORMS)
+
+
+def _validate_webui_host(host: str) -> str:
+    """无认证 Web UI 只允许监听回环地址。"""
+    value = host.strip()
+    if value.lower() == "localhost":
+        return value
+    try:
+        if ipaddress.ip_address(value).is_loopback:
+            return value
+    except ValueError:
+        pass
+    raise ValueError("Web UI 无认证,仅允许监听本机回环地址(127.0.0.1/localhost/::1)")
 
 
 def _force_utf8_stdout() -> None:
@@ -320,10 +334,7 @@ def sync(
         typer.echo(f"[wxsp] 平台 {platform} 飞书未启用,跳过 sync。")
         return
 
-    typer.echo(
-        f"[wxsp] 飞书同步开始({platform}): app_token={feishu_cfg.bitable.app_token} "
-        f"table_id={feishu_cfg.bitable.table_id}"
-    )
+    typer.echo(f"[wxsp] 飞书同步开始({platform}): table_id={feishu_cfg.bitable.table_id}")
     try:
         result = sync_now(settings, dry_run=dry_run, platform=platform)
     except FeishuApiError as exc:
@@ -349,13 +360,11 @@ def run(
     ),
 ) -> None:
     """执行任务。三选一:--task-id 单条 / --today 跑今天 / --daemon 起 cron。"""
-    settings = load_settings(platform=platform or "tencent_channel")
-
     if task_id is not None:
         typer.echo(f"[wxsp] 跑 task {task_id}{' (dry-run)' if dry_run else ''}...")
         try:
-            result = publish(task_id, dry_run=dry_run, settings=settings)
-        except AlreadyClaimed as exc:
+            result = publish(task_id, dry_run=dry_run)
+        except (AlreadyClaimed, ValueError) as exc:
             typer.echo(f"[wxsp] ✗ {exc}")
             raise typer.Exit(code=1) from exc
 
@@ -369,6 +378,12 @@ def run(
         typer.echo(f"[wxsp] ✗ task {task_id} 失败: {result.error_type}")
         typer.echo(f"        {result.error_msg}")
         raise typer.Exit(code=1)
+
+    if not today and not daemon:
+        typer.echo("[wxsp] 请指定 --task-id N / --today / --daemon 之一")
+        raise typer.Exit(code=2)
+
+    settings = load_settings(platform=platform or "tencent_channel")
 
     if today:
         # 不带 --platform 时跑所有已配置平台,但每个平台必须用各自的 settings
@@ -407,6 +422,8 @@ def run(
             # BackgroundScheduler 重复注册 cron,触发时跑两次 run_today_pending)。
             import uvicorn
 
+            bind_host = _validate_webui_host(settings.webui.host)
+
             if settings.webui.open_browser_on_start:
                 import threading
                 import time
@@ -415,7 +432,7 @@ def run(
                 def _open() -> None:
                     time.sleep(1.0)
                     try:
-                        webbrowser.open(f"http://{settings.webui.host}:{settings.webui.port}/")
+                        webbrowser.open(f"http://{bind_host}:{settings.webui.port}/")
                     except Exception:
                         pass
 
@@ -425,7 +442,7 @@ def run(
             try:
                 uvicorn.run(
                     "wxsp.api.app:app",
-                    host=settings.webui.host,
+                    host=bind_host,
                     port=settings.webui.port,
                     log_level="info",
                 )
@@ -439,9 +456,6 @@ def run(
         except (KeyboardInterrupt, SystemExit):
             typer.echo("[wxsp] daemon 退出")
         return
-
-    typer.echo("[wxsp] 请指定 --task-id N / --today / --daemon 之一")
-    raise typer.Exit(code=2)
 
 
 @app.command("status")
@@ -549,6 +563,8 @@ def web(
         bind_host = host or "127.0.0.1"
         bind_port = port or 8765
         open_browser = not no_browser
+
+    bind_host = _validate_webui_host(bind_host)
 
     if open_browser:
 

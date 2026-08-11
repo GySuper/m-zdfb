@@ -127,9 +127,9 @@
               <div class="cfg-row">
                 <label>并发账号上限</label>
                 <div class="cfg-control">
-                  <input type="number" name="pub_max_concurrent" value="{{ vm.pub_max_concurrent }}" min="1" max="4" style="width: 80px;">
+                  <input type="number" name="pub_max_concurrent" value="1" min="1" max="1" readonly style="width: 80px;">
                 </div>
-                <span class="cfg-hint"><strong style="color: var(--color-error);">建议 1</strong>。同 IP 多账号并发是明显的风控特征</span>
+                <span class="cfg-hint">固定为 1。发布、重试和 cron 共用单 worker,避免物理输入冲突与多账号并发风控</span>
               </div>
             </div>
             <div class="cfg-foot">
@@ -451,7 +451,7 @@
                 <div class="cfg-control">
                   <input type="text" name="webui_host" value="{{ vm.webui_host }}" required>
                 </div>
-                <span class="cfg-hint"><code>127.0.0.1</code> = 只本机;<code>0.0.0.0</code> = 局域网可访问(慎用)</span>
+                <span class="cfg-hint">仅允许本机回环地址,如 <code>127.0.0.1</code> 或 <code>localhost</code></span>
               </div>
               <div class="cfg-row">
                 <label>监听端口</label>

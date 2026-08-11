@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import sys
@@ -14,7 +15,7 @@ from typing import Any
 import yaml
 from platformdirs import user_data_dir as _platform_user_data_dir
 from platformdirs import user_log_dir as _platform_user_log_dir
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 from wxsp.platform_meta import REGISTRY
 
@@ -235,7 +236,7 @@ class PublisherConfig(BaseModel):
     upload_timeout_seconds: int = 600
     step_pause_seconds: tuple[float, float] = (1.0, 3.0)
     screenshot_on_error: bool = True
-    max_concurrent_accounts: int = 1
+    max_concurrent_accounts: int = Field(default=1, ge=1, le=1)
 
 
 class FeishuFieldMap(BaseModel):
@@ -309,9 +310,24 @@ class WebUIConfig(BaseModel):
     port: int = 8765
     open_browser_on_start: bool = True
 
+    @field_validator("host")
+    @classmethod
+    def _host_must_be_loopback(cls, value: str) -> str:
+        host = value.strip()
+        if host.lower() == "localhost":
+            return host
+        try:
+            if ipaddress.ip_address(host).is_loopback:
+                return host
+        except ValueError:
+            pass
+        raise ValueError("无认证 Web UI 仅允许监听本机回环地址")
+
 
 class Settings(BaseModel):
     """每个 config_{platform}.yaml 的完整结构。"""
+
+    _source_platform: str | None = PrivateAttr(default=None)
 
     app: AppConfig
     paths: PathsConfig
@@ -321,6 +337,11 @@ class Settings(BaseModel):
     feishu: FeishuConfig
     monitoring: MonitoringConfig
     webui: WebUIConfig
+
+    @property
+    def source_platform(self) -> str | None:
+        """load_settings 注入的来源平台;直接构造的测试/兼容对象为 None。"""
+        return self._source_platform
 
     @model_validator(mode="after")
     def _expand_nas_root_template(self) -> Settings:
@@ -389,7 +410,9 @@ def load_settings(
     raw2 = path.read_text(encoding="utf-8")
     expanded2 = _expand_env_vars(raw2)
     platform_data: dict[str, Any] = yaml.safe_load(expanded2)
-    return Settings.model_validate(platform_data)
+    settings = Settings.model_validate(platform_data)
+    settings._source_platform = platform
+    return settings
 
 
 def _empty_shell_config() -> dict[str, Any]:

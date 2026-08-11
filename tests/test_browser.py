@@ -8,6 +8,7 @@ manually in M2 acceptance (Task 8) and by `wxsp login` against the test account
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -254,3 +255,40 @@ def test_system_chrome_path_not_found(monkeypatch) -> None:
 
     with pytest.raises(FileNotFoundError, match="Google Chrome"):
         browser._system_chrome_path()
+
+
+def test_wait_for_devtools_port_timeout_is_not_blocked_by_silent_stderr() -> None:
+    from wxsp import browser
+
+    release_reader = threading.Event()
+
+    class SilentStderr:
+        def readline(self) -> str:
+            release_reader.wait(timeout=1)
+            return ""
+
+    class RunningProcess:
+        stderr = SilentStderr()
+
+    try:
+        assert browser._wait_for_devtools_port(RunningProcess(), timeout_seconds=0.02) is None
+    finally:
+        release_reader.set()
+
+
+def test_wait_for_devtools_port_parses_reader_thread_output() -> None:
+    from wxsp import browser
+
+    class ReadyStderr:
+        def __init__(self) -> None:
+            self.lines = iter(
+                ["noise\n", "DevTools listening on ws://127.0.0.1:9333/devtools/browser/x\n", ""]
+            )
+
+        def readline(self) -> str:
+            return next(self.lines)
+
+    class ReadyProcess:
+        stderr = ReadyStderr()
+
+    assert browser._wait_for_devtools_port(ReadyProcess(), timeout_seconds=0.1) == 9333

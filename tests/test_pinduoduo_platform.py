@@ -5,6 +5,53 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from wxsp.errors import ElementNotFound
+
+
+def _schedule_page() -> tuple[MagicMock, MagicMock, MagicMock]:
+    from wxsp.platforms import pinduoduo_selectors as sel
+
+    page = MagicMock()
+    radio = MagicMock()
+    radio.first = radio
+    page.get_by_text.return_value = radio
+
+    date_input = MagicMock()
+    date_input.first = date_input
+    cell = MagicMock()
+    cell_query = MagicMock()
+    cell_filter = MagicMock()
+    cell_query.filter.return_value = cell_filter
+    cell_filter.first = cell
+
+    time_input = MagicMock()
+    time_input.first = time_input
+    confirm = MagicMock()
+    confirm.first = confirm
+
+    def locator(selector: str) -> MagicMock:
+        if selector == sel.SCHEDULE_DATE_INPUT:
+            return date_input
+        if selector.startswith('[role="date-cell"]'):
+            return cell_query
+        if selector == '[data-testid="beast-core-timePicker-input"]':
+            return time_input
+        if selector == sel.SCHEDULE_CONFIRM_BUTTON:
+            return confirm
+        raise AssertionError(f"unexpected selector: {selector}")
+
+    page.locator.side_effect = locator
+    page.evaluate.return_value = {
+        "colCount": 3,
+        "clicked": ["18", "30", "00"],
+    }
+    return page, cell, confirm
+
 
 def test_pinduoduo_registered_in_registry() -> None:
     from wxsp.platform_meta import ALL_PLATFORMS, get_meta
@@ -68,3 +115,42 @@ def test_pinduoduo_spec_wiring() -> None:
     assert PINDUODUO_SPEC.display_name == "拼多多"
     assert PINDUODUO_SPEC.pre_publish is _pre_publish
     assert PINDUODUO_SPEC.post_publish is _post_publish
+
+
+def test_pinduoduo_schedule_date_failure_fails_closed() -> None:
+    from wxsp.platforms.pinduoduo import _set_schedule
+
+    page, cell, _confirm = _schedule_page()
+    cell.click.side_effect = RuntimeError("date missing")
+
+    with (
+        patch("wxsp.platforms.pinduoduo._wait"),
+        pytest.raises(ElementNotFound, match="日历"),
+    ):
+        _set_schedule(page, datetime(2026, 8, 12, 18, 30))
+
+
+def test_pinduoduo_schedule_incomplete_time_fails_closed() -> None:
+    from wxsp.platforms.pinduoduo import _set_schedule
+
+    page, _cell, _confirm = _schedule_page()
+    page.evaluate.return_value = {"colCount": 3, "clicked": ["18", "30"]}
+
+    with (
+        patch("wxsp.platforms.pinduoduo._wait"),
+        pytest.raises(ElementNotFound, match="时间滚轮"),
+    ):
+        _set_schedule(page, datetime(2026, 8, 12, 18, 30))
+
+
+def test_pinduoduo_schedule_confirm_failure_fails_closed() -> None:
+    from wxsp.platforms.pinduoduo import _set_schedule
+
+    page, _cell, confirm = _schedule_page()
+    confirm.click.side_effect = RuntimeError("confirm missing")
+
+    with (
+        patch("wxsp.platforms.pinduoduo._wait"),
+        pytest.raises(ElementNotFound, match="确认按钮"),
+    ):
+        _set_schedule(page, datetime(2026, 8, 12, 18, 30))

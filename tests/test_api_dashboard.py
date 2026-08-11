@@ -196,3 +196,27 @@ def test_dashboard_backlog_includes_pending_and_interrupted_from_past_days(
     assert "<strong>2</strong>" in r.text or "积压" in r.text  # 弱断言:数字 2 + "积压" 关键字
     # 强断言:必须看到 "积压 ... 2" 上下文
     assert "2</strong>" in r.text
+
+
+def test_cross_origin_write_request_is_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/tasks/run-today",
+        headers={"Origin": "https://evil.example"},
+    )
+    assert response.status_code == 403
+
+
+def test_same_origin_write_request_is_allowed(client: TestClient) -> None:
+    response = client.post(
+        "/tasks/run-today",
+        headers={"Origin": "http://testserver"},
+    )
+    assert response.status_code != 403
+
+
+def test_untrusted_host_is_rejected(client: TestClient) -> None:
+    response = client.get(
+        "/?platform=tencent_channel",
+        headers={"Host": "evil.example"},
+    )
+    assert response.status_code == 400

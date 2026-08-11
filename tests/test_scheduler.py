@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session, select
 
-from tests.conftest import make_settings
+from tests.conftest import make_settings as _base_make_settings
+from wxsp.config import AccountConfig
 from wxsp.db import get_engine, init_db, session_scope
 from wxsp.models import Account, Event, Task, Video
 from wxsp.publisher import PublishResult
@@ -22,6 +23,21 @@ from wxsp.scheduler import (
     queue_today,
     run_today_pending,
 )
+
+
+def make_settings(video_root: Path, cover_root: Path):
+    settings = _base_make_settings(video_root, cover_root)
+    settings.accounts = {
+        "a": AccountConfig(
+            display_name="a",
+            enabled=True,
+            daily_limit=20,
+            user_data_dir=video_root / "profile",
+            video_search_root=video_root,
+            cover_search_root=cover_root,
+        )
+    }
+    return settings
 
 
 def _seed_account_video(session: Session, *, account_id: str = "a", video_id: str) -> None:
@@ -299,6 +315,41 @@ def test_run_today_pending_with_task_ids_runs_only_those(
 
     assert calls == [only_id]  # 只跑 v1,同日 pending 的 v2 不碰
     assert summary.attempted == 1
+
+
+def test_run_today_pending_skips_disabled_account(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "db.sqlite"
+    monkeypatch.setenv("WXSP_DB_PATH", str(db_path))
+    engine = get_engine(db_path)
+    init_db(engine)
+    with session_scope(engine) as session:
+        _seed_account_video(session, video_id="v1")
+        session.add(
+            Task(
+                video_id="v1",
+                account_id="a",
+                execute_date=date.today(),
+                publish_at=datetime.now(),
+                status="pending",
+            )
+        )
+
+    settings = make_settings(tmp_path, tmp_path)
+    settings.accounts["a"].enabled = False
+    publish_calls: list[int] = []
+    monkeypatch.setattr(
+        "wxsp.scheduler.publish",
+        lambda task_id, **_: publish_calls.append(task_id),
+    )
+
+    summary = run_today_pending(settings, do_sync=False)
+
+    assert publish_calls == []
+    assert summary.attempted == 0
+    assert summary.skipped_paused == 1
+    assert summary.per_account["a"].halt_reason == "账号已禁用或配置已删除"
 
 
 def test_run_today_pending_skips_tasks_when_account_paused(

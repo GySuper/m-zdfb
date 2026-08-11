@@ -9,6 +9,7 @@ from __future__ import annotations
 
 # ============== URL ==============
 PUBLISH_PAGE_URL = "https://creator.guanghe.taobao.com/page/pubNew/video"
+SUCCESS_URL_FRAGMENT = "/page/workspace/tb"
 LOGIN_URL_FRAGMENT = "login.taobao.com"
 CREATOR_HOME = "https://creator.guanghe.taobao.com"
 
@@ -60,14 +61,13 @@ PRODUCT_ITEM_LINK_BY_ID = 'a[href*="item.htm?id={pid}"]'
 # 弹窗默认商品列表就绪信号:click"添加商品"后默认列表还在加载,等首个商品 link
 # 出现再开始按 ID 搜索,否则搜索与列表加载竞态致 card.hover() 超时。
 PRODUCT_ITEM_LINK_ANY = 'a[href*="item.htm?id="]'
-# 从标题链接上溯到卡片容器(class 含 `--item--`,区别于 `--item-title--`/`--item-desc--` 等)。
-PRODUCT_ITEM_CARD_ANCESTOR = 'xpath=ancestor::*[contains(@class, "--item--")][1]'
+# 从标题链接上溯到最近的、含商品选择 checkbox 的卡片容器。
+# 不依赖 CSS-module class:淘宝已从 `--item--` 改为 `--itemCard---<hash>`。
+PRODUCT_ITEM_CARD_ANCESTOR = 'xpath=ancestor::div[.//input[@type="checkbox"]][1]'
 # 卡片内"商品选择"复选框的真实 input(区别于顶部"筛选近14天")。Fusion 把 opacity:0 的
 # input 绝对定位盖在可见方框上专门接收点击 —— 点 <label>/.next-checkbox-inner 会被 input
 # 拦截指针事件(报 "input intercepts pointer events" 超时),直接点 input 才是正解。
-PRODUCT_ITEM_SELECT_CHECKBOX_INPUT = 'label[class*="item-select"] input[type="checkbox"]'
-# 选中标记:item-select 的 label 勾上后 class 追加 "checked"(由真实选中态 DOM 确认)。
-PRODUCT_ITEM_SELECTED = 'label[class*="item-select"][class*="checked"]'
+PRODUCT_ITEM_SELECT_CHECKBOX_INPUT = 'input.next-checkbox-input[type="checkbox"]'
 PRODUCT_CONFIRM_BUTTON = 'button:has-text("确定")'
 PRODUCT_CLOSE_BUTTON = 'button:has-text("取消")'
 

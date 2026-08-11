@@ -366,10 +366,13 @@ def run_today_pending(
             plan.append((tid, t.account_id))
         # 一次性拿账号快照:paused_until + cookie_status,避免发布时才发现 cookie 没登录
         paused_accounts: set[str] = set()
+        disabled_accounts: set[str] = set()
         unlogged_accounts: dict[str, str] = {}  # acc_id → 中文跳过原因
         for acc_id in {acc for _, acc in plan}:
             acc = session.get(Account, acc_id)
-            if acc is None:
+            account_cfg = settings.accounts.get(acc_id)
+            if acc is None or not acc.is_active or account_cfg is None or not account_cfg.enabled:
+                disabled_accounts.add(acc_id)
                 continue
             # Per-platform:skip accounts not belonging to this platform
             if platform is not None and acc.platform != platform:
@@ -408,17 +411,22 @@ def run_today_pending(
 
         if (
             account_id in paused_accounts
+            or account_id in disabled_accounts
             or account_id in halted_accounts
             or account_id in unlogged_accounts
         ):
             summary.skipped_paused += 1
             acc_stat.skipped += 1
             reason = (
-                unlogged_accounts.get(account_id) or halted_accounts.get(account_id) or "账号暂停中"
+                unlogged_accounts.get(account_id)
+                or halted_accounts.get(account_id)
+                or ("账号已禁用或配置已删除" if account_id in disabled_accounts else "账号暂停中")
             )
             # 未登录的也写进 halt_reason,让 run_summary 显示"跳过(原因:请扫码)"
             # 而不是只写"暂停跳过 N"(运营一头雾水)
-            if account_id in unlogged_accounts and acc_stat.halt_reason is None:
+            if (
+                account_id in unlogged_accounts or account_id in disabled_accounts
+            ) and acc_stat.halt_reason is None:
                 acc_stat.halt_reason = reason
             logger.info(f"[scheduler] 跳过 task={task_id}:账号 {account_id} {reason}")
             continue

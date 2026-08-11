@@ -21,7 +21,7 @@ def test_run_task_id_success_prints_ok_and_exits_zero(tmp_path, monkeypatch):
     )
     with (
         patch("wxsp.cli.publish", return_value=fake_result) as p,
-        patch("wxsp.cli.load_settings", return_value=MagicMock()),
+        patch("wxsp.cli.load_settings", return_value=MagicMock()) as load_settings,
     ):
         result = CliRunner().invoke(app, ["run", "--task-id", "7"])
     assert result.exit_code == 0, result.stdout
@@ -29,6 +29,8 @@ def test_run_task_id_success_prints_ok_and_exits_zero(tmp_path, monkeypatch):
     p.assert_called_once()
     _args, kwargs = p.call_args
     assert kwargs.get("dry_run") is False
+    assert "settings" not in kwargs
+    load_settings.assert_not_called()
 
 
 def test_run_task_id_dry_run_passes_flag(tmp_path, monkeypatch):

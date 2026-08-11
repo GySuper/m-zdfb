@@ -177,7 +177,7 @@ def _set_schedule(page: Page, publish_at: datetime) -> None:
         cell.click()
         _wait(page, 500, 1000)
     except Exception as err:
-        logger.warning(f"[pinduoduo] 日历格子 day={day} 未命中(可能需切月): {err}")
+        raise ElementNotFound(f"日历格子 day={day} 未命中(可能需切月): {err}") from err
     # 点 timePicker wrapper 弹时间滚轮面板,三列(时/分/秒)各点目标项
     hh, mm, ss = publish_at.strftime("%H"), publish_at.strftime("%M"), publish_at.strftime("%S")
     try:
@@ -202,15 +202,21 @@ def _set_schedule(page: Page, publish_at: datetime) -> None:
         logger.info(
             f"[pinduoduo] 时间滚轮 colCount={result.get('colCount')} clicked={result.get('clicked')}"
         )
+        if result.get("clicked") != [hh, mm, ss]:
+            raise ElementNotFound(
+                f"时间滚轮未完整设置: expected={[hh, mm, ss]} actual={result.get('clicked')}"
+            )
         _wait(page, 500, 1000)
+    except ElementNotFound:
+        raise
     except Exception as err:
-        logger.warning(f"[pinduoduo] 时间滚轮设置失败(降级为默认时间): {err}")
+        raise ElementNotFound(f"时间滚轮设置失败: {err}") from err
     # 点确认按钮(只选不确认会丢失)
     try:
         page.locator(sel.SCHEDULE_CONFIRM_BUTTON).first.click()
         _wait(page, 1500, 2500)
     except Exception as err:
-        logger.warning(f"[pinduoduo] 定时确认按钮未找到(可能改版): {err}")
+        raise ElementNotFound(f"定时确认按钮未找到(可能改版): {err}") from err
 
 
 def _select_declaration(page: Page, declaration: str | None) -> None:

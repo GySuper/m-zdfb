@@ -87,8 +87,8 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 - 健康指标用 `cookie_last_active_at`(上次成功打开账号主页时间),不是"导入时间"
 
 ### 2.5 同 IP 多账号并发是风控特征
-- 默认 `max_concurrent_accounts = 1`,**单 worker 串行执行**
-- 同一时刻同一台机器只跑一个视频号账号的浏览器
+- `max_concurrent_accounts = 1` 是硬约束,所有平台 / CLI / cron / Web retry 共用**单 worker 串行执行**
+- 同一时刻同一台机器只跑一个发布浏览器
 
 ### 3. 视频号定时发布平台限制
 - 定时发布最早 = 当前时间 + 30 分钟(以页面校验为准,不要硬编码)
@@ -373,7 +373,7 @@ publisher:
   upload_timeout_seconds: 600
   step_pause_seconds: [1, 3]          # 步骤间随机停顿范围
   screenshot_on_error: true
-  max_concurrent_accounts: 1          # 单 worker 串行,避免同 IP 多账号并发风控
+  max_concurrent_accounts: 1          # 固定为 1;单 worker 串行,避免物理输入冲突和并发风控
 
 # ============== 飞书集成 ==============
 feishu:
@@ -626,6 +626,8 @@ wxsp web [--port p]                  启动 Web UI(开浏览器),等价于 run -
 ### 定位
 
 **运维控制台**,不创建任务。所有任务创建在飞书侧完成。
+
+安全边界:只允许监听本机回环地址;所有写请求校验同源,并启用 TrustedHost。需要局域网访问时必须先另行增加认证层,不能直接绑定 `0.0.0.0`。
 
 ### 页面
 

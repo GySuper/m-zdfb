@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
-from patchright.sync_api import FrameLocator, Page
+from patchright.sync_api import FrameLocator, Page, expect
 
 import wxsp.apc
 from wxsp.browser import browser_context
@@ -184,11 +184,12 @@ def _add_products(page: Page, product_ids: list[str]) -> None:
         # 先 hover 卡片让复选框显出,再直接点 input(opacity:0 盖在方框上,是真正接收点击的元素)。
         card = link.locator(sel.PRODUCT_ITEM_CARD_ANCESTOR)
         card.hover()
-        card.locator(sel.PRODUCT_ITEM_SELECT_CHECKBOX_INPUT).first.click()
+        checkbox = card.locator(sel.PRODUCT_ITEM_SELECT_CHECKBOX_INPUT).first
+        checkbox.click()
 
-        # 校验真的勾上了:卡片的 item-select label 出现 "checked" class,不静默跳过
+        # 校验真实 checkbox 已选中,不依赖 Fusion 组件可能变化的 class。
         try:
-            card.locator(sel.PRODUCT_ITEM_SELECTED).wait_for(timeout=3_000)
+            expect(checkbox).to_be_checked(timeout=3_000)
         except Exception as err:
             raise ProductNotFound(f"商品ID '{pid}' 已搜到但勾选未生效") from err
         logger.info(f"[taobao] 选中商品 pid={pid}")
@@ -306,25 +307,25 @@ def _click_publish(page: Page) -> None:
 def _wait_for_success_indicator(page: Page, timeout: int = 60) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        # 发布后页面会跳到 /page/workspace/tb,第一时间检测 URL 变化
-        if "pubNew/video" not in page.url:
-            logger.info("[taobao] 页面已跳转，视为发布成功")
+        # 只接受发布后的作品管理页,登录/错误/风控等其它跳转不能算成功。
+        if sel.SUCCESS_URL_FRAGMENT in page.url:
+            logger.info("[taobao] 已跳转作品管理页，发布成功")
             return
         for indicator in sel.SUCCESS_INDICATORS:
             try:
-                if page.locator(f'text="{indicator}"').count():
+                if page.locator(f'text="{indicator}"').first.is_visible():
                     return
             except Exception:
                 pass
             try:
                 iframe = _iframe(page)
-                if iframe.locator(f'text="{indicator}"').count():
+                if iframe.locator(f'text="{indicator}"').first.is_visible():
                     return
             except Exception:
                 pass
         time.sleep(2)
-    if "pubNew/video" not in page.url:
-        logger.info("[taobao] 页面已跳转，视为发布成功")
+    if sel.SUCCESS_URL_FRAGMENT in page.url:
+        logger.info("[taobao] 已跳转作品管理页，发布成功")
         return
     raise ElementNotFound("发布成功判定超时")
 

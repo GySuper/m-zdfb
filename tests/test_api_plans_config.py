@@ -572,6 +572,32 @@ def test_accounts_add_generates_id_and_writes_entry(
     assert new["user_data_dir"] == str(tmp_path / "data" / "chrome-profiles" / aid)
 
 
+def test_accounts_add_disabled_syncs_inactive_state_to_db(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _setup(tmp_path, monkeypatch)
+    before = set(yaml.safe_load(cfg.read_text("utf-8"))["accounts"])
+
+    r = client_empty.post(
+        "/config/accounts/add",
+        data={
+            "display_name": "停用号",
+            "daily_limit": "15",
+            "video_search_root": "/tmp/nas/videos/off",
+            "cover_search_root": "/tmp/nas/covers/off",
+        },
+        follow_redirects=False,
+    )
+
+    assert r.status_code == 303
+    after = set(yaml.safe_load(cfg.read_text("utf-8"))["accounts"])
+    aid = (after - before).pop()
+    with Session(get_engine(tmp_path / "db.sqlite")) as session:
+        account = session.get(Account, aid)
+        assert account is not None
+        assert account.is_active is False
+
+
 def test_accounts_add_rejects_duplicate_display_name_with_friendly_msg(
     client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -646,6 +672,42 @@ def test_accounts_update_writes_changes(
     assert a["user_data_dir"] == "./data/chrome-profiles/account_a"
 
 
+def test_accounts_update_syncs_disabled_state_to_db(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _setup(tmp_path, monkeypatch)
+    engine = get_engine(tmp_path / "db.sqlite")
+    with session_scope(engine) as session:
+        session.add(
+            Account(
+                id="account_a",
+                display_name="美食号",
+                user_data_dir="./data/chrome-profiles/account_a",
+                daily_limit=20,
+                is_active=True,
+            )
+        )
+
+    r = client_empty.post(
+        "/config/accounts/account_a/update",
+        data={
+            "display_name": "美食号改名了",
+            "daily_limit": "30",
+            "video_search_root": "/tmp/nas/new-videos",
+            "cover_search_root": "/tmp/nas/new-covers",
+        },
+        follow_redirects=False,
+    )
+
+    assert r.status_code == 303
+    with Session(engine) as session:
+        account = session.get(Account, "account_a")
+        assert account is not None
+        assert account.is_active is False
+        assert account.display_name == "美食号改名了"
+        assert account.daily_limit == 30
+
+
 def test_accounts_update_unknown_no_op(
     client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -697,6 +759,31 @@ def test_accounts_delete_removes_entry(
     assert r.status_code == 303
     disk = yaml.safe_load(cfg.read_text("utf-8"))
     assert "account_a" not in disk["accounts"]
+
+
+def test_accounts_delete_deactivates_db_row(
+    client_empty: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _setup(tmp_path, monkeypatch)
+    engine = get_engine(tmp_path / "db.sqlite")
+    with session_scope(engine) as session:
+        session.add(
+            Account(
+                id="account_a",
+                display_name="美食号",
+                user_data_dir="./data/chrome-profiles/account_a",
+                daily_limit=20,
+                is_active=True,
+            )
+        )
+
+    r = client_empty.post("/config/accounts/account_a/delete", follow_redirects=False)
+
+    assert r.status_code == 303
+    with Session(engine) as session:
+        account = session.get(Account, "account_a")
+        assert account is not None
+        assert account.is_active is False
 
 
 def test_accounts_delete_unknown_no_op(

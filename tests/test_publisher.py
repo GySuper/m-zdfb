@@ -10,7 +10,7 @@ import pytest
 from sqlmodel import Session, select
 
 from tests.conftest import make_settings
-from wxsp.db import claim_task, get_engine, init_db
+from wxsp.db import claim_task, get_engine, init_db, session_scope
 from wxsp.models import Account, Task, Video
 from wxsp.platforms.tencent_channel import random_pause, screenshot
 from wxsp.publisher import AlreadyClaimed, PublishResult, publish
@@ -48,6 +48,83 @@ def test_publish_result_defaults() -> None:
     r = PublishResult(task_id=1, ok=False, dry_run=True)
     assert r.remote_url is None
     assert r.screenshots == []
+
+
+def test_publish_calls_are_globally_serialized(
+    pending_task: tuple[int, Path],
+) -> None:
+    import threading
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    first_entered = threading.Event()
+    second_entered = threading.Event()
+    release_first = threading.Event()
+    call_count = 0
+    count_lock = threading.Lock()
+
+    class FakePublisher:
+        def publish_one(self, task_id, *, dry_run, settings):
+            nonlocal call_count
+            _ = settings
+            with count_lock:
+                call_count += 1
+                position = call_count
+            if position == 1:
+                first_entered.set()
+                assert release_first.wait(timeout=2)
+            else:
+                second_entered.set()
+            return PublishResult(task_id, ok=True, dry_run=dry_run)
+
+    errors: list[BaseException] = []
+
+    def run_one() -> None:
+        try:
+            publish(task_id, dry_run=True, settings=settings)
+        except BaseException as exc:  # pragma: no cover - 仅用于把线程异常带回主线程
+            errors.append(exc)
+
+    first = threading.Thread(target=run_one)
+    second = threading.Thread(target=run_one)
+    with patch("wxsp.publisher._get_publisher", return_value=FakePublisher()):
+        first.start()
+        assert first_entered.wait(timeout=2)
+        second.start()
+        assert not second_entered.wait(timeout=0.1)
+        release_first.set()
+        first.join(timeout=2)
+        second.join(timeout=2)
+
+    assert not errors
+    assert second_entered.is_set()
+
+
+def test_publish_rejects_concurrency_above_single_worker(
+    pending_task: tuple[int, Path],
+) -> None:
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    settings.publisher.max_concurrent_accounts = 2
+
+    with pytest.raises(ValueError, match=r"max_concurrent_accounts.*1"):
+        publish(task_id, dry_run=True, settings=settings)
+
+
+def test_publish_rejects_inactive_account(
+    pending_task: tuple[int, Path],
+) -> None:
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    engine = get_engine()
+    with session_scope(engine) as session:
+        account = session.get(Account, "a")
+        assert account is not None
+        account.is_active = False
+        session.add(account)
+
+    with pytest.raises(ValueError, match="账号不存在或已禁用"):
+        publish(task_id, dry_run=True, settings=settings)
 
 
 # =========== publish() 顶层编排 ===========
@@ -250,6 +327,57 @@ def test_publish_failure_writes_status_failed_with_screenshot(
         assert task_db.last_error_type == "upload_failed"
         assert task_db.screenshots_json != "[]"
         assert task_db.finished_at is not None
+
+
+def test_publish_failure_respects_screenshot_on_error_false(
+    pending_task: tuple[int, Path],
+) -> None:
+    from wxsp.errors import UploadFailed
+
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    settings.publisher.screenshot_on_error = False
+
+    def raise_upload(*_a, **_kw):
+        raise UploadFailed("上传中断")
+
+    screenshot_mock = MagicMock()
+    overrides = _noop_steps(upload_video=raise_upload)
+    with (
+        patch(
+            "wxsp.platforms.runner.browser_context",
+            return_value=_fake_browser_ctx(tmp_path),
+        ),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
+        patch("wxsp.platforms.runner.screenshot", screenshot_mock),
+        patch.multiple("wxsp.platforms.tencent_channel", **overrides),
+    ):
+        result = publish(task_id, dry_run=False, settings=settings)
+
+    assert result.ok is False
+    screenshot_mock.assert_not_called()
+    assert result.screenshots == []
+
+
+def test_tencent_publish_rejects_headless_at_execution_boundary(
+    pending_task: tuple[int, Path],
+) -> None:
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    settings.publisher.headless = True
+    browser_mock = MagicMock()
+
+    with (
+        patch("wxsp.platforms.runner.browser_context", browser_mock),
+        patch("wxsp.platforms.runner.stage_to_tmp", return_value=tmp_path / "v.mp4"),
+        patch("wxsp.platforms.runner.cleanup_tmp"),
+    ):
+        result = publish(task_id, dry_run=True, settings=settings)
+
+    assert result.ok is False
+    assert "headless" in (result.error_msg or "")
+    browser_mock.assert_not_called()
 
 
 def test_publish_cookie_expired_keeps_task_pending_for_relogin(

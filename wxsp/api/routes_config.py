@@ -493,7 +493,7 @@ def add_account(
     daily_limit: int = Form(20),
     video_search_root: str = Form(...),
     cover_search_root: str = Form(...),
-    enabled: bool = Form(True),
+    enabled: bool = Form(False),
     platform: str = Query("tencent_channel"),
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
@@ -545,6 +545,7 @@ def add_account(
                     platform=platform,
                     user_data_dir=user_data_dir,
                     daily_limit=daily_limit,
+                    is_active=enabled,
                 )
             )
     suffix = _sync_account_to_feishu(data, display_name)
@@ -622,6 +623,7 @@ def update_account(
     cover_search_root: str = Form(...),
     enabled: bool = Form(False),
     platform: str = Query("tencent_channel"),
+    session: Session = Depends(get_session),
 ) -> RedirectResponse:
     """编辑账号(account_id 和 user_data_dir 不可改:它们与 chrome profile 强绑定)。"""
     display_name = display_name.strip()
@@ -646,7 +648,7 @@ def update_account(
                 status_code=303,
             )
         old_entry = accounts[account_id]
-        accounts[account_id] = _build_account_entry(
+        entry = _build_account_entry(
             display_name=display_name,
             enabled=enabled,
             daily_limit=daily_limit,
@@ -655,6 +657,7 @@ def update_account(
             user_data_dir=old_entry.get("user_data_dir") or _profile_dir_for(account_id),
             platform=platform,
         )
+        accounts[account_id] = entry
         data["accounts"] = accounts
         errors = _validate_dict(data)
         if errors:
@@ -663,13 +666,34 @@ def update_account(
                 status_code=303,
             )
         _save_yaml(data, platform=platform)
+        account = session.get(Account, account_id)
+        if account is None:
+            account = Account(
+                id=account_id,
+                display_name=display_name,
+                platform=platform,
+                user_data_dir=entry["user_data_dir"],
+                daily_limit=daily_limit,
+                is_active=enabled,
+            )
+        else:
+            account.display_name = display_name
+            account.platform = platform
+            account.user_data_dir = entry["user_data_dir"]
+            account.daily_limit = daily_limit
+            account.is_active = enabled
+        session.add(account)
     return RedirectResponse(
         f"/config?flash=已更新账号 {account_id}&platform={platform}", status_code=303
     )
 
 
 @router.post("/config/accounts/{account_id}/delete")
-def delete_account(account_id: str, platform: str = "tencent_channel") -> RedirectResponse:
+def delete_account(
+    account_id: str,
+    platform: str = "tencent_channel",
+    session: Session = Depends(get_session),
+) -> RedirectResponse:
     with _config_lock:
         data = _load_raw_yaml(platform or "tencent_channel")
         accounts = data.get("accounts", {}) or {}
@@ -686,6 +710,10 @@ def delete_account(account_id: str, platform: str = "tencent_channel") -> Redire
                 f"/config?flash=删除失败: {errors[0]}&platform={platform}", status_code=303
             )
         _save_yaml(data, platform=platform)
+        account = session.get(Account, account_id)
+        if account is not None:
+            account.is_active = False
+            session.add(account)
     return RedirectResponse(
         f"/config?flash=已删除账号 {account_id}&platform={platform}", status_code=303
     )

@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 from tests.conftest import make_settings
 from wxsp.db import claim_task, get_engine, init_db
 from wxsp.models import Account, Task, Video
-from wxsp.publisher import AlreadyClaimed, publish
+from wxsp.publisher import AlreadyClaimed, PublishResult, publish
 
 # patch 根:抽取前所有依赖都在 taobao_guanghe 模块命名空间里。
 # 迁移到 runner 后,基础设施类的 patch 目标会改成 wxsp.platforms.runner.*。
@@ -112,6 +112,150 @@ def _patches(tmp_path: Path, overrides: dict):
         patch(f"{RUNNER}.screenshot", side_effect=lambda *a, **kw: tmp_path / "s.png"),
         patch.multiple(MOD, **overrides),
     )
+
+
+def test_publish_loads_settings_for_task_platform_when_omitted(
+    pending_task: tuple[int, Path],
+) -> None:
+    task_id, tmp_path = pending_task
+    settings = make_settings(tmp_path, tmp_path)
+    fake_publisher = MagicMock()
+    fake_publisher.publish_one.return_value = PublishResult(task_id, ok=True, dry_run=True)
+
+    with (
+        patch("wxsp.publisher.load_settings", return_value=settings) as load_settings,
+        patch("wxsp.publisher._get_publisher", return_value=fake_publisher),
+    ):
+        result = publish(task_id, dry_run=True)
+
+    assert result.ok is True
+    load_settings.assert_called_once_with(platform="taobao_guanghe")
+    fake_publisher.publish_one.assert_called_once_with(task_id, dry_run=True, settings=settings)
+
+
+def test_publish_reloads_settings_when_source_platform_mismatches_task(
+    pending_task: tuple[int, Path],
+) -> None:
+    task_id, tmp_path = pending_task
+    wrong_settings = make_settings(tmp_path, tmp_path)
+    wrong_settings._source_platform = "tencent_channel"
+    correct_settings = make_settings(tmp_path, tmp_path)
+    correct_settings._source_platform = "taobao_guanghe"
+    from wxsp.config import AccountConfig
+
+    correct_settings.accounts = {
+        "a": AccountConfig(
+            display_name="淘宝A",
+            platform="taobao_guanghe",
+            daily_limit=20,
+            user_data_dir=tmp_path / "profile",
+            video_search_root=tmp_path,
+            cover_search_root=tmp_path,
+        )
+    }
+    fake_publisher = MagicMock()
+    fake_publisher.publish_one.return_value = PublishResult(task_id, ok=True, dry_run=True)
+
+    with (
+        patch("wxsp.publisher.load_settings", return_value=correct_settings) as load_settings,
+        patch("wxsp.publisher._get_publisher", return_value=fake_publisher),
+    ):
+        result = publish(task_id, dry_run=True, settings=wrong_settings)
+
+    assert result.ok is True
+    load_settings.assert_called_once_with(platform="taobao_guanghe")
+    fake_publisher.publish_one.assert_called_once_with(
+        task_id, dry_run=True, settings=correct_settings
+    )
+
+
+def test_wait_for_success_rejects_unexpected_redirect() -> None:
+    from wxsp.errors import ElementNotFound
+    from wxsp.platforms.taobao_guanghe import _wait_for_success_indicator
+
+    page = MagicMock()
+    page.url = "https://login.taobao.com/member/login.jhtml"
+
+    with pytest.raises(ElementNotFound, match="成功判定超时"):
+        _wait_for_success_indicator(page, timeout=0)
+
+
+def test_wait_for_success_ignores_hidden_indicator() -> None:
+    from wxsp.errors import ElementNotFound
+    from wxsp.platforms import taobao_selectors as sel
+    from wxsp.platforms.taobao_guanghe import _wait_for_success_indicator
+
+    page = MagicMock()
+    page.url = sel.PUBLISH_PAGE_URL
+    hidden = MagicMock()
+    hidden.first = hidden
+    hidden.is_visible.return_value = False
+    page.locator.return_value = hidden
+
+    with (
+        patch("wxsp.platforms.taobao_guanghe.time.time", side_effect=[0, 0, 2]),
+        patch("wxsp.platforms.taobao_guanghe.time.sleep"),
+        patch("wxsp.platforms.taobao_guanghe._iframe") as iframe,
+        pytest.raises(ElementNotFound, match="成功判定超时"),
+    ):
+        iframe.return_value.locator.return_value = hidden
+        _wait_for_success_indicator(page, timeout=1)
+
+
+def test_add_products_uses_current_card_and_checkbox_dom() -> None:
+    from wxsp.platforms import taobao_selectors as sel
+    from wxsp.platforms.taobao_guanghe import _add_products
+
+    pid = "1040198270412"
+    page = MagicMock()
+    iframe = MagicMock()
+    trigger = MagicMock()
+    heading = MagicMock()
+    any_link = MagicMock()
+    result_link = MagicMock()
+    search = MagicMock()
+    confirm = MagicMock()
+    card = MagicMock()
+    checkbox = MagicMock()
+    any_link.first = MagicMock()
+    result_link.first = result_link
+    checkbox.first = checkbox
+
+    locators = {
+        sel.PRODUCT_TRIGGER: trigger,
+        sel.PRODUCT_DIALOG_HEADING: heading,
+        sel.PRODUCT_ITEM_LINK_ANY: any_link,
+        sel.PRODUCT_SEARCH_INPUT: search,
+        sel.PRODUCT_ITEM_LINK_BY_ID.format(pid=pid): result_link,
+        sel.PRODUCT_CONFIRM_BUTTON: confirm,
+    }
+    iframe.locator.side_effect = locators.__getitem__
+
+    def locate_card(selector: str) -> MagicMock:
+        assert selector == 'xpath=ancestor::div[.//input[@type="checkbox"]][1]'
+        return card
+
+    def locate_checkbox(selector: str) -> MagicMock:
+        assert selector == 'input.next-checkbox-input[type="checkbox"]'
+        return checkbox
+
+    result_link.locator.side_effect = locate_card
+    card.locator.side_effect = locate_checkbox
+
+    with (
+        patch(f"{MOD}._iframe", return_value=iframe),
+        patch(f"{MOD}.expect") as expect_checkbox,
+        patch(f"{MOD}.time.sleep"),
+    ):
+        _add_products(page, [pid])
+
+    search.fill.assert_called_once_with(pid)
+    search.press.assert_called_once_with("Enter")
+    card.hover.assert_called_once_with()
+    checkbox.click.assert_called_once_with()
+    expect_checkbox.assert_called_once_with(checkbox)
+    expect_checkbox.return_value.to_be_checked.assert_called_once_with(timeout=3_000)
+    confirm.click.assert_called_once_with()
 
 
 def test_dry_run_short_circuits_before_click_publish(pending_task: tuple[int, Path]) -> None:

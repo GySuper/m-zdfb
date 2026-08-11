@@ -8,6 +8,7 @@ from datetime import date as _date
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -37,7 +38,9 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 @pytest.fixture
-def client_with_data(tmp_path: Path) -> Iterator[tuple[TestClient, _date]]:
+def client_with_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[TestClient, _date]]:
     db_path = tmp_path / "db.sqlite"
     engine = get_engine(db_path)
     init_db(engine)
@@ -99,6 +102,7 @@ def client_with_data(tmp_path: Path) -> Iterator[tuple[TestClient, _date]]:
 
     app.dependency_overrides[get_session] = fake_get_session
     app.dependency_overrides[get_settings] = lambda: settings
+    monkeypatch.setattr(routes_tasks, "load_settings", lambda platform: settings)
 
     with TestClient(app) as c:
         yield c, today
@@ -149,17 +153,22 @@ def test_retry_resets_to_pending_and_spawns(
 ) -> None:
     c, _ = client_with_data
     calls: list[tuple[str, int]] = []
-    monkeypatch.setattr(
-        routes_tasks,
-        "_spawn",
-        lambda name, fn, *a, **kw: calls.append((name, a[0])) if a else None,
-    )
+    engine = get_engine(tmp_path / "db.sqlite")
+
+    def fake_spawn(name, fn, *args, **kwargs):
+        _ = fn, kwargs
+        with Session(engine) as separate_session:
+            task = separate_session.get(Task, args[0])
+            assert task is not None
+            assert task.status == "pending"
+        calls.append((name, args[0]))
+
+    monkeypatch.setattr(routes_tasks, "_spawn", fake_spawn)
 
     r = c.post("/tasks/1/retry", follow_redirects=False)
     assert r.status_code == 303
     assert calls == [("retry", 1)]
 
-    engine = get_engine(tmp_path / "db.sqlite")
     with session_scope(engine) as s:
         t = s.get(Task, 1)
         assert t is not None
@@ -186,6 +195,31 @@ def test_retry_running_task_rejected(
     # 跳回详情页 + flash,但状态仍是 running
     with session_scope(engine) as s:
         assert s.get(Task, 1).status == "running"  # type: ignore[union-attr]
+
+
+def test_retry_disabled_account_is_rejected_without_spawning(
+    client_with_data: tuple[TestClient, _date],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    c, _ = client_with_data
+    engine = get_engine(tmp_path / "db.sqlite")
+    with session_scope(engine) as session:
+        account = session.get(Account, "account_a")
+        assert account is not None
+        account.is_active = False
+        session.add(account)
+    spawn = pytest.fail
+    monkeypatch.setattr(routes_tasks, "_spawn", spawn)
+
+    response = c.post("/tasks/1/retry", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "账号已禁用或删除" in unquote(response.headers["location"])
+    with Session(engine) as session:
+        task = session.get(Task, 1)
+        assert task is not None
+        assert task.status == "failed"
 
 
 def test_retry_unknown_task_404(client_with_data: tuple[TestClient, _date]) -> None:

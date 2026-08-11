@@ -463,7 +463,7 @@ def test_check_feishu_returns_ok_when_prober_succeeds(tmp_path: Path) -> None:
 
     assert called == [settings]
     assert row.ok is True
-    assert "tok_test" in row.detail
+    assert "tok_test" not in row.detail
     assert "tbl_test" in row.detail
 
 

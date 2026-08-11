@@ -42,6 +42,18 @@ def _legacy_engine(tmp_path: Path):
             )
         )
         conn.execute(text("INSERT INTO event (level, type, message) VALUES ('info','x','y')"))
+        conn.execute(
+            text(
+                "CREATE TABLE video (id VARCHAR PRIMARY KEY, source VARCHAR, "
+                "file_path VARCHAR, title VARCHAR, ingested_at DATETIME)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO video (id, source, file_path, title) "
+                "VALUES ('v1', 'feishu', '/old.mp4', '老视频')"
+            )
+        )
     return engine
 
 
@@ -71,6 +83,21 @@ def test_init_db_migration_idempotent(tmp_path: Path) -> None:
     init_db(engine)  # 第二次不应报错(列已存在则跳过)
     with engine.begin() as conn:
         assert conn.execute(text("SELECT count(*) FROM account")).scalar() == 1
+
+
+def test_init_db_adds_new_video_columns_to_legacy_table(tmp_path: Path) -> None:
+    engine = _legacy_engine(tmp_path)
+    init_db(engine)
+
+    with engine.begin() as conn:
+        cols = [r[1] for r in conn.execute(text("PRAGMA table_info(video)"))]
+        assert "declaration" in cols
+        assert "ai_optimize" in cols
+        assert "product_ids_json" in cols
+        row = conn.execute(
+            text("SELECT declaration, ai_optimize, product_ids_json FROM video WHERE id='v1'")
+        ).one()
+        assert row == (None, 0, "[]")
 
 
 def test_init_db_fresh_db_has_platform(tmp_path: Path) -> None:

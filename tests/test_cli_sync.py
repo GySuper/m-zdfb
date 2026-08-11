@@ -190,6 +190,7 @@ def test_sync_happy_pipeline(sync_env: dict[str, Any], monkeypatch: pytest.Monke
     runner = CliRunner()
     result = runner.invoke(app, ["sync"])
     assert result.exit_code == 0, result.output
+    assert "app_token=tok" not in result.output
 
     engine = get_engine(sync_env["db_path"])
     with Session(engine) as session:

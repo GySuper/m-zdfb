@@ -108,7 +108,7 @@ def sync_now(
         active_accounts: dict[str, str] = {
             aid: settings.accounts[aid].display_name
             for aid in active_account_ids
-            if aid in settings.accounts
+            if aid in settings.accounts and settings.accounts[aid].enabled
         }
         for row in rows:
             existing_video = session.get(Video, row.record_id)

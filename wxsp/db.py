@@ -43,6 +43,7 @@ def init_db(engine: Engine) -> None:
     SQLModel.metadata.create_all(engine)
     _migrate_add_platform_column(engine)
     _migrate_add_community_columns(engine)
+    _migrate_add_video_columns(engine)
 
 
 def _migrate_add_platform_column(engine: Engine) -> None:
@@ -90,6 +91,25 @@ def _migrate_add_community_columns(engine: Engine) -> None:
         if "community_last_active_at" not in cols:
             conn.execute(text("ALTER TABLE account ADD COLUMN community_last_active_at DATETIME"))
             logger.info("[db] 老库迁移:account 补 community_last_active_at 列")
+
+
+def _migrate_add_video_columns(engine: Engine) -> None:
+    """老库升级补列:淘宝/拼多多新增的视频声明、AI 和商品字段。"""
+    inspector = inspect(engine)
+    if "video" not in set(inspector.get_table_names()):
+        return
+    cols = {c["name"] for c in inspector.get_columns("video")}
+    definitions = {
+        "declaration": "VARCHAR",
+        "ai_optimize": "BOOLEAN NOT NULL DEFAULT 0",
+        "product_ids_json": "VARCHAR NOT NULL DEFAULT '[]'",
+    }
+    with engine.begin() as conn:
+        for column, definition in definitions.items():
+            if column in cols:
+                continue
+            conn.execute(text(f'ALTER TABLE video ADD COLUMN "{column}" {definition}'))
+            logger.info(f"[db] 老库迁移:video 补 {column} 列")
 
 
 @contextmanager

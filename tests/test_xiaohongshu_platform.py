@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from wxsp.errors import ElementNotFound
+
 
 def test_xiaohongshu_registered_in_registry() -> None:
     from wxsp.platform_meta import ALL_PLATFORMS, get_meta
@@ -57,3 +64,21 @@ def test_xiaohongshu_spec_wiring() -> None:
     assert XIAOHONGSHU_SPEC.display_name == "小红书"
     assert XIAOHONGSHU_SPEC.pre_publish is _pre_publish
     assert XIAOHONGSHU_SPEC.post_publish is _post_publish
+
+
+def test_xiaohongshu_schedule_missing_input_fails_closed() -> None:
+    from wxsp.platforms.xiaohongshu import _set_schedule
+
+    page = MagicMock()
+    switch_card = MagicMock()
+    schedule_input = MagicMock()
+    schedule_input.first = schedule_input
+    schedule_input.wait_for.side_effect = RuntimeError("missing")
+    page.locator.side_effect = [switch_card, schedule_input]
+
+    with (
+        patch("wxsp.platforms.xiaohongshu.physical_click"),
+        patch("wxsp.platforms.xiaohongshu._wait_xhs"),
+        pytest.raises(ElementNotFound, match="定时发布日期框"),
+    ):
+        _set_schedule(page, datetime(2026, 8, 12, 18, 0))

@@ -120,6 +120,8 @@ def load_task_bundle(session: Session, task_id: int) -> TaskBundle:
 
 def _capture_error_artifacts(page: Page, ctx: PublishContext) -> None:
     """趁 page 还活着:截图 err_{last_step}.png + 落一份同名 .html,失败不外抛。"""
+    if not ctx.settings.publisher.screenshot_on_error:
+        return
     try:
         shot = screenshot(
             page,
@@ -201,6 +203,10 @@ def run_publish(
     )
 
     try:
+        if spec.platform_key == "tencent_channel" and settings.publisher.headless:
+            ctx.last_step = "browser"
+            raise RuntimeError("视频号禁止 headless 模式,请将 publisher.headless 设为 false")
+
         # [1] stage NAS → tmp
         ctx.last_step = "stage"
         staged = stage_to_tmp(bundle.video_file_path, task_id=task_id, tmp_root=tmp_root)

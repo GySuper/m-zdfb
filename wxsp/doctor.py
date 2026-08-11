@@ -206,10 +206,7 @@ def check_feishu(config: Settings, *, prober: FeishuProber | None = None) -> Fei
     return FeishuCheckRow(
         label="feishu.api",
         ok=True,
-        detail=(
-            f"OK (app_token={config.feishu.bitable.app_token} "
-            f"table_id={config.feishu.bitable.table_id})"
-        ),
+        detail=f"OK (table_id={config.feishu.bitable.table_id})",
     )
 
 

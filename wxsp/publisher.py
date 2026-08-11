@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from wxsp.config import Settings
+import threading
+
+from wxsp.config import Settings, load_settings
 from wxsp.db import get_engine, init_db
 from wxsp.models import Account, Task
 from wxsp.platforms.base import (  # re-export for callers
@@ -28,6 +30,10 @@ _PUBLISHERS: dict[str, PlatformPublisher] = {
     "pinduoduo": PinduoduoPublisher(),
 }
 
+# CLI / cron / Web retry 最终都经过这个边界。进程内只允许一个发布浏览器运行,
+# 避免 pyautogui、BlockInput 和同 IP 多账号并发互相干扰。
+_PUBLISH_LOCK = threading.Lock()
+
 
 def _get_publisher(platform: str) -> PlatformPublisher:
     if platform not in _PUBLISHERS:
@@ -39,7 +45,7 @@ def publish(
     task_id: int,
     *,
     dry_run: bool = False,
-    settings: Settings,
+    settings: Settings | None = None,
 ) -> PublishResult:
     """Route to correct platform publisher based on task.platform.
 
@@ -56,12 +62,26 @@ def publish(
         if task is None:
             raise ValueError(f"Task {task_id} not found")
         platform = getattr(task, "platform", "tencent_channel")
+        account = session.get(Account, task.account_id)
+        if account is None or not account.is_active:
+            raise ValueError(f"Task {task_id} 的账号不存在或已禁用")
+        account_id = account.id
+
+    if settings is None or settings.source_platform not in (None, platform):
+        settings = load_settings(platform=platform)
+    account_cfg = settings.accounts.get(account_id)
+    if settings.source_platform is not None and (account_cfg is None or not account_cfg.enabled):
+        raise ValueError(f"Task {task_id} 的账号已从平台配置删除或禁用")
+    if settings.publisher.max_concurrent_accounts != 1:
+        raise ValueError("当前发布器只支持单 worker: max_concurrent_accounts 必须为 1")
 
     pub = _get_publisher(platform)
-    return pub.publish_one(task_id, dry_run=dry_run, settings=settings)
+    with _PUBLISH_LOCK:
+        return pub.publish_one(task_id, dry_run=dry_run, settings=settings)
 
 
 def login(account: Account) -> bool:
     """Route to the correct platform publisher's login based on account.platform."""
     platform = getattr(account, "platform", "tencent_channel")
-    return _get_publisher(platform).login(account)
+    with _PUBLISH_LOCK:
+        return _get_publisher(platform).login(account)

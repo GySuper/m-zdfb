@@ -283,8 +283,7 @@ def _set_schedule(page: Page, publish_at: datetime) -> None:
     try:
         inp.wait_for(state="visible", timeout=10_000)
     except Exception as err:
-        logger.warning(f"[xiaohongshu] 定时发布日期框未找到(可能改版): {err}")
-        return  # 定时设置失败不阻断发布(降级为即时发布)
+        raise ElementNotFound(f"定时发布日期框未找到(可能改版): {err}") from err
 
     # 物理点击日期框聚焦 → Cmd/Ctrl+A 全选 → 物理输入覆盖 → 回车确认
     # force_paste:定时日期含冒号 :,中文输入法下逐字符 press 会被拦截

@@ -98,6 +98,15 @@ def test_run_supports_today_flag() -> None:
     assert "--dry-run" in result.stdout
 
 
+def test_webui_bind_host_must_be_loopback() -> None:
+    from wxsp.cli import _validate_webui_host
+
+    assert _validate_webui_host("127.0.0.1") == "127.0.0.1"
+    assert _validate_webui_host("localhost") == "localhost"
+    with pytest.raises(ValueError, match="仅允许监听本机"):
+        _validate_webui_host("0.0.0.0")
+
+
 def test_doctor_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # doctor 现在会读 settings.paths.{video,cover}_search_root 并检查存在性,
     # 测试不依赖开发机 config.yaml,monkeypatch load_settings 注入临时目录。

@@ -20,9 +20,12 @@ from __future__ import annotations
 
 import json as _json
 import os
+import queue
+import re
 import signal
 import subprocess
 import sys
+import threading
 import time as _time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -172,19 +175,7 @@ def _launch_real_chrome(
         except Exception:
             pass
     proc = subprocess.Popen(argv, **popen_kwargs)
-    # 轮询 stderr 直到出现 "DevTools listening on ws://127.0.0.1:<port>"(Chrome 自选端口)
-    deadline = _time.monotonic() + 15
-    port: int | None = None
-    while _time.monotonic() < deadline and proc.poll() is None:
-        line = proc.stderr.readline() if proc.stderr else ""
-        if "DevTools listening on" in line:
-            # 形如 ...ws://127.0.0.1:9222/devtools/browser/...
-            import re
-
-            m = re.search(r"127\.0\.0\.1:(\d+)", line)
-            if m:
-                port = int(m.group(1))
-                break
+    port = _wait_for_devtools_port(proc, timeout_seconds=15)
     if port is None:
         proc.terminate()
         raise RuntimeError("Chrome DevTools 端口就绪超时(15s 内未监听)")
@@ -202,6 +193,45 @@ def _launch_real_chrome(
         except Exception:
             pass
     return proc, port
+
+
+def _wait_for_devtools_port(proc: Any, *, timeout_seconds: float) -> int | None:
+    """异步排空 stderr,让启动截止时间不受阻塞式 readline 影响。"""
+    lines: queue.Queue[str] = queue.Queue()
+    reader_done = threading.Event()
+    capture = threading.Event()
+    capture.set()
+
+    def _drain() -> None:
+        try:
+            if proc.stderr is None:
+                return
+            while line := proc.stderr.readline():
+                if capture.is_set():
+                    lines.put(line)
+        finally:
+            reader_done.set()
+
+    threading.Thread(target=_drain, daemon=True, name="chrome-stderr").start()
+    deadline = _time.monotonic() + timeout_seconds
+    try:
+        while _time.monotonic() < deadline:
+            if reader_done.is_set() and lines.empty():
+                return None
+            remaining = deadline - _time.monotonic()
+            try:
+                line = lines.get(timeout=max(0.001, min(0.1, remaining)))
+            except queue.Empty:
+                continue
+            if "DevTools listening on" not in line:
+                continue
+            match = re.search(r"127\.0\.0\.1:(\d+)", line)
+            if match:
+                return int(match.group(1))
+        return None
+    finally:
+        # 端口拿到后线程仍继续排空 Chrome stderr,但不再缓存日志。
+        capture.clear()
 
 
 def _fingerprint_storage_dir() -> Path:

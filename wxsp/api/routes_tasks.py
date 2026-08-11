@@ -258,9 +258,18 @@ def retry_task(
             url=f"/tasks/{task_id}?flash={'当前状态不可重试: ' + task.status}&platform={plat}",
             status_code=303,
         )
+    account = session.get(Account, task.account_id)
+    account_cfg = settings.accounts.get(task.account_id)
+    if account is None or not account.is_active or account_cfg is None or not account_cfg.enabled:
+        return RedirectResponse(
+            url=f"/tasks/{task_id}?flash=账号已禁用或删除,不能重试&platform={plat}",
+            status_code=303,
+        )
     # 重置回 pending(claim_task 才会生效)。attempts 保留累加,审计用。
     _reset_to_pending(task)
     session.add(task)
+    # 后台线程使用独立 session,必须先提交 pending,否则 claim_task 会读到旧状态。
+    session.commit()
     _spawn("retry", _run_publish, task_id, settings)
     return RedirectResponse(
         url=f"/tasks/{task_id}?flash=已加入队列重试&platform={plat}", status_code=303

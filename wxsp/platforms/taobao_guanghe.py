@@ -10,11 +10,14 @@ from __future__ import annotations
 import json as _json
 import random
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import TypeVar
 
 from loguru import logger
 from patchright.sync_api import FrameLocator, Page, expect
+from patchright.sync_api import TimeoutError as PWTimeoutError
 
 import wxsp.apc
 from wxsp.browser import browser_context
@@ -38,8 +41,62 @@ def _iframe(page: Page) -> FrameLocator:
     return page.frame_locator(sel.IFRAME_SELECTOR)
 
 
+_ELEMENT_RETRY_ATTEMPTS = 3
+_ELEMENT_RETRY_DELAY_SECONDS = 1.5
+_T = TypeVar("_T")
+
+
+def _dismiss_transient_popups(page: Page) -> None:
+    """尽力清理遮挡元素的弹窗,失败不掩盖原始元素错误。"""
+    for selector in sel.POPUP_CLOSE_SELECTORS:
+        try:
+            close = page.locator(selector).first
+            if close.is_visible():
+                close.click(timeout=1_000)
+                logger.info(f"[taobao] 重试前关闭弹窗 selector={selector}")
+                return
+        except Exception:
+            continue
+
+    try:
+        iframe = _iframe(page)
+        for selector in sel.POPUP_CLOSE_SELECTORS:
+            try:
+                close = iframe.locator(selector).first
+                if close.is_visible():
+                    close.click(timeout=1_000)
+                    logger.info(f"[taobao] 重试前关闭 iframe 弹窗 selector={selector}")
+                    return
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    try:
+        page.keyboard.press("Escape")
+    except Exception:
+        pass
+
+
+def _with_element_retry(page: Page, step: str, action: Callable[[], _T]) -> _T:
+    """页面元素暂时未就绪时重试当前发布前步骤。"""
+    for attempt in range(1, _ELEMENT_RETRY_ATTEMPTS + 1):
+        try:
+            return action()
+        except (ElementNotFound, PWTimeoutError, NetworkError) as exc:
+            if attempt == _ELEMENT_RETRY_ATTEMPTS:
+                raise
+            logger.warning(
+                f"[taobao] 步骤 {step} 元素暂不可用,准备重试 "
+                f"({attempt}/{_ELEMENT_RETRY_ATTEMPTS - 1}): {exc}"
+            )
+            _dismiss_transient_popups(page)
+            time.sleep(_ELEMENT_RETRY_DELAY_SECONDS)
+    raise AssertionError("unreachable")
+
+
 # ---------------------------------------------------------------------------
-# step functions [3]-[16]
+# step functions [3]-[15]
 # ---------------------------------------------------------------------------
 
 
@@ -66,7 +123,7 @@ def _verify_logged_in(page: Page) -> None:
     try:
         _iframe(page).locator(sel.LOGGED_IN_INDICATOR).wait_for(timeout=5_000)
     except Exception as err:
-        raise CookieExpired("发布表单不可见，登录态可能失效") from err
+        raise NetworkError("发布表单加载超时") from err
 
 
 def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> None:
@@ -287,15 +344,6 @@ def _toggle_ai_optimize(page: Page, on: bool) -> None:
     logger.warning(f"[taobao] AI优化开关点击后仍非目标态 on={on},继续发布")
 
 
-def _disable_download(page: Page) -> None:
-    """取消'允许下载':radio 默认选中,点击即取消。"""
-    iframe = _iframe(page)
-    label = iframe.locator(sel.DOWNLOAD_RADIO)
-    radio = label.locator("..").locator('input[type="radio"]')
-    if radio.is_checked():
-        label.click()
-
-
 def _click_publish(page: Page) -> None:
     iframe = _iframe(page)
     scheduled = iframe.locator(sel.SUBMIT_BUTTON_SCHEDULED)
@@ -347,7 +395,7 @@ def _risk_control_probe(page: Page) -> None:
 
 
 def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishContext) -> None:
-    """[3]-[15] 打开页 → 上传 → 填表 → 商品 → 定时 → 声明 → 风控探测。
+    """[3]-[14] 打开页 → 上传 → 填表 → 商品 → 定时 → 声明 → 风控探测。
 
     视频本体由编排器已 stage 好传进来(淘宝无独立封面文件,封面由平台自动生成)。
     """
@@ -369,11 +417,11 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
     apc_passed = wxsp.apc.check_pass()
 
     ctx.last_step = "open"
-    _open_publish_page(page)
+    _with_element_retry(page, "open", lambda: _open_publish_page(page))
     random_pause(step_pause)
 
     ctx.last_step = "login"
-    _verify_logged_in(page)
+    _with_element_retry(page, "login", lambda: _verify_logged_in(page))
     random_pause(step_pause)
 
     # APC 拒绝时装"等待上传区域超时"故障(对齐 tencent §3.3)
@@ -390,7 +438,11 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
         raise ElementNotFound("等待上传区域超时(60s)")
 
     ctx.last_step = "upload"
-    _upload_video(page, file_path=staged, timeout_seconds=upload_timeout)
+    _with_element_retry(
+        page,
+        "upload",
+        lambda: _upload_video(page, file_path=staged, timeout_seconds=upload_timeout),
+    )
     random_pause(step_pause)
 
     ctx.last_step = "cover"
@@ -398,15 +450,19 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
     random_pause(step_pause)
 
     ctx.last_step = "title"
-    _fill_title(page, title=bundle.title)
+    _with_element_retry(page, "title", lambda: _fill_title(page, title=bundle.title))
     random_pause(step_pause)
 
     ctx.last_step = "desc"
-    _fill_description(page, description=bundle.description)
+    _with_element_retry(
+        page,
+        "desc",
+        lambda: _fill_description(page, description=bundle.description),
+    )
     random_pause(step_pause)
 
     ctx.last_step = "topic"
-    _add_topic(page, topic_name=bundle.topic)
+    _with_element_retry(page, "topic", lambda: _add_topic(page, topic_name=bundle.topic))
     random_pause(step_pause)
 
     ctx.last_step = "products"
@@ -422,23 +478,35 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
                 f" {product_ids_raw!r},跳过商品"
             )
     if product_ids_list:
-        _add_products(page, product_ids=product_ids_list)
+        _with_element_retry(
+            page,
+            "products",
+            lambda: _add_products(page, product_ids=product_ids_list),
+        )
     random_pause(step_pause)
 
     ctx.last_step = "schedule"
-    _set_schedule(page, publish_at=bundle.publish_at)
+    _with_element_retry(
+        page,
+        "schedule",
+        lambda: _set_schedule(page, publish_at=bundle.publish_at),
+    )
     random_pause(step_pause)
 
     ctx.last_step = "declaration"
-    _set_declaration(page, declaration=bundle.declaration)
+    _with_element_retry(
+        page,
+        "declaration",
+        lambda: _set_declaration(page, declaration=bundle.declaration),
+    )
     random_pause(step_pause)
 
     ctx.last_step = "ai"
-    _toggle_ai_optimize(page, on=bool(bundle.ai_optimize))
-    random_pause(step_pause)
-
-    ctx.last_step = "download"
-    _disable_download(page)
+    _with_element_retry(
+        page,
+        "ai",
+        lambda: _toggle_ai_optimize(page, on=bool(bundle.ai_optimize)),
+    )
     random_pause(step_pause)
 
     ctx.last_step = "risk"
@@ -446,7 +514,7 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
 
 
 def _post_publish(page: Page, bundle: TaskBundle, ctx: PublishContext) -> None:
-    """[16]-[17] 点定时发布 → 等跳转判成功。淘宝不抽取 remote_url(到点前无公开链接)。"""
+    """[15]-[16] 点定时发布 → 等跳转判成功。淘宝不抽取 remote_url(到点前无公开链接)。"""
     ctx.last_step = "publish"
     _click_publish(page)
 

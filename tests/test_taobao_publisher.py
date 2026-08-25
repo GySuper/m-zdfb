@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from patchright.sync_api import TimeoutError as PWTimeoutError
 from sqlmodel import Session, select
 
 from tests.conftest import make_settings
@@ -93,7 +95,6 @@ def _noop_steps(**overrides):
         "_set_schedule": lambda *a, **kw: None,
         "_set_declaration": lambda *a, **kw: None,
         "_toggle_ai_optimize": lambda *a, **kw: None,
-        "_disable_download": lambda *a, **kw: None,
         "_click_publish": lambda *a, **kw: None,
         "_wait_for_success_indicator": lambda *a, **kw: None,
         "_risk_control_probe": lambda *a, **kw: None,
@@ -200,6 +201,119 @@ def test_wait_for_success_ignores_hidden_indicator() -> None:
     ):
         iframe.return_value.locator.return_value = hidden
         _wait_for_success_indicator(page, timeout=1)
+
+
+def test_element_retry_retries_timeout_and_clears_popup() -> None:
+    from wxsp.platforms.taobao_guanghe import _with_element_retry
+
+    page = MagicMock()
+    close = MagicMock()
+    close.is_visible.return_value = True
+    page.locator.return_value.first = close
+    calls = 0
+
+    def flaky_action() -> str:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise PWTimeoutError("元素还没出现")
+        return "ok"
+
+    with patch(f"{MOD}.time.sleep") as sleep:
+        assert _with_element_retry(page, "title", flaky_action) == "ok"
+
+    assert calls == 3
+    assert sleep.call_count == 2
+    close.click.assert_called_with(timeout=1_000)
+
+
+def test_element_retry_raises_after_three_attempts() -> None:
+    from wxsp.platforms.taobao_guanghe import _with_element_retry
+
+    page = MagicMock()
+    calls = 0
+
+    def always_missing() -> None:
+        nonlocal calls
+        calls += 1
+        raise PWTimeoutError("元素始终未出现")
+
+    with (
+        patch(f"{MOD}._dismiss_transient_popups"),
+        patch(f"{MOD}.time.sleep"),
+        pytest.raises(PWTimeoutError, match="元素始终未出现"),
+    ):
+        _with_element_retry(page, "schedule", always_missing)
+
+    assert calls == 3
+
+
+def test_pre_publish_retries_transient_open_timeout() -> None:
+    from wxsp.platforms.taobao_guanghe import _pre_publish
+
+    page = MagicMock()
+    bundle = SimpleNamespace(
+        product_ids_json="[]",
+        tags_json="[]",
+        title="标题",
+        description=None,
+        topic=None,
+        declaration=None,
+        ai_optimize=False,
+        publish_at=datetime.now(),
+    )
+    ctx = SimpleNamespace(
+        step_pause=(0, 0),
+        settings=SimpleNamespace(publisher=SimpleNamespace(upload_timeout_seconds=1)),
+        task_id=1,
+        screenshots_root=Path("screenshots"),
+        result=SimpleNamespace(screenshots=[]),
+    )
+    calls = 0
+
+    def flaky_open(*_args: object, **_kwargs: object) -> None:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise PWTimeoutError("发布页还在加载")
+
+    def no_op(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    with (
+        patch(f"{MOD}.wxsp.apc.check_pass", return_value=True),
+        patch(f"{MOD}._open_publish_page", side_effect=flaky_open),
+        patch(f"{MOD}._verify_logged_in", side_effect=no_op),
+        patch(f"{MOD}._upload_video", side_effect=no_op),
+        patch(f"{MOD}._fill_title", side_effect=no_op),
+        patch(f"{MOD}._fill_description", side_effect=no_op),
+        patch(f"{MOD}._add_topic", side_effect=no_op),
+        patch(f"{MOD}._set_schedule", side_effect=no_op),
+        patch(f"{MOD}._set_declaration", side_effect=no_op),
+        patch(f"{MOD}._toggle_ai_optimize", side_effect=no_op),
+        patch(f"{MOD}._risk_control_probe", side_effect=no_op),
+        patch(f"{MOD}.random_pause"),
+        patch(f"{MOD}._dismiss_transient_popups"),
+        patch(f"{MOD}.time.sleep"),
+    ):
+        _pre_publish(page, bundle, Path("video.mp4"), ctx)
+
+    assert calls == 3
+
+
+def test_verify_logged_in_treats_slow_form_as_retryable_network_error() -> None:
+    from wxsp.errors import NetworkError
+    from wxsp.platforms import taobao_selectors as sel
+    from wxsp.platforms.taobao_guanghe import _verify_logged_in
+
+    page = MagicMock()
+    page.url = sel.PUBLISH_PAGE_URL
+    with patch(f"{MOD}._iframe") as iframe:
+        iframe.return_value.locator.return_value.wait_for.side_effect = PWTimeoutError(
+            "iframe still loading"
+        )
+        with pytest.raises(NetworkError, match="发布表单加载超时"):
+            _verify_logged_in(page)
 
 
 def test_add_products_uses_current_card_and_checkbox_dom() -> None:

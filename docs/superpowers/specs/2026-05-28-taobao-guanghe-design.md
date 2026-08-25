@@ -216,7 +216,6 @@ accounts:
 | 定时发布 | ✗ | YYYY/MM/DD + HH:mm + 日历 | radio 启用 → 填日期 → 填时间 → 确定 |
 | 创作者声明 | ✓ | 6 选 1，默认"无需标注" | radio 选择 |
 | AI优化 | ✗ | toggle 开关 | 飞书字段控制 |
-| 允许下载 | ✗ | checkbox，默认勾选 | **取消勾选** |
 
 ### 5.3 话题选择弹窗
 
@@ -255,12 +254,11 @@ accounts:
 [11] set_schedule(publish_at)         # 定时发布 radio → 日历选择器
 [12] set_declaration(type)            # 创作者声明 radio（6选1）
 [13] toggle_ai_optimize(on/off)       # AI优化 switch
-[14] disable_download()               # 取消"允许下载" checkbox
 ─────── ★ DRY_RUN GATE ★ ──────
-[15] click_publish()                  # 按钮文案可能为"定时发布"
-[16] wait_for_success_indicator()
-[17] close_browser()
-[18] cleanup_tmp()
+[14] click_publish()                  # 按钮文案可能为"定时发布"
+[15] wait_for_success_indicator()
+[16] close_browser()
+[17] cleanup_tmp()
 ```
 
 每步失败截图到 `logs/screenshots/{YYYYMM}/{task_id}_{step}.png`。

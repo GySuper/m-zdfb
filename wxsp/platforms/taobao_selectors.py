@@ -20,6 +20,16 @@ PUBLISH_VIDEO_MENU_ITEM = "发视频"
 # ============== iframe ==============
 IFRAME_SELECTOR = 'iframe[title="发布器"]'
 
+# 重试前只允许点击对话框关闭控件,不碰"确定/参与"等业务按钮。
+POPUP_CLOSE_SELECTORS = (
+    '[role="dialog"] [aria-label="关闭"]',
+    '[role="dialog"] [aria-label="Close"]',
+    '[role="dialog"] [class*="close"]',
+    '.next-dialog [aria-label="关闭"]',
+    '.next-dialog [aria-label="Close"]',
+    '.next-dialog [class*="close"]',
+)
+
 # ============== [4] 登录态判定 ==============
 LOGGED_IN_INDICATOR = "text=发布视频"
 
@@ -99,9 +109,6 @@ DECLARATION_RADIO_MAP = {
 # 锚定到含"AI优化"标签的 hosting-section 内的开关,避免误中页面上其它 role=switch。
 # next-switch 用 aria-checked="true"/"false" 表示开关态(平台默认开)。
 AI_TOGGLE_SWITCH = '[class*="hosting-section"]:has-text("AI优化") [role="switch"]'
-
-# ============== [14] 允许下载(radio,默认选中 → 点一下取消)
-DOWNLOAD_RADIO = "text=允许下载"
 
 # ============== 风控文案 ==============
 RISK_CONTROL_KEYWORDS = (

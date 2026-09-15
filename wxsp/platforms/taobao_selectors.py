@@ -57,6 +57,9 @@ TOPIC_CLOSE_BUTTON = 'button:has-text("取消")'
 # ============== [10] 关联商品 ==============
 PRODUCT_TRIGGER = "text=添加商品"
 PRODUCT_SEARCH_INPUT = 'input[placeholder*="商品"]'
+# 2026-09-15 实测改版:Enter 不再触发搜索,对话框也没有文字搜索按钮;
+# 搜索由输入框内放大镜图标提交(Fusion next-search 的 .next-search-icon)。
+PRODUCT_SEARCH_BUTTON = 'i[role="button"][aria-label="搜索"]'
 PRODUCT_DIALOG = f".next-dialog:visible:has({PRODUCT_SEARCH_INPUT})"
 # 搜索结果是商品卡片(非每商品一个独立 checkbox 列)。卡片标题链接的 href 含商品ID,
 # 是最稳的锚点(class 都是 CSS-module hash)。用 .format(pid=) 注入。
@@ -103,16 +106,6 @@ DECLARATION_RADIO_MAP = {
 # 锚定到含"AI优化"标签的 hosting-section 内的开关,避免误中页面上其它 role=switch。
 # next-switch 用 aria-checked="true"/"false" 表示开关态(平台默认开)。
 AI_TOGGLE_SWITCH = '[class*="hosting-section"]:has-text("AI优化") [role="switch"]'
-
-# ============== 风控文案 ==============
-RISK_CONTROL_KEYWORDS = (
-    "请稍后",
-    "系统繁忙",
-    "操作过于频繁",
-    "账号异常",
-    "账号处于异常",
-    "内容不符合",
-)
 
 # ============== 成功判定 ==============
 SUCCESS_INDICATORS = (

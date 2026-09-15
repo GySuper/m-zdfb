@@ -9,7 +9,7 @@ from datetime import datetime
 import pytest
 from patchright.sync_api import Page, sync_playwright
 
-from wxsp.errors import ElementNotFound, RiskControl, UploadFailed
+from wxsp.errors import ElementNotFound, UploadFailed
 from wxsp.platforms import taobao_guanghe as tb
 from wxsp.platforms import taobao_selectors as sel
 
@@ -136,8 +136,10 @@ def test_product_search_allows_empty_initial_list_and_keeps_checked_item(
         """
       <div onclick="document.querySelector('.next-dialog').style.display='block'">添加商品</div>
       <div class="next-dialog" style="display:none">
-        <input placeholder="输入商品关键词或商品ID" onkeydown="if(event.key === 'Enter') {
-          setTimeout(() => document.querySelector('#result').style.display='block', 200); }">
+        <input placeholder="输入商品关键词或商品ID">
+        <i role="button" aria-label="搜索" class="next-search-icon"
+          style="display:inline-block;width:20px;height:20px"
+          onclick="setTimeout(() => document.querySelector('#result').style.display='block', 200)"></i>
         <div id="result" style="display:none">
           <a href="https://item.taobao.com/item.htm?id=1234">wrong prefix</a>
           <div><a href="https://item.taobao.com/item.htm?id=123">product</a>
@@ -161,6 +163,8 @@ def test_product_checkbox_replacement_after_click_is_treated_as_selected(
       <div onclick="document.querySelector('.next-dialog').style.display='block'">添加商品</div>
       <div class="next-dialog" style="display:none">
         <input placeholder="输入商品关键词或商品ID">
+        <i role="button" aria-label="搜索" class="next-search-icon"
+          style="display:inline-block;width:20px;height:20px"></i>
         <div><a href="https://item.taobao.com/item.htm?id=1054399102483">product</a>
           <input class="next-checkbox-input" type="checkbox" aria-checked="false"
             onclick="event.preventDefault(); setTimeout(() => {
@@ -205,12 +209,6 @@ def test_saved_draft_is_not_publish_success(browser_page: Page) -> None:
     set_frame(browser_page, "<p>已保存</p>")
     with pytest.raises(ElementNotFound, match="成功判定超时"):
         tb._wait_for_success_indicator(browser_page, timeout=0.1)
-
-
-def test_iframe_risk_is_detected(browser_page: Page) -> None:
-    set_frame(browser_page, "<p>操作过于频繁</p>")
-    with pytest.raises(RiskControl):
-        tb._risk_control_probe(browser_page)
 
 
 def test_cover_waits_until_main_image_is_loaded(

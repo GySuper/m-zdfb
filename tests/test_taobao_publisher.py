@@ -99,7 +99,6 @@ def _noop_steps(**overrides):
         "_click_publish": lambda *a, **kw: None,
         "_prepare_publish": lambda *a, **kw: None,
         "_wait_for_success_indicator": lambda *a, **kw: None,
-        "_risk_control_probe": lambda *a, **kw: None,
         "random_pause": lambda *a, **kw: None,
     }
     fakes.update(overrides)
@@ -298,7 +297,6 @@ def test_post_publish_does_not_repeat_ambiguous_submit() -> None:
 
     with (
         patch(f"{MOD}._prepare_publish"),
-        patch(f"{MOD}._risk_control_probe"),
         patch(f"{MOD}._click_publish", side_effect=PWTimeoutError("navigation timeout")) as submit,
         patch(f"{MOD}._wait_for_success_indicator") as wait,
         pytest.raises(PWTimeoutError),
@@ -320,28 +318,6 @@ def test_success_url_requires_management_page(url: str, expected: bool) -> None:
     from wxsp.platforms.taobao_guanghe import _is_success_url
 
     assert _is_success_url(url) is expected
-
-
-def test_risk_probe_detects_iframe_warning() -> None:
-    from wxsp.errors import RiskControl
-    from wxsp.platforms.taobao_guanghe import _risk_control_probe
-
-    page = MagicMock()
-    page.locator.return_value.inner_text.return_value = "发布作品"
-    page.frame_locator.return_value.locator.return_value.inner_text.return_value = "操作过于频繁"
-    with pytest.raises(RiskControl, match="操作过于频繁"):
-        _risk_control_probe(page)
-
-
-def test_risk_probe_detects_account_abnormal_notice() -> None:
-    from wxsp.errors import RiskControl
-    from wxsp.platforms.taobao_guanghe import _risk_control_probe
-
-    page = MagicMock()
-    page.locator.return_value.inner_text.return_value = "账号处于异常状态"
-    page.frame_locator.return_value.locator.return_value.inner_text.return_value = "发布视频"
-    with pytest.raises(RiskControl, match="账号处于异常"):
-        _risk_control_probe(page)
 
 
 def test_description_requires_editor_focus_before_select_all() -> None:
@@ -400,7 +376,6 @@ def test_pre_publish_retries_transient_open_timeout() -> None:
         patch(f"{MOD}._set_schedule", side_effect=no_op),
         patch(f"{MOD}._set_declaration", side_effect=no_op),
         patch(f"{MOD}._toggle_ai_optimize", side_effect=no_op),
-        patch(f"{MOD}._risk_control_probe", side_effect=no_op),
         patch(f"{MOD}.random_pause"),
         patch(f"{MOD}.time.sleep"),
     ):
@@ -435,6 +410,7 @@ def test_add_products_uses_current_card_and_checkbox_dom() -> None:
     trigger = MagicMock()
     result_link = MagicMock()
     search = MagicMock()
+    search_icon = MagicMock()
     confirm = MagicMock()
     card = MagicMock()
     checkbox = MagicMock()
@@ -451,6 +427,7 @@ def test_add_products_uses_current_card_and_checkbox_dom() -> None:
 
     locators = {
         sel.PRODUCT_SEARCH_INPUT: search,
+        sel.PRODUCT_SEARCH_BUTTON: search_icon,
         sel.PRODUCT_ITEM_LINK_BY_ID.format(pid=pid): result_link,
         sel.PRODUCT_CONFIRM_BUTTON: confirm,
     }
@@ -478,7 +455,7 @@ def test_add_products_uses_current_card_and_checkbox_dom() -> None:
         _add_products(page, [pid])
 
     search.fill.assert_called_once_with(pid)
-    search.press.assert_called_once_with("Enter")
+    search_icon.click.assert_called_once_with()
     card.hover.assert_called_once_with()
     checkbox.click.assert_called_once_with(timeout=15_000)
     confirm.click.assert_called_once_with()
@@ -509,6 +486,7 @@ def test_add_products_converts_checkbox_framework_error_to_selection_error() -> 
     }.__getitem__
     dialog.locator.side_effect = {
         sel.PRODUCT_SEARCH_INPUT: MagicMock(),
+        sel.PRODUCT_SEARCH_BUTTON: MagicMock(),
         sel.PRODUCT_ITEM_LINK_BY_ID.format(pid=pid): link,
     }.__getitem__
     link.locator.return_value = card
@@ -522,7 +500,7 @@ def test_add_products_converts_checkbox_framework_error_to_selection_error() -> 
 
 
 def test_dry_run_short_circuits_before_click_publish(pending_task: tuple[int, Path]) -> None:
-    """dry_run=True:跑到 risk 后停下,不点发布。"""
+    """dry_run=True:跑到 schedule 后停下,不点发布。"""
     task_id, tmp_path = pending_task
     settings = make_settings(tmp_path, tmp_path)
 
@@ -538,7 +516,7 @@ def test_dry_run_short_circuits_before_click_publish(pending_task: tuple[int, Pa
         _open_publish_page=fake("open"),
         _verify_logged_in=fake("login"),
         _upload_video=fake("upload"),
-        _risk_control_probe=fake("risk"),
+        _set_schedule=fake("schedule"),
         _click_publish=fake("publish"),
         _wait_for_success_indicator=fake("wait"),
     )
@@ -550,7 +528,7 @@ def test_dry_run_short_circuits_before_click_publish(pending_task: tuple[int, Pa
     assert result.dry_run is True
     assert "publish" not in call_log
     assert "wait" not in call_log
-    assert call_log[-1] == "risk"
+    assert call_log[-1] == "schedule"
 
 
 def test_already_claimed_raises(pending_task: tuple[int, Path]) -> None:
@@ -640,7 +618,7 @@ def test_risk_control_pauses_account_24h(pending_task: tuple[int, Path]) -> None
     def raise_risk(*_a, **_kw):
         raise RiskControl("操作过于频繁")
 
-    overrides = _noop_steps(_risk_control_probe=raise_risk)
+    overrides = _noop_steps(_set_schedule=raise_risk)
     p1, p2, p3, p4, p5 = _patches(tmp_path, overrides)
     with p1, p2, p3, p4, p5:
         result = publish(task_id, dry_run=False, settings=settings)
@@ -685,7 +663,7 @@ def test_failure_writes_event_with_mapped_notify_type(pending_task: tuple[int, P
     def raise_risk(*_a, **_kw):
         raise RiskControl("操作过于频繁")
 
-    overrides = _noop_steps(_risk_control_probe=raise_risk)
+    overrides = _noop_steps(_set_schedule=raise_risk)
     p1, p2, p3, p4, p5 = _patches(tmp_path, overrides)
     with p1, p2, p3, p4, p5:
         result = publish(task_id, dry_run=False, settings=settings)

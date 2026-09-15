@@ -98,7 +98,6 @@ def _noop_steps(**overrides):
         "_click_publish": lambda *a, **kw: None,
         "_prepare_publish": lambda *a, **kw: None,
         "_wait_for_success_indicator": lambda *a, **kw: None,
-        "_risk_control_probe": lambda *a, **kw: None,
         "random_pause": lambda *a, **kw: None,
     }
     fakes.update(overrides)

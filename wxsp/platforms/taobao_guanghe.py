@@ -31,7 +31,6 @@ from wxsp.errors import (
     NetworkError,
     ProductNotFound,
     ProductSelectionFailed,
-    RiskControl,
     TopicNotFound,
     UploadFailed,
 )
@@ -225,7 +224,7 @@ def _add_products(page: Page, product_ids: list[str]) -> None:
             raise ProductNotFound(f"商品ID '{pid}' 必须为数字")
         search = dialog.locator(sel.PRODUCT_SEARCH_INPUT)
         search.fill(pid)
-        search.press("Enter")
+        dialog.locator(sel.PRODUCT_SEARCH_BUTTON).click()
 
         # 结果以商品卡片呈现(不是每商品一个可见 checkbox)。按卡片标题链接 href 里的
         # 商品ID 精确定位 —— 搜不到 → 链接永不出现 → 判 ProductNotFound。
@@ -407,22 +406,13 @@ def _wait_for_success_indicator(page: Page, timeout: int = 60) -> None:
     raise ElementNotFound("发布成功判定超时")
 
 
-def _risk_control_probe(page: Page) -> None:
-    """扫页面 body 文本,任一风控关键词命中 → RiskControl。"""
-    body_text = page.locator("body").inner_text(timeout=_CONTROL_TIMEOUT_MS)
-    body_text += _iframe(page).locator("body").inner_text(timeout=_CONTROL_TIMEOUT_MS)
-    for kw in sel.RISK_CONTROL_KEYWORDS:
-        if kw in body_text:
-            raise RiskControl(f"页面命中风控关键词: {kw}")
-
-
 # ---------------------------------------------------------------------------
 # 平台步骤回调 + Spec + Publisher
 # ---------------------------------------------------------------------------
 
 
 def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishContext) -> None:
-    """[3]-[14] 打开页 → 上传 → 填表 → 商品 → 声明/AI → 定时 → 风控探测。
+    """[3]-[14] 打开页 → 上传 → 填表 → 商品 → 声明/AI → 定时。
 
     视频本体由编排器已 stage 好传进来(淘宝无独立封面文件,封面由平台自动生成)。
     """
@@ -519,15 +509,11 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
     ctx.last_step = "schedule"
     _with_element_retry(page, "schedule", lambda: _set_schedule(page, publish_at=bundle.publish_at))
 
-    ctx.last_step = "risk"
-    _risk_control_probe(page)
-
 
 def _post_publish(page: Page, bundle: TaskBundle, ctx: PublishContext) -> None:
     """[15]-[16] 点定时发布 → 等跳转判成功。淘宝不抽取 remote_url(到点前无公开链接)。"""
     ctx.last_step = "publish"
     _with_element_retry(page, "publish_prepare", lambda: _prepare_publish(page, bundle.publish_at))
-    _risk_control_probe(page)
     _click_publish(page)
 
     ctx.last_step = "wait_success"

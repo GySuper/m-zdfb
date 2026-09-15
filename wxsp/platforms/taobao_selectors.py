@@ -20,57 +20,47 @@ PUBLISH_VIDEO_MENU_ITEM = "发视频"
 # ============== iframe ==============
 IFRAME_SELECTOR = 'iframe[title="发布器"]'
 
-# 重试前只允许点击对话框关闭控件,不碰"确定/参与"等业务按钮。
-POPUP_CLOSE_SELECTORS = (
-    '[role="dialog"] [aria-label="关闭"]',
-    '[role="dialog"] [aria-label="Close"]',
-    '[role="dialog"] [class*="close"]',
-    '.next-dialog [aria-label="关闭"]',
-    '.next-dialog [aria-label="Close"]',
-    '.next-dialog [class*="close"]',
-)
-
 # ============== [4] 登录态判定 ==============
 LOGGED_IN_INDICATOR = "text=发布视频"
 
 # ============== [5] 视频上传 ==============
-FILE_INPUT = 'input[type="file"]'
+FILE_INPUT = 'input[type="file"][name="file"]'
 UPLOAD_AREA = "text=点击上传视频，或将视频拖放到此处"
 # 实测(2026-07-10 DOM 采样):平台显示"等待视频上传..."(带省略号),不带省略号永远 count=0。
 # 上传成功后该文案消失、"重新上传"按钮出现;失败则出"视频上传失败"。
 UPLOAD_WAITING_TEXT = "等待视频上传..."
 UPLOAD_FAILED_TEXT = "视频上传失败"
 COVER_READY_INDICATOR = "重新上传"  # 上传成功后出现(失败时也有,故须配合失败文案排除)
-# 封面图预览:上传成功后渲染出 <img> 封面缩略图。"视频封面"是 section 标题(一直存在,
-# 不能用作判据)。用封面区 img 元素的 src 是否含封面图路径判定渲染完成。
-COVER_IMG_PREVIEW = 'img[src*="cover"]'
+# 2026-09-15 实测:当前采用的封面与智能候选图分开,只等待主封面缩略图。
+COVER_IMG_PREVIEW = 'img[class*="--coverPic--"]'
 
 # ============== [7] 标题 ==============
 TITLE_INPUT = 'input[placeholder="加个标题让内容更吸引人"]'
 TITLE_MAX_LENGTH = 30
 
 # ============== [8] 描述 ==============
-DESCRIPTION_EDITOR = "[data-cangjie-key]"
+DESCRIPTION_EDITOR = '[data-cangjie-editable="true"]'
+DESCRIPTION_INPUT = "textarea[data-cangjie-dockey]"
 DESCRIPTION_AREA = "text=展开说说"
 
 # ============== [9] 话题活动 ==============
 TOPIC_CLICK_AREA = "text=点击添加话题"
-TOPIC_DIALOG_HEADING = ".next-dialog-header"
 TOPIC_SEARCH_INPUT = 'input[placeholder*="关键词"]'
+TOPIC_DIALOG = f".next-dialog:visible:has({TOPIC_SEARCH_INPUT})"
+TOPIC_CARD = '[data-autolog-container="topic-item-card"]'
+TOPIC_TITLE = '[class*="--topic-title-font--"]'
+TOPIC_SELECTED_CLASS = "topic-card-select-active--"
 TOPIC_SEARCH_BUTTON = 'button:has-text("搜索")'
 TOPIC_CONFIRM_BUTTON = 'button:has-text("确认提交")'
 TOPIC_CLOSE_BUTTON = 'button:has-text("取消")'
 
 # ============== [10] 关联商品 ==============
 PRODUCT_TRIGGER = "text=添加商品"
-PRODUCT_DIALOG_HEADING = ".next-dialog-header"
 PRODUCT_SEARCH_INPUT = 'input[placeholder*="商品"]'
+PRODUCT_DIALOG = f".next-dialog:visible:has({PRODUCT_SEARCH_INPUT})"
 # 搜索结果是商品卡片(非每商品一个独立 checkbox 列)。卡片标题链接的 href 含商品ID,
 # 是最稳的锚点(class 都是 CSS-module hash)。用 .format(pid=) 注入。
-PRODUCT_ITEM_LINK_BY_ID = 'a[href*="item.htm?id={pid}"]'
-# 弹窗默认商品列表就绪信号:click"添加商品"后默认列表还在加载,等首个商品 link
-# 出现再开始按 ID 搜索,否则搜索与列表加载竞态致 card.hover() 超时。
-PRODUCT_ITEM_LINK_ANY = 'a[href*="item.htm?id="]'
+PRODUCT_ITEM_LINK_BY_ID = 'a[href$="item.htm?id={pid}"], a[href*="item.htm?id={pid}&"]'
 # 从标题链接上溯到最近的、含商品选择 checkbox 的卡片容器。
 # 不依赖 CSS-module class:淘宝已从 `--item--` 改为 `--itemCard---<hash>`。
 PRODUCT_ITEM_CARD_ANCESTOR = 'xpath=ancestor::div[.//input[@type="checkbox"]][1]'
@@ -82,15 +72,15 @@ PRODUCT_CONFIRM_BUTTON = 'button:has-text("确定")'
 PRODUCT_CLOSE_BUTTON = 'button:has-text("取消")'
 
 # ============== [11] 定时发布 ==============
-SCHEDULE_RADIO = "text=定时发布"
-SCHEDULE_COMBOBOX = '[role="combobox"]'
+SCHEDULE_RADIO = 'div:has(> span:text-is("定时发布")) > label input[type="radio"]'
+SCHEDULE_COMBOBOX = 'input[role="combobox"][placeholder="请选择日期和时间"]'
 SUBMIT_BUTTON_SCHEDULED = 'button:has-text("定时发布")'
 SUBMIT_BUTTON_IMMEDIATE = 'button:has-text("立即发布")'
 # DatePicker 内部:日期/时间用文本输入框直接填(YYYY/MM/DD + HH:mm),绕开点日历格子。
 # 日历里本月日号和下月溢出日号重复(如本月+下月都有 "1""2""3"),点 .first 会选到
 # 本月同号 → 跨月任务被排到错误月份。实测:填 YYYY/MM/DD 会让日历自动翻到目标月并选中,
 # 但会把时间重置成 00:00,故时间必须在日期之后填。
-SCHEDULE_PICKER_OVERLAY = ".next-overlay-wrapper.opened"
+SCHEDULE_PICKER_OVERLAY = '.next-overlay-wrapper.opened:has(input[placeholder="YYYY/MM/DD"])'
 SCHEDULE_DATE_INPUT = 'input[placeholder="YYYY/MM/DD"]'
 SCHEDULE_TIME_INPUT = 'input[placeholder="HH:mm"]'
 SCHEDULE_CONFIRM = 'button:has-text("确定")'
@@ -116,6 +106,7 @@ RISK_CONTROL_KEYWORDS = (
     "系统繁忙",
     "操作过于频繁",
     "账号异常",
+    "账号处于异常",
     "内容不符合",
 )
 
@@ -123,5 +114,4 @@ RISK_CONTROL_KEYWORDS = (
 SUCCESS_INDICATORS = (
     "发布成功",
     "定时发布成功",
-    "已保存",
 )

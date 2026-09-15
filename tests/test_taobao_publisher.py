@@ -96,6 +96,7 @@ def _noop_steps(**overrides):
         "_set_declaration": lambda *a, **kw: None,
         "_toggle_ai_optimize": lambda *a, **kw: None,
         "_click_publish": lambda *a, **kw: None,
+        "_prepare_publish": lambda *a, **kw: None,
         "_wait_for_success_indicator": lambda *a, **kw: None,
         "_risk_control_probe": lambda *a, **kw: None,
         "random_pause": lambda *a, **kw: None,
@@ -194,7 +195,7 @@ def test_wait_for_success_ignores_hidden_indicator() -> None:
     page.locator.return_value = hidden
 
     with (
-        patch("wxsp.platforms.taobao_guanghe.time.time", side_effect=[0, 0, 2]),
+        patch("wxsp.platforms.taobao_guanghe.time.monotonic", side_effect=[0, 0, 2]),
         patch("wxsp.platforms.taobao_guanghe.time.sleep"),
         patch("wxsp.platforms.taobao_guanghe._iframe") as iframe,
         pytest.raises(ElementNotFound, match="成功判定超时"),
@@ -203,7 +204,7 @@ def test_wait_for_success_ignores_hidden_indicator() -> None:
         _wait_for_success_indicator(page, timeout=1)
 
 
-def test_element_retry_retries_timeout_and_clears_popup() -> None:
+def test_element_retry_preserves_form_dialogs() -> None:
     from wxsp.platforms.taobao_guanghe import _with_element_retry
 
     page = MagicMock()
@@ -224,7 +225,8 @@ def test_element_retry_retries_timeout_and_clears_popup() -> None:
 
     assert calls == 3
     assert sleep.call_count == 2
-    close.click.assert_called_with(timeout=1_000)
+    close.click.assert_not_called()
+    page.keyboard.press.assert_not_called()
 
 
 def test_element_retry_raises_after_three_attempts() -> None:
@@ -239,13 +241,105 @@ def test_element_retry_raises_after_three_attempts() -> None:
         raise PWTimeoutError("元素始终未出现")
 
     with (
-        patch(f"{MOD}._dismiss_transient_popups"),
         patch(f"{MOD}.time.sleep"),
         pytest.raises(PWTimeoutError, match="元素始终未出现"),
     ):
         _with_element_retry(page, "schedule", always_missing)
 
     assert calls == 3
+
+
+def test_prepare_publish_repairs_lost_schedule() -> None:
+    from wxsp.errors import ElementNotFound
+    from wxsp.platforms.taobao_guanghe import _prepare_publish
+
+    page = MagicMock()
+    target = datetime(2026, 9, 16, 12, 30)
+    with (
+        patch(f"{MOD}._verify_schedule", side_effect=ElementNotFound("mode reset")),
+        patch(f"{MOD}._set_schedule") as repair,
+    ):
+        _prepare_publish(page, target)
+    repair.assert_called_once_with(page, target)
+
+
+def test_post_publish_never_submits_when_schedule_cannot_be_repaired() -> None:
+    from wxsp.errors import ElementNotFound
+    from wxsp.platforms.taobao_guanghe import _post_publish
+
+    with (
+        patch(f"{MOD}._prepare_publish", side_effect=ElementNotFound("date mismatch")) as prepare,
+        patch(f"{MOD}._click_publish") as submit,
+        patch(f"{MOD}.time.sleep"),
+        pytest.raises(ElementNotFound, match="date mismatch"),
+    ):
+        _post_publish(MagicMock(), SimpleNamespace(publish_at=datetime.now()), SimpleNamespace())
+    assert prepare.call_count == 3
+    submit.assert_not_called()
+
+
+def test_post_publish_does_not_repeat_ambiguous_submit() -> None:
+    from wxsp.platforms.taobao_guanghe import _post_publish
+
+    with (
+        patch(f"{MOD}._prepare_publish"),
+        patch(f"{MOD}._risk_control_probe"),
+        patch(f"{MOD}._click_publish", side_effect=PWTimeoutError("navigation timeout")) as submit,
+        patch(f"{MOD}._wait_for_success_indicator") as wait,
+        pytest.raises(PWTimeoutError),
+    ):
+        _post_publish(MagicMock(), SimpleNamespace(publish_at=datetime.now()), SimpleNamespace())
+    submit.assert_called_once()
+    wait.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        ("https://creator.guanghe.taobao.com/page/workspace/tb?tab=video", True),
+        ("https://login.taobao.com/?redirect=/page/workspace/tb", False),
+        ("https://creator.guanghe.taobao.com/page/workspace/tb/error", False),
+    ],
+)
+def test_success_url_requires_management_page(url: str, expected: bool) -> None:
+    from wxsp.platforms.taobao_guanghe import _is_success_url
+
+    assert _is_success_url(url) is expected
+
+
+def test_risk_probe_detects_iframe_warning() -> None:
+    from wxsp.errors import RiskControl
+    from wxsp.platforms.taobao_guanghe import _risk_control_probe
+
+    page = MagicMock()
+    page.locator.return_value.inner_text.return_value = "发布作品"
+    page.frame_locator.return_value.locator.return_value.inner_text.return_value = "操作过于频繁"
+    with pytest.raises(RiskControl, match="操作过于频繁"):
+        _risk_control_probe(page)
+
+
+def test_risk_probe_detects_account_abnormal_notice() -> None:
+    from wxsp.errors import RiskControl
+    from wxsp.platforms.taobao_guanghe import _risk_control_probe
+
+    page = MagicMock()
+    page.locator.return_value.inner_text.return_value = "账号处于异常状态"
+    page.frame_locator.return_value.locator.return_value.inner_text.return_value = "发布视频"
+    with pytest.raises(RiskControl, match="账号处于异常"):
+        _risk_control_probe(page)
+
+
+def test_description_requires_editor_focus_before_select_all() -> None:
+    from wxsp.errors import ElementNotFound
+    from wxsp.platforms.taobao_guanghe import _fill_description
+
+    page = MagicMock()
+    with patch(f"{MOD}.expect") as expectation:
+        expectation.return_value.to_be_focused.side_effect = AssertionError("not focused")
+        with pytest.raises(ElementNotFound, match="焦点"):
+            _fill_description(page, "replacement")
+    page.keyboard.press.assert_not_called()
+    page.keyboard.type.assert_not_called()
 
 
 def test_pre_publish_retries_transient_open_timeout() -> None:
@@ -293,7 +387,6 @@ def test_pre_publish_retries_transient_open_timeout() -> None:
         patch(f"{MOD}._toggle_ai_optimize", side_effect=no_op),
         patch(f"{MOD}._risk_control_probe", side_effect=no_op),
         patch(f"{MOD}.random_pause"),
-        patch(f"{MOD}._dismiss_transient_popups"),
         patch(f"{MOD}.time.sleep"),
     ):
         _pre_publish(page, bundle, Path("video.mp4"), ctx)
@@ -323,27 +416,26 @@ def test_add_products_uses_current_card_and_checkbox_dom() -> None:
     pid = "1040198270412"
     page = MagicMock()
     iframe = MagicMock()
+    dialog = MagicMock()
     trigger = MagicMock()
-    heading = MagicMock()
-    any_link = MagicMock()
     result_link = MagicMock()
     search = MagicMock()
     confirm = MagicMock()
     card = MagicMock()
     checkbox = MagicMock()
-    any_link.first = MagicMock()
     result_link.first = result_link
     checkbox.first = checkbox
 
     locators = {
-        sel.PRODUCT_TRIGGER: trigger,
-        sel.PRODUCT_DIALOG_HEADING: heading,
-        sel.PRODUCT_ITEM_LINK_ANY: any_link,
         sel.PRODUCT_SEARCH_INPUT: search,
         sel.PRODUCT_ITEM_LINK_BY_ID.format(pid=pid): result_link,
         sel.PRODUCT_CONFIRM_BUTTON: confirm,
     }
-    iframe.locator.side_effect = locators.__getitem__
+    iframe.locator.side_effect = {
+        sel.PRODUCT_TRIGGER: trigger,
+        sel.PRODUCT_DIALOG: dialog,
+    }.__getitem__
+    dialog.locator.side_effect = locators.__getitem__
 
     def locate_card(selector: str) -> MagicMock:
         assert selector == 'xpath=ancestor::div[.//input[@type="checkbox"]][1]'
@@ -366,10 +458,12 @@ def test_add_products_uses_current_card_and_checkbox_dom() -> None:
     search.fill.assert_called_once_with(pid)
     search.press.assert_called_once_with("Enter")
     card.hover.assert_called_once_with()
-    checkbox.click.assert_called_once_with()
+    checkbox.check.assert_called_once_with(timeout=15_000)
+    checkbox.click.assert_not_called()
     expect_checkbox.assert_called_once_with(checkbox)
     expect_checkbox.return_value.to_be_checked.assert_called_once_with(timeout=3_000)
     confirm.click.assert_called_once_with()
+    dialog.wait_for.assert_called_with(state="hidden", timeout=15_000)
 
 
 def test_dry_run_short_circuits_before_click_publish(pending_task: tuple[int, Path]) -> None:

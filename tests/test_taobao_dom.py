@@ -77,20 +77,21 @@ def test_schedule_check_is_idempotent_and_verifies_full_date(browser_page: Page)
       <div><label><input id="mode" type="radio" checked
         onclick="this.checked = false"></label><span>定时发布</span></div>
       <input role="combobox" placeholder="请选择日期和时间" value="2026/09/15 01:00"
-        readonly onclick="document.querySelector('.next-overlay-wrapper').classList.add('opened')">
-      <div class="next-overlay-wrapper" style="display:none">
-        <input id="date" placeholder="YYYY/MM/DD" value="2026/09/15"
-          onkeydown="if(event.key === 'Enter') setTimeout(() => {
-            document.querySelector('[role=combobox]').value = this.value + ' 00:00';
-            document.querySelector('#time').value = '00:00'; }, 100)">
-        <input id="time" placeholder="HH:mm" value="01:00">
-        <button onclick="document.querySelector('[role=combobox]').value =
-          document.querySelector('#date').value + ' ' +
-          document.querySelector('#time').value;
-          this.parentElement.classList.remove('opened')">确定</button>
+        readonly onclick="document.querySelector('#shell').classList.add('opened')">
+      <div id="shell" class="next-overlay-wrapper" style="height:0">
+        <div class="next-overlay-inner next-date-picker-body" style="position:absolute">
+          <input id="date" placeholder="YYYY/MM/DD" value="2026/09/15"
+            onkeydown="if(event.key === 'Enter') setTimeout(() => {
+              document.querySelector('[role=combobox]').value = this.value + ' 00:00';
+              document.querySelector('#time').value = '00:00'; }, 100)">
+          <input id="time" placeholder="HH:mm" value="01:00">
+          <button onclick="document.querySelector('[role=combobox]').value =
+            document.querySelector('#date').value + ' ' +
+            document.querySelector('#time').value;
+            document.querySelector('#shell').classList.remove('opened')">确定</button>
+        </div>
       </div>
       <button>定时发布</button>
-      <style>.next-overlay-wrapper.opened { display:block !important }</style>
     """,
     )
     target = datetime(2026, 9, 16, 12, 30)
@@ -111,10 +112,12 @@ def test_schedule_waits_for_picker_already_expanded_during_mount(browser_page: P
       <script>
         setTimeout(() => {
           document.querySelector('#picker-mount').innerHTML = `
-            <div class="next-overlay-wrapper opened">
-              <input placeholder="YYYY/MM/DD" value="2026/09/16">
-              <input placeholder="HH:mm" value="12:30">
-              <button onclick="this.parentElement.classList.remove('opened')">确定</button>
+            <div class="next-overlay-wrapper opened" style="height:0">
+              <div class="next-overlay-inner next-date-picker-body" style="position:absolute">
+                <input placeholder="YYYY/MM/DD" value="2026/09/16">
+                <input placeholder="HH:mm" value="12:30">
+                <button onclick="this.closest('.next-overlay-wrapper').classList.remove('opened')">确定</button>
+              </div>
             </div>`;
         }, 100);
       </script>

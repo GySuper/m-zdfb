@@ -80,7 +80,11 @@ SUBMIT_BUTTON_IMMEDIATE = 'button:has-text("立即发布")'
 # 日历里本月日号和下月溢出日号重复(如本月+下月都有 "1""2""3"),点 .first 会选到
 # 本月同号 → 跨月任务被排到错误月份。实测:填 YYYY/MM/DD 会让日历自动翻到目标月并选中,
 # 但会把时间重置成 00:00,故时间必须在日期之后填。
-SCHEDULE_PICKER_OVERLAY = '.next-overlay-wrapper.opened:has(input[placeholder="YYYY/MM/DD"])'
+# 改版后外壳 .next-overlay-wrapper 是零高度 static 容器(空包围盒被判定 hidden),
+# 可见面板是内层绝对定位的 .next-overlay-inner,等待目标必须是内层。
+SCHEDULE_PICKER_OVERLAY = (
+    '.next-overlay-wrapper.opened .next-overlay-inner:has(input[placeholder="YYYY/MM/DD"])'
+)
 SCHEDULE_DATE_INPUT = 'input[placeholder="YYYY/MM/DD"]'
 SCHEDULE_TIME_INPUT = 'input[placeholder="HH:mm"]'
 SCHEDULE_CONFIRM = 'button:has-text("确定")'

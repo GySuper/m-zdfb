@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from patchright.sync_api import Error as PWError
 from patchright.sync_api import TimeoutError as PWTimeoutError
 from sqlmodel import Session, select
 
@@ -425,6 +426,14 @@ def test_add_products_uses_current_card_and_checkbox_dom() -> None:
     checkbox = MagicMock()
     result_link.first = result_link
     checkbox.first = checkbox
+    checkbox.is_checked.return_value = False
+    checkbox.get_attribute.return_value = "false"
+
+    def mark_selected(*_args: object, **_kwargs: object) -> None:
+        checkbox.is_checked.return_value = True
+        checkbox.get_attribute.return_value = "true"
+
+    checkbox.click.side_effect = mark_selected
 
     locators = {
         sel.PRODUCT_SEARCH_INPUT: search,
@@ -450,7 +459,6 @@ def test_add_products_uses_current_card_and_checkbox_dom() -> None:
 
     with (
         patch(f"{MOD}._iframe", return_value=iframe),
-        patch(f"{MOD}.expect") as expect_checkbox,
         patch(f"{MOD}.time.sleep"),
     ):
         _add_products(page, [pid])
@@ -458,12 +466,45 @@ def test_add_products_uses_current_card_and_checkbox_dom() -> None:
     search.fill.assert_called_once_with(pid)
     search.press.assert_called_once_with("Enter")
     card.hover.assert_called_once_with()
-    checkbox.check.assert_called_once_with(timeout=15_000)
-    checkbox.click.assert_not_called()
-    expect_checkbox.assert_called_once_with(checkbox)
-    expect_checkbox.return_value.to_be_checked.assert_called_once_with(timeout=3_000)
+    checkbox.click.assert_called_once_with(timeout=15_000)
     confirm.click.assert_called_once_with()
     dialog.wait_for.assert_called_with(state="hidden", timeout=15_000)
+
+
+def test_add_products_converts_checkbox_framework_error_to_selection_error() -> None:
+    from wxsp.errors import ProductSelectionFailed
+    from wxsp.platforms import taobao_selectors as sel
+    from wxsp.platforms.taobao_guanghe import _add_products
+
+    pid = "1054399102483"
+    page = MagicMock()
+    iframe = MagicMock()
+    dialog = MagicMock()
+    link = MagicMock()
+    link.first = link
+    card = MagicMock()
+    checkbox = MagicMock()
+    checkbox.first = checkbox
+    checkbox.is_checked.return_value = False
+    checkbox.get_attribute.return_value = "false"
+    checkbox.click.side_effect = PWError("click did not change its state")
+
+    iframe.locator.side_effect = {
+        sel.PRODUCT_TRIGGER: MagicMock(),
+        sel.PRODUCT_DIALOG: dialog,
+    }.__getitem__
+    dialog.locator.side_effect = {
+        sel.PRODUCT_SEARCH_INPUT: MagicMock(),
+        sel.PRODUCT_ITEM_LINK_BY_ID.format(pid=pid): link,
+    }.__getitem__
+    link.locator.return_value = card
+    card.locator.return_value = checkbox
+
+    with (
+        patch(f"{MOD}._iframe", return_value=iframe),
+        pytest.raises(ProductSelectionFailed, match="勾选失败"),
+    ):
+        _add_products(page, [pid])
 
 
 def test_dry_run_short_circuits_before_click_publish(pending_task: tuple[int, Path]) -> None:

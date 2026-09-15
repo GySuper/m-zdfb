@@ -18,7 +18,8 @@ from typing import TypeVar
 from urllib.parse import urlsplit
 
 from loguru import logger
-from patchright.sync_api import FrameLocator, Page, expect
+from patchright.sync_api import Error as PWError
+from patchright.sync_api import FrameLocator, Locator, Page, expect
 from patchright.sync_api import TimeoutError as PWTimeoutError
 
 import wxsp.apc
@@ -29,6 +30,7 @@ from wxsp.errors import (
     ElementNotFound,
     NetworkError,
     ProductNotFound,
+    ProductSelectionFailed,
     RiskControl,
     TopicNotFound,
     UploadFailed,
@@ -48,6 +50,7 @@ _ELEMENT_RETRY_DELAY_SECONDS = 1.5
 _CONTROL_TIMEOUT_MS = 15_000
 _COVER_WAIT_TIMEOUT_SECONDS = 180
 _COVER_POLL_INTERVAL_SECONDS = 1
+_PRODUCT_SELECT_TIMEOUT_SECONDS = 3
 _T = TypeVar("_T")
 
 
@@ -198,6 +201,11 @@ def _add_topic(page: Page, topic_name: str | None) -> None:
 _MAX_PRODUCTS = 6
 
 
+def _is_product_checkbox_selected(checkbox: Locator) -> bool:
+    """淘宝 Fusion 受控 checkbox 会在点击后替换 DOM 节点。"""
+    return checkbox.is_checked() or checkbox.get_attribute("aria-checked") == "true"
+
+
 def _add_products(page: Page, product_ids: list[str]) -> None:
     if not product_ids:
         return
@@ -231,13 +239,21 @@ def _add_products(page: Page, product_ids: list[str]) -> None:
         card = link.locator(sel.PRODUCT_ITEM_CARD_ANCESTOR)
         card.hover()
         checkbox = card.locator(sel.PRODUCT_ITEM_SELECT_CHECKBOX_INPUT).first
-        checkbox.check(timeout=_CONTROL_TIMEOUT_MS)
 
-        # 校验真实 checkbox 已选中,不依赖 Fusion 组件可能变化的 class。
+        # 不使用 locator.check(): Fusion 点击后会异步替换 input,check() 对旧节点做
+        # 原生 checked 断言会误报失败。click 后通过 locator 重新解析当前节点状态。
         try:
-            expect(checkbox).to_be_checked(timeout=3_000)
-        except AssertionError as err:
-            raise ProductNotFound(f"商品ID '{pid}' 已搜到但勾选未生效") from err
+            if not _is_product_checkbox_selected(checkbox):
+                checkbox.click(timeout=_CONTROL_TIMEOUT_MS)
+            deadline = time.monotonic() + _PRODUCT_SELECT_TIMEOUT_SECONDS
+            while time.monotonic() < deadline:
+                if _is_product_checkbox_selected(checkbox):
+                    break
+                time.sleep(0.2)
+            else:
+                raise ProductSelectionFailed(f"商品ID '{pid}' 已搜到但勾选未生效")
+        except PWError as err:
+            raise ProductSelectionFailed(f"商品ID '{pid}' 已搜到但勾选失败") from err
         logger.info(f"[taobao] 选中商品 pid={pid}")
     dialog.locator(sel.PRODUCT_CONFIRM_BUTTON).click()
     dialog.wait_for(state="hidden", timeout=_CONTROL_TIMEOUT_MS)

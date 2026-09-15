@@ -67,6 +67,7 @@ _ERROR_TYPE_CN: dict[str, str] = {
     "feishu_api_error": "飞书接口错误",
     "topic_not_found": "话题未找到",
     "product_not_found": "商品未找到",
+    "product_selection_failed": "商品选择失败",
     "unknown": "未知错误",
     "cookie_warning": "登录态即将过期",
     "backlog_high": "历史积压超阈值",

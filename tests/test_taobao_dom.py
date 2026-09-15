@@ -123,6 +123,31 @@ def test_product_search_allows_empty_initial_list_and_keeps_checked_item(
     assert checkbox.is_checked()
 
 
+def test_product_checkbox_replacement_after_click_is_treated_as_selected(
+    browser_page: Page,
+) -> None:
+    set_frame(
+        browser_page,
+        """
+      <div onclick="document.querySelector('.next-dialog').style.display='block'">添加商品</div>
+      <div class="next-dialog" style="display:none">
+        <input placeholder="输入商品关键词或商品ID">
+        <div><a href="https://item.taobao.com/item.htm?id=1054399102483">product</a>
+          <input class="next-checkbox-input" type="checkbox" aria-checked="false"
+            onclick="event.preventDefault(); setTimeout(() => {
+              const replacement = this.cloneNode(); replacement.checked = true;
+              replacement.setAttribute('aria-checked', 'true'); this.replaceWith(replacement);
+            }, 50)">
+        </div>
+        <button onclick="this.parentElement.style.display='none'">确定</button>
+      </div>
+    """,
+    )
+    tb._add_products(browser_page, ["1054399102483"])
+    checkbox = browser_page.frame_locator(sel.IFRAME_SELECTOR).locator('input[type="checkbox"]')
+    assert checkbox.is_checked()
+
+
 def test_topic_does_not_toggle_already_selected_card(browser_page: Page) -> None:
     set_frame(
         browser_page,

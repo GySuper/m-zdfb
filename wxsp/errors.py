@@ -42,6 +42,10 @@ class ProductNotFound(PublisherError):
     """飞书填的商品ID在弹窗搜索无结果。"""
 
 
+class ProductSelectionFailed(PublisherError):
+    """商品已搜索到,但淘宝受控复选框未能选中。"""
+
+
 class TopicNotFound(PublisherError):
     """飞书填的话题名搜索无结果。"""
 
@@ -63,6 +67,7 @@ _KIND_BY_TYPE: dict[type[Exception], str] = {
     NetworkError: "network",
     VideoInvalid: "video_invalid",
     ProductNotFound: "product_not_found",
+    ProductSelectionFailed: "product_selection_failed",
     TopicNotFound: "topic_not_found",
     LoginRequired: "login_required",
 }

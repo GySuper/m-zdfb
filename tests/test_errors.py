@@ -10,6 +10,7 @@ from wxsp.errors import (
     ElementNotFound,
     NasUnreachable,
     NetworkError,
+    ProductSelectionFailed,
     PublisherError,
     RiskControl,
     UnknownError,
@@ -45,6 +46,7 @@ def test_classify_known_publisher_errors_returns_their_kind() -> None:
         (NasUnreachable("x"), "nas_unreachable"),
         (NetworkError("x"), "network"),
         (VideoInvalid("x"), "video_invalid"),
+        (ProductSelectionFailed("x"), "product_selection_failed"),
     ]
     for exc, kind in cases:
         assert classify(exc) == kind
@@ -67,6 +69,7 @@ def test_all_publisher_errors_share_base_class() -> None:
         NasUnreachable,
         NetworkError,
         VideoInvalid,
+        ProductSelectionFailed,
         UnknownError,
     ):
         assert issubclass(cls, PublisherError)

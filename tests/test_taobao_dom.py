@@ -99,6 +99,32 @@ def test_schedule_check_is_idempotent_and_verifies_full_date(browser_page: Page)
     tb._verify_schedule(browser_page, target)
 
 
+def test_schedule_waits_for_picker_already_expanded_during_mount(browser_page: Page) -> None:
+    set_frame(
+        browser_page,
+        """
+      <div><label><input type="radio" checked></label><span>定时发布</span></div>
+      <input role="combobox" aria-expanded="true" placeholder="请选择日期和时间"
+        value="2026/09/16 12:30" onclick="this.dataset.reclicked = 'true'">
+      <div id="picker-mount"></div>
+      <button>定时发布</button>
+      <script>
+        setTimeout(() => {
+          document.querySelector('#picker-mount').innerHTML = `
+            <div class="next-overlay-wrapper opened">
+              <input placeholder="YYYY/MM/DD" value="2026/09/16">
+              <input placeholder="HH:mm" value="12:30">
+              <button onclick="this.parentElement.classList.remove('opened')">确定</button>
+            </div>`;
+        }, 100);
+      </script>
+    """,
+    )
+    tb._set_schedule(browser_page, datetime(2026, 9, 16, 12, 30))
+    combo = browser_page.frame_locator(sel.IFRAME_SELECTOR).locator(sel.SCHEDULE_COMBOBOX)
+    assert combo.get_attribute("data-reclicked") is None
+
+
 def test_product_search_allows_empty_initial_list_and_keeps_checked_item(
     browser_page: Page,
 ) -> None:

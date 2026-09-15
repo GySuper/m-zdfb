@@ -51,6 +51,7 @@ _CONTROL_TIMEOUT_MS = 15_000
 _COVER_WAIT_TIMEOUT_SECONDS = 180
 _COVER_POLL_INTERVAL_SECONDS = 1
 _PRODUCT_SELECT_TIMEOUT_SECONDS = 3
+_SCHEDULE_OPEN_TIMEOUT_MS = 3_000
 _T = TypeVar("_T")
 
 
@@ -259,15 +260,25 @@ def _add_products(page: Page, product_ids: list[str]) -> None:
     dialog.wait_for(state="hidden", timeout=_CONTROL_TIMEOUT_MS)
 
 
+def _open_schedule_picker(combo: Locator, picker: Locator) -> None:
+    """打开日期面板,已展开或点击期间展开时都不重复点击。"""
+    if combo.get_attribute("aria-expanded") != "true":
+        try:
+            combo.click(timeout=_SCHEDULE_OPEN_TIMEOUT_MS)
+        except PWTimeoutError:
+            # 点击期间 DatePicker 可能已经打开并遮住输入框,这种情况无需再点。
+            if combo.get_attribute("aria-expanded") != "true":
+                raise
+    picker.wait_for(timeout=_CONTROL_TIMEOUT_MS)
+
+
 def _set_schedule(page: Page, publish_at: datetime) -> None:
     iframe = _iframe(page)
     # radio 与提交按钮同名,直接定位 radio input,避免文本选择器歧义。
     iframe.locator(sel.SCHEDULE_RADIO).check(timeout=_CONTROL_TIMEOUT_MS)
     combo = iframe.locator(sel.SCHEDULE_COMBOBOX)
     picker = iframe.locator(sel.SCHEDULE_PICKER_OVERLAY)
-    if not picker.is_visible():
-        combo.click(timeout=_CONTROL_TIMEOUT_MS)
-    picker.wait_for(timeout=_CONTROL_TIMEOUT_MS)
+    _open_schedule_picker(combo, picker)
     date_input = picker.locator(sel.SCHEDULE_DATE_INPUT)
     target_date = publish_at.strftime("%Y/%m/%d")
     target_time = publish_at.strftime("%H:%M")

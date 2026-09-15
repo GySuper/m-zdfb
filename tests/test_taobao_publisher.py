@@ -264,6 +264,20 @@ def test_prepare_publish_repairs_lost_schedule() -> None:
     repair.assert_called_once_with(page, target)
 
 
+def test_open_schedule_picker_recovers_when_click_opens_panel() -> None:
+    from wxsp.platforms.taobao_guanghe import _open_schedule_picker
+
+    combo = MagicMock()
+    picker = MagicMock()
+    combo.get_attribute.side_effect = ["false", "true"]
+    combo.click.side_effect = PWTimeoutError("panel intercepts pointer events")
+
+    _open_schedule_picker(combo, picker)
+
+    combo.click.assert_called_once_with(timeout=3_000)
+    picker.wait_for.assert_called_once_with(timeout=15_000)
+
+
 def test_post_publish_never_submits_when_schedule_cannot_be_repaired() -> None:
     from wxsp.errors import ElementNotFound
     from wxsp.platforms.taobao_guanghe import _post_publish

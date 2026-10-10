@@ -456,7 +456,7 @@ def test_add_products_uses_current_card_and_checkbox_dom() -> None:
 
     search.fill.assert_called_once_with(pid)
     search_icon.click.assert_called_once_with()
-    card.hover.assert_called_once_with()
+    card.hover.assert_called_once_with(timeout=15_000)
     checkbox.click.assert_called_once_with(timeout=15_000)
     confirm.click.assert_called_once_with()
     dialog.wait_for.assert_called_with(state="hidden", timeout=15_000)

@@ -9,7 +9,7 @@ from datetime import datetime
 import pytest
 from patchright.sync_api import Page, sync_playwright
 
-from wxsp.errors import ElementNotFound, UploadFailed
+from wxsp.errors import ElementNotFound, ProductNotFound, ProductSelectionFailed, UploadFailed
 from wxsp.platforms import taobao_guanghe as tb
 from wxsp.platforms import taobao_selectors as sel
 
@@ -154,6 +154,72 @@ def test_product_search_allows_empty_initial_list_and_keeps_checked_item(
     assert checkbox.is_checked()
 
 
+def test_product_search_waits_through_transient_empty_state(
+    browser_page: Page, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tb, "_CONTROL_TIMEOUT_MS", 300)
+    monkeypatch.setattr(tb, "_PRODUCT_SEARCH_TIMEOUT_MS", 2_000)
+    set_frame(
+        browser_page,
+        """
+      <div onclick="document.querySelector('.next-dialog').style.display='block'">添加商品</div>
+      <div class="next-dialog" style="display:none">
+        <input placeholder="输入商品关键词或商品ID">
+        <i role="button" aria-label="搜索" class="next-search-icon"
+          style="display:inline-block;width:20px;height:20px"
+          onclick="document.querySelector('#result').innerHTML = '<p>没有找到商品</p>';
+            setTimeout(() => document.querySelector('#result').innerHTML = `
+              <div><a href='https://item.taobao.com/item.htm?id=123'>product</a>
+                <input class='next-checkbox-input' type='checkbox'></div>`, 800)"></i>
+        <div id="result"></div>
+        <button onclick="this.parentElement.style.display='none'">确定</button>
+      </div>
+    """,
+    )
+    tb._add_products(browser_page, ["123"])
+    iframe = browser_page.frame_locator(sel.IFRAME_SELECTOR)
+    assert iframe.locator('input[type="checkbox"]').is_checked()
+    assert not iframe.locator(".next-dialog").is_visible()
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        "<p>没有找到商品</p>",
+        """<div><a href="https://item.taobao.com/item.htm?id=1234">wrong prefix</a>
+          <input class="next-checkbox-input" type="checkbox"></div>""",
+        """<div style="display:none"><a href="https://item.taobao.com/item.htm?id=123">hidden</a>
+          <input class="next-checkbox-input" type="checkbox"></div>""",
+    ],
+    ids=["empty", "wrong-product", "hidden-product"],
+)
+def test_product_search_timeout_does_not_confirm_selection(
+    browser_page: Page, monkeypatch: pytest.MonkeyPatch, result: str
+) -> None:
+    monkeypatch.setattr(tb, "_CONTROL_TIMEOUT_MS", 300)
+    monkeypatch.setattr(tb, "_PRODUCT_SEARCH_TIMEOUT_MS", 400)
+    set_frame(
+        browser_page,
+        f"""
+      <div onclick="document.querySelector('.next-dialog').style.display='block'">添加商品</div>
+      <div class="next-dialog" style="display:none">
+        <input placeholder="输入商品关键词或商品ID">
+        <i role="button" aria-label="搜索" class="next-search-icon"
+          style="display:inline-block;width:20px;height:20px"></i>
+        {result}
+        <button onclick="this.dataset.confirmed = 'true'">确定</button>
+      </div>
+    """,
+    )
+    with pytest.raises(ProductNotFound, match="商品ID '123' 搜索无结果"):
+        tb._add_products(browser_page, ["123"])
+    iframe = browser_page.frame_locator(sel.IFRAME_SELECTOR)
+    assert iframe.locator("button").get_attribute("data-confirmed") is None
+    assert all(
+        not checkbox.is_checked() for checkbox in iframe.locator('input[type="checkbox"]').all()
+    )
+
+
 def test_product_checkbox_replacement_after_click_is_treated_as_selected(
     browser_page: Page,
 ) -> None:
@@ -179,6 +245,122 @@ def test_product_checkbox_replacement_after_click_is_treated_as_selected(
     tb._add_products(browser_page, ["1054399102483"])
     checkbox = browser_page.frame_locator(sel.IFRAME_SELECTOR).locator('input[type="checkbox"]')
     assert checkbox.is_checked()
+
+
+def test_product_checkbox_waits_through_detached_input(browser_page: Page) -> None:
+    set_frame(
+        browser_page,
+        """
+      <div onclick="document.querySelector('.next-dialog').style.display='block'">添加商品</div>
+      <div class="next-dialog" style="display:none">
+        <input placeholder="输入商品关键词或商品ID">
+        <i role="button" aria-label="搜索" style="display:inline-block;width:20px;height:20px"></i>
+        <div><a href="https://item.taobao.com/item.htm?id=980563551052">product</a>
+          <input class="next-checkbox-input" type="checkbox"
+            onclick="event.preventDefault(); const card = this.parentElement;
+              const replacement = this.cloneNode(); replacement.checked = true;
+              replacement.setAttribute('aria-checked', 'true'); this.remove();
+              setTimeout(() => card.appendChild(replacement), 800)">
+        </div>
+        <button onclick="this.parentElement.style.display='none'">确定</button>
+      </div>
+    """,
+    )
+    browser_page.set_default_timeout(100)
+    try:
+        tb._add_products(browser_page, ["980563551052"])
+    finally:
+        browser_page.set_default_timeout(2_000)
+    assert (
+        browser_page.frame_locator(sel.IFRAME_SELECTOR)
+        .locator('input[type="checkbox"]')
+        .is_checked()
+    )
+
+
+def test_product_checkbox_retries_if_first_click_does_not_select(
+    browser_page: Page, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tb, "_PRODUCT_SELECT_TIMEOUT_SECONDS", 0.1)
+    monkeypatch.setattr(tb, "_ELEMENT_RETRY_DELAY_SECONDS", 0.02)
+    set_frame(
+        browser_page,
+        """
+      <div onclick="document.querySelector('.next-dialog').style.display='block'">添加商品</div>
+      <div class="next-dialog" style="display:none">
+        <input placeholder="输入商品关键词或商品ID">
+        <i role="button" aria-label="搜索" style="display:inline-block;width:20px;height:20px"></i>
+        <div><a href="https://item.taobao.com/item.htm?id=980563551052">product</a>
+          <input class="next-checkbox-input" type="checkbox" data-clicks="0"
+            onclick="this.dataset.clicks = Number(this.dataset.clicks) + 1;
+              if(this.dataset.clicks === '1') event.preventDefault()">
+        </div>
+        <button onclick="this.parentElement.style.display='none'">确定</button>
+      </div>
+    """,
+    )
+    tb._add_products(browser_page, ["980563551052"])
+    checkbox = browser_page.frame_locator(sel.IFRAME_SELECTOR).locator('input[type="checkbox"]')
+    assert checkbox.is_checked()
+    assert checkbox.get_attribute("data-clicks") == "2"
+
+
+def test_product_checkbox_does_not_click_selected_replacement(
+    browser_page: Page, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tb, "_ELEMENT_RETRY_DELAY_SECONDS", 0.02)
+    set_frame(
+        browser_page,
+        """
+      <div onclick="document.querySelector('.next-dialog').style.display='block'">添加商品</div>
+      <div class="next-dialog" style="display:none">
+        <input placeholder="输入商品关键词或商品ID">
+        <i role="button" aria-label="搜索" style="display:inline-block;width:20px;height:20px"></i>
+        <div onmouseenter="if(!this.dataset.replaced) {
+          this.dataset.replaced = 'true'; const checkbox = this.querySelector('input');
+          const replacement = checkbox.cloneNode(); replacement.checked = true; checkbox.remove();
+          setTimeout(() => this.appendChild(replacement), 800) }">
+          <a href="https://item.taobao.com/item.htm?id=980563551052">product</a>
+          <input class="next-checkbox-input" type="checkbox" checked data-clicks="0"
+            onclick="this.dataset.clicks = Number(this.dataset.clicks) + 1">
+        </div>
+        <button onclick="this.parentElement.style.display='none'">确定</button>
+      </div>
+    """,
+    )
+    tb._add_products(browser_page, ["980563551052"])
+    checkbox = browser_page.frame_locator(sel.IFRAME_SELECTOR).locator('input[type="checkbox"]')
+    assert checkbox.is_checked()
+    assert checkbox.get_attribute("data-clicks") == "0"
+
+
+def test_product_checkbox_stops_after_bounded_retries(
+    browser_page: Page, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tb, "_PRODUCT_SELECT_TIMEOUT_SECONDS", 0.1)
+    monkeypatch.setattr(tb, "_ELEMENT_RETRY_DELAY_SECONDS", 0.02)
+    set_frame(
+        browser_page,
+        """
+      <div onclick="document.querySelector('.next-dialog').style.display='block'">添加商品</div>
+      <div class="next-dialog" style="display:none">
+        <input placeholder="输入商品关键词或商品ID">
+        <i role="button" aria-label="搜索" style="display:inline-block;width:20px;height:20px"></i>
+        <div><a href="https://item.taobao.com/item.htm?id=980563551052">product</a>
+          <input class="next-checkbox-input" type="checkbox" data-clicks="0"
+            onclick="event.preventDefault(); this.dataset.clicks = Number(this.dataset.clicks) + 1">
+        </div>
+        <button onclick="this.dataset.confirmed = 'true'">确定</button>
+      </div>
+    """,
+    )
+    with pytest.raises(ProductSelectionFailed, match="勾选未生效"):
+        tb._add_products(browser_page, ["980563551052"])
+    iframe = browser_page.frame_locator(sel.IFRAME_SELECTOR)
+    checkbox = iframe.locator('input[type="checkbox"]')
+    assert not checkbox.is_checked()
+    assert checkbox.get_attribute("data-clicks") == "3"
+    assert iframe.locator("button").get_attribute("data-confirmed") is None
 
 
 def test_topic_does_not_toggle_already_selected_card(browser_page: Page) -> None:

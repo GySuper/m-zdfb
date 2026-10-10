@@ -38,6 +38,31 @@ from patchright.sync_api import Page, sync_playwright
 from wxsp.config import get_user_data_dir, is_packaged
 from wxsp.platform_meta import get_meta
 
+
+@contextmanager
+def _profile_session(user_data_dir: Path) -> Iterator[None]:
+    """清理残留进程前抢占 profile;操作系统文件锁也防止跨进程误杀活跃浏览器。"""
+    user_data_dir.mkdir(parents=True, exist_ok=True)
+    with (user_data_dir / ".wxsp-browser.lock").open("a+b") as lock_file:
+        if lock_file.tell() == 0:
+            lock_file.write(b"\0")
+            lock_file.flush()
+        lock_file.seek(0)
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise RuntimeError(f"账号 {user_data_dir.name} 的浏览器正在使用,请关闭后再试") from exc
+        # 关闭文件即释放锁,程序异常退出时也由操作系统释放;锁文件保留避免 unlink 竞态。
+        yield
+
+
 WECHAT_CHANNELS_HOME = "https://channels.weixin.qq.com"
 
 
@@ -341,7 +366,7 @@ def _reap_stale_profile_lock(user_data_dir: Path) -> None:
 
 
 @contextmanager
-def browser_context(
+def _browser_context_impl(
     user_data_dir: Path,
     *,
     headless: bool = False,
@@ -605,6 +630,27 @@ def browser_context(
                     context.close()
                 except Exception:
                     pass  # 浏览器可能已经崩溃,close 失败不影响主流程
+
+
+@contextmanager
+def browser_context(
+    user_data_dir: Path,
+    *,
+    headless: bool = False,
+    account_id: str | None = None,
+    platform: str = "tencent_channel",
+    _skip_cleanup: bool = False,
+) -> Iterator[Page]:
+    """打开账号浏览器并持有 profile 级会话锁。"""
+    with _profile_session(user_data_dir):
+        with _browser_context_impl(
+            user_data_dir,
+            headless=headless,
+            account_id=account_id,
+            platform=platform,
+            _skip_cleanup=_skip_cleanup,
+        ) as page:
+            yield page
 
 
 def wait_for_logged_in(page: Page, *, timeout_ms: int, platform: str = "tencent_channel") -> bool:

@@ -49,6 +49,7 @@ _ELEMENT_RETRY_DELAY_SECONDS = 1.5
 _CONTROL_TIMEOUT_MS = 15_000
 _COVER_WAIT_TIMEOUT_SECONDS = 180
 _COVER_POLL_INTERVAL_SECONDS = 1
+_PRODUCT_SEARCH_TIMEOUT_MS = 60_000
 _PRODUCT_SELECT_TIMEOUT_SECONDS = 3
 _SCHEDULE_OPEN_TIMEOUT_MS = 3_000
 _T = TypeVar("_T")
@@ -203,7 +204,39 @@ _MAX_PRODUCTS = 6
 
 def _is_product_checkbox_selected(checkbox: Locator) -> bool:
     """淘宝 Fusion 受控 checkbox 会在点击后替换 DOM 节点。"""
-    return checkbox.is_checked() or checkbox.get_attribute("aria-checked") == "true"
+    return (
+        checkbox.is_checked(timeout=500)
+        or checkbox.get_attribute("aria-checked", timeout=500) == "true"
+    )
+
+
+def _select_product(link: Locator, pid: str) -> None:
+    card = link.locator(sel.PRODUCT_ITEM_CARD_ANCESTOR)
+    checkbox = card.locator(sel.PRODUCT_ITEM_SELECT_CHECKBOX_INPUT).first
+    for attempt in range(1, _ELEMENT_RETRY_ATTEMPTS + 1):
+        try:
+            card.hover(timeout=_CONTROL_TIMEOUT_MS)
+            if not _is_product_checkbox_selected(checkbox):
+                checkbox.click(timeout=_CONTROL_TIMEOUT_MS)
+            deadline = time.monotonic() + _PRODUCT_SELECT_TIMEOUT_SECONDS
+            while time.monotonic() < deadline:
+                try:
+                    if _is_product_checkbox_selected(checkbox):
+                        return
+                except PWTimeoutError:
+                    pass  # 节点替换期间继续等,不能把缺失节点当成未选中后再次点击。
+                time.sleep(0.2)
+            failure = ProductSelectionFailed(f"商品ID '{pid}' 已搜到但勾选未生效")
+        except PWError as err:
+            failure = ProductSelectionFailed(f"商品ID '{pid}' 已搜到但勾选失败: {err}")
+            if not isinstance(err, PWTimeoutError):
+                raise failure from err
+        if attempt == _ELEMENT_RETRY_ATTEMPTS:
+            raise failure
+        logger.warning(
+            f"[taobao] {failure},重新核对勾选状态({attempt}/{_ELEMENT_RETRY_ATTEMPTS - 1})"
+        )
+        time.sleep(_ELEMENT_RETRY_DELAY_SECONDS)
 
 
 def _add_products(page: Page, product_ids: list[str]) -> None:
@@ -225,35 +258,27 @@ def _add_products(page: Page, product_ids: list[str]) -> None:
         search = dialog.locator(sel.PRODUCT_SEARCH_INPUT)
         search.fill(pid)
         dialog.locator(sel.PRODUCT_SEARCH_BUTTON).click()
+        search_started = time.monotonic()
+        logger.info(
+            f"[taobao] 搜索商品 pid={pid},等待结果(最长 {_PRODUCT_SEARCH_TIMEOUT_MS / 1000:g}s)"
+        )
 
         # 结果以商品卡片呈现(不是每商品一个可见 checkbox)。按卡片标题链接 href 里的
-        # 商品ID 精确定位 —— 搜不到 → 链接永不出现 → 判 ProductNotFound。
+        # 商品ID 精确定位。搜索会先显示空态,最长等待 60 秒让异步结果加载,再判无结果。
         link = dialog.locator(sel.PRODUCT_ITEM_LINK_BY_ID.format(pid=pid)).first
         try:
-            link.wait_for(state="visible", timeout=_CONTROL_TIMEOUT_MS)
+            link.wait_for(state="visible", timeout=_PRODUCT_SEARCH_TIMEOUT_MS)
         except PWTimeoutError as err:
-            raise ProductNotFound(f"商品ID '{pid}' 搜索无结果") from err
+            elapsed = time.monotonic() - search_started
+            raise ProductNotFound(
+                f"商品ID '{pid}' 搜索无结果(等待 {elapsed:.1f}s 后目标商品仍未出现)"
+            ) from err
 
         # 上溯到卡片容器,勾选卡片内"商品选择"复选框(hover 才显,区别于顶部"筛选"复选框)。
         # 先 hover 卡片让复选框显出,再直接点 input(opacity:0 盖在方框上,是真正接收点击的元素)。
-        card = link.locator(sel.PRODUCT_ITEM_CARD_ANCESTOR)
-        card.hover()
-        checkbox = card.locator(sel.PRODUCT_ITEM_SELECT_CHECKBOX_INPUT).first
-
         # 不使用 locator.check(): Fusion 点击后会异步替换 input,check() 对旧节点做
         # 原生 checked 断言会误报失败。click 后通过 locator 重新解析当前节点状态。
-        try:
-            if not _is_product_checkbox_selected(checkbox):
-                checkbox.click(timeout=_CONTROL_TIMEOUT_MS)
-            deadline = time.monotonic() + _PRODUCT_SELECT_TIMEOUT_SECONDS
-            while time.monotonic() < deadline:
-                if _is_product_checkbox_selected(checkbox):
-                    break
-                time.sleep(0.2)
-            else:
-                raise ProductSelectionFailed(f"商品ID '{pid}' 已搜到但勾选未生效")
-        except PWError as err:
-            raise ProductSelectionFailed(f"商品ID '{pid}' 已搜到但勾选失败") from err
+        _select_product(link, pid)
         logger.info(f"[taobao] 选中商品 pid={pid}")
     dialog.locator(sel.PRODUCT_CONFIRM_BUTTON).click()
     dialog.wait_for(state="hidden", timeout=_CONTROL_TIMEOUT_MS)

@@ -50,3 +50,55 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ============ 旧模板兼容层(.legacy) ============
+ * 配置页、安装向导的表单逻辑多,保留原有 markup 和 JS,只在这里把旧的变量与类名换成新外观。 */
+.legacy {
+  --color-text: #0b0b12; --color-text-mute: #6b7280; --color-text-faint: #9ca3af;
+  --color-bg: #f4f4f7; --color-surface: #ffffff; --color-surface-alt: #fafafc;
+  --color-border: #e5e7eb; --color-border-soft: #f1f2f6;
+  --color-primary: #6366f1; --color-primary-hover: #4f46e5; --color-primary-soft: #eef2ff;
+  --color-ok: #059669; --color-ok-soft: #d1fae5; --color-warn: #b45309; --color-warn-soft: #fef3c7;
+  --color-error: #e11d48; --color-error-soft: #ffe4e6; --color-info: #4f46e5; --color-info-soft: #eef2ff;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-8: 48px;
+  --radius-sm: 12px; --radius-md: 28px; --radius-lg: 28px;
+  --shadow-sm: 0 1px 2px rgba(16,16,40,.08); --shadow-md: 0 12px 40px -12px rgba(16,16,40,.12);
+}
+.legacy a { color: var(--color-primary); }
+.legacy code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; background: #f3f4f6; border-radius: 6px; padding: 1px 6px; color: #374151; }
+.legacy input[type=text], .legacy input[type=number], .legacy input[type=password], .legacy input[type=url],
+.legacy input[type=email], .legacy input[type=date], .legacy input[type=time], .legacy select, .legacy textarea {
+  height: 40px; padding: 0 12px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-surface-alt);
+  font: inherit; font-size: 14px; color: var(--color-text); outline: none; transition: border-color .15s, box-shadow .15s, background-color .15s;
+}
+.legacy textarea { height: auto; padding: 10px 12px; }
+.legacy input:focus, .legacy select:focus, .legacy textarea:focus { border-color: #a5b4fc; background: #fff; box-shadow: 0 0 0 4px #eef2ff; }
+.legacy input[readonly] { color: var(--color-text-faint); }
+.legacy button:not(.btn):not(.eye-toggle), .legacy a.btn-sm, .legacy a.btn:not(.btn-dark):not(.btn-soft) {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 40px; padding: 0 18px; border-radius: 999px;
+  border: 0; background: #f3f4f6; color: #111827; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  text-decoration: none; transition: background-color .15s, transform .1s;
+}
+.legacy button:not(.btn):not(.eye-toggle):hover { background: #e5e7eb; }
+.legacy button:not(.btn):not(.eye-toggle):active { transform: scale(.97); }
+.legacy button.primary, .legacy .btn.primary { background: #111827; color: #fff; }
+.legacy button.primary:hover, .legacy .btn.primary:hover { background: #374151; }
+.legacy button.btn-sm, .legacy .btn-sm { height: 32px; padding: 0 14px; font-size: 13px; }
+.legacy button.danger, .legacy .danger { background: #fff1f2; color: #e11d48; }
+.legacy button.danger:hover { background: #ffe4e6; }
+.legacy .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; background: #f3f4f6; color: #6b7280; }
+.legacy .badge.ok { background: #d1fae5; color: #047857; } .legacy .badge.warn { background: #fef3c7; color: #92400e; }
+.legacy .badge.error { background: #ffe4e6; color: #be123c; } .legacy .badge.info { background: #eef2ff; color: #4338ca; }
+.legacy .card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 24px 28px 8px; }
+.legacy .card-header h2 { font-size: 16px; font-weight: 700; }
+.legacy .card-body { padding: 12px 28px 24px; }
+.legacy table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.legacy th { text-align: left; font-size: 12px; font-weight: 500; color: var(--color-text-faint); padding: 10px 12px; }
+.legacy td { padding: 12px; border-top: 1px solid var(--color-border-soft); vertical-align: middle; }
+.legacy .empty { text-align: center; padding: 32px 16px; color: var(--color-text-mute); font-size: 14px; }
+.legacy .empty-title { font-size: 16px; font-weight: 700; color: var(--color-text); margin-bottom: 4px; }
+.legacy .muted, .legacy .text-mute { color: var(--color-text-mute); }
+.legacy .text-faint { color: var(--color-text-faint); }
+.legacy .text-xs { font-size: 12px; } .legacy .text-sm { font-size: 13px; }
+.legacy .nowrap { white-space: nowrap; }
+.legacy .mt-2 { margin-top: 8px; } .legacy .mt-3 { margin-top: 12px; }

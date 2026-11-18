@@ -1,19 +1,16 @@
-{% extends "base.html" %}
+{% extends "base_v2.html" %}
 {% block page_title %}配置{% endblock %}
+{% block heading %}配置{% endblock %}
+{% block subheading %}
+<div class="flex flex-wrap items-center gap-2 mt-1 text-sm text-white/80">
+  <span>每个分区单独保存，保存前自动备份成 .bak</span>
+  <span class="px-2 py-0.5 rounded-lg bg-white/15 font-mono text-xs">{{ abs_path }}</span>
+  {% if not exists %}<span class="chip bg-rose-500/90 text-white">文件未找到</span>{% endif %}
+</div>
+{% endblock %}
+{% block op_status %}{% if flash %}<div class="flash ok" id="flash-banner">{{ flash }}</div>{% endif %}{% endblock %}
 {% block content %}
-
-  <div class="page-header">
-    <div>
-      <div class="page-title">{{ platform_cn(request.state.current_platform) }}·配置</div>
-      <div class="page-subtitle">
-        文件 <code>{{ abs_path }}</code>
-        {% if not exists %} <span class="badge error">未找到</span>{% endif %}
-        · 每分区单独保存 · 保存前自动备份到 <code>.bak</code>
-      </div>
-    </div>
-  </div>
-
-  {% if flash %}<div class="flash ok" id="flash-banner">{{ flash }}</div>{% endif %}
+<div class="legacy">
 
   <div class="cfg-layout">
     {# ============ 左侧锚点导航 ============ #}
@@ -579,26 +576,27 @@
 
   <style>
     /* ============ Config layout ============ */
-    .cfg-layout { display: grid; grid-template-columns: 180px 1fr; gap: var(--space-5); }
+    .cfg-layout { display: grid; grid-template-columns: 200px 1fr; gap: var(--space-5); }
     @media (max-width: 900px) { .cfg-layout { grid-template-columns: 1fr; } .cfg-nav { display: none; } }
     .cfg-nav {
       position: sticky; top: var(--space-5); align-self: start;
       max-height: calc(100vh - var(--space-8)); overflow-y: auto;
+      background: #fff; border-radius: 24px; padding: 16px 10px;
+      box-shadow: 0 1px 2px rgba(16,16,40,.04), 0 12px 40px -12px rgba(16,16,40,.12);
     }
-    .cfg-nav-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-text-faint); margin-bottom: 6px; padding: 0 8px; }
+    .cfg-nav-title { font-size: 12px; color: var(--color-text-faint); margin-bottom: 6px; padding: 0 10px; }
     .cfg-nav a {
-      display: block; padding: 6px 10px; font-size: 13px;
-      color: var(--color-text-mute); border-radius: var(--radius-sm);
-      border-left: 2px solid transparent; margin-bottom: 1px;
+      display: block; padding: 8px 12px; font-size: 14px;
+      color: var(--color-text-mute); border-radius: var(--radius-sm); margin-bottom: 2px;
     }
-    .cfg-nav a:hover { background: var(--color-primary-soft); color: var(--color-primary); border-left-color: var(--color-primary); }
+    .cfg-nav a:hover { background: var(--color-primary-soft); color: var(--color-primary); }
     .cfg-nav-divider { height: 1px; background: var(--color-border-soft); margin: var(--space-3) 0; }
 
     .cfg-main { min-width: 0; }
 
     .cfg-section { margin-bottom: var(--space-6); scroll-margin-top: var(--space-4); }
-    .cfg-section-head { margin-bottom: var(--space-3); }
-    .cfg-section-head h2 { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: var(--space-2); }
+    .cfg-section-head { margin-bottom: var(--space-3); padding: 0 8px; }
+    .cfg-section-head h2 { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: var(--space-2); }
     .cfg-section-desc { color: var(--color-text-mute); font-size: 13px; margin-top: 4px; }
 
     /* ============ Cfg row (label / control / hint) ============ */
@@ -648,7 +646,7 @@
       position: absolute;
       cursor: pointer;
       inset: 0;
-      background: var(--color-border);
+      background: #d1d5db;
       transition: 0.2s;
       border-radius: 10px;
     }
@@ -699,6 +697,7 @@
       border-top: 1px solid var(--color-border-soft);
       background: var(--color-surface-alt);
       border-radius: 0 0 var(--radius-md) var(--radius-md);
+      padding: var(--space-4) 28px;
     }
     .cfg-foot-status {
       flex: 1;
@@ -930,4 +929,5 @@ function saveDefaultPlatform(val) {
   });
 }
 </script>
+</div>
 {% endblock %}

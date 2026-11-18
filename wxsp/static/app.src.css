@@ -74,13 +74,13 @@
 .legacy textarea { height: auto; padding: 10px 12px; }
 .legacy input:focus, .legacy select:focus, .legacy textarea:focus { border-color: #a5b4fc; background: #fff; box-shadow: 0 0 0 4px #eef2ff; }
 .legacy input[readonly] { color: var(--color-text-faint); }
-.legacy button:not(.btn):not(.eye-toggle), .legacy a.btn-sm, .legacy a.btn:not(.btn-dark):not(.btn-soft) {
+.legacy :where(button:not(.btn):not(.eye-toggle), a.btn-sm, a.btn:not(.btn-dark):not(.btn-soft)) {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 40px; padding: 0 18px; border-radius: 999px;
   border: 0; background: #f3f4f6; color: #111827; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap;
   text-decoration: none; transition: background-color .15s, transform .1s;
 }
-.legacy button:not(.btn):not(.eye-toggle):hover { background: #e5e7eb; }
-.legacy button:not(.btn):not(.eye-toggle):active { transform: scale(.97); }
+.legacy :where(button:not(.btn):not(.eye-toggle)):hover { background: #e5e7eb; }
+.legacy :where(button:not(.btn):not(.eye-toggle)):active { transform: scale(.97); }
 .legacy button.primary, .legacy .btn.primary { background: #111827; color: #fff; }
 .legacy button.primary:hover, .legacy .btn.primary:hover { background: #374151; }
 .legacy button.btn-sm, .legacy .btn-sm { height: 32px; padding: 0 14px; font-size: 13px; }

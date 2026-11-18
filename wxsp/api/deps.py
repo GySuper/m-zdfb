@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session
 
 from wxsp import __version__ as wxsp_version
@@ -44,16 +46,24 @@ PLATFORM_BRAND: dict[str, dict[str, str]] = {
 
 def platform_overview() -> dict[str, dict[str, int]]:
     """平台切换面板用:每个平台今日已发 / 今日总数 / 账号数 / 需扫码账号数。"""
+    out: dict[str, dict[str, int]] = {}
+
+    def slot(pf: str) -> dict[str, int]:
+        return out.setdefault(pf, {"done": 0, "total": 0, "accounts": 0, "issues": 0})
+
+    try:
+        _fill_overview(slot)
+    except OperationalError:  # 全新库还没建表(配置页等不走 get_session 的页面也渲染顶栏)
+        return {}
+    return out
+
+
+def _fill_overview(slot: Any) -> None:
     from datetime import date
 
     from sqlmodel import func, select
 
     from wxsp.models import Account, Task
-
-    out: dict[str, dict[str, int]] = {}
-
-    def slot(pf: str) -> dict[str, int]:
-        return out.setdefault(pf, {"done": 0, "total": 0, "accounts": 0, "issues": 0})
 
     with session_scope(get_engine()) as s:
         rows = s.exec(
@@ -73,7 +83,6 @@ def platform_overview() -> dict[str, dict[str, int]]:
             slot(pf)["accounts"] += n
             if cs in ("expired", "warn"):
                 slot(pf)["issues"] += n
-    return out
 
 
 def today_label() -> str:

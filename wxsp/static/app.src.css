@@ -1,0 +1,52 @@
+/* 新版界面(Auto)样式源文件。改完运行:
+ * tools/tailwindcss -c tailwind.config.js -i wxsp/static/app.src.css -o wxsp/static/app.css --minify
+ * 生成的 app.css 一并提交,运行和打包都不需要 Node / Tailwind。 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply bg-[#f4f4f7] text-[#0b0b12] font-sans antialiased; font-feature-settings: "tnum"; }
+  [x-cloak] { display: none !important; }
+}
+
+@layer components {
+  .card { @apply bg-white rounded-[28px]; box-shadow: 0 1px 2px rgba(16,16,40,.04), 0 12px 40px -12px rgba(16,16,40,.12); transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s; }
+  .tilt { transform-style: preserve-3d; will-change: transform; }
+  .tilt:hover { box-shadow: 0 1px 2px rgba(16,16,40,.04), 0 30px 60px -20px rgba(80,60,200,.28); }
+  .pop { animation: pop .7s cubic-bezier(.2,1.4,.3,1) both; }
+  .liquid { position: absolute; left: 0; right: 0; bottom: 0; transition: height 1.6s cubic-bezier(.2,.8,.2,1); }
+  .wave { position: absolute; top: -10px; left: 0; width: 200%; height: 20px; animation: wv 3s linear infinite; }
+  .now { animation: nowp 2s ease-in-out infinite; }
+  .note-in { animation: noteIn .6s cubic-bezier(.2,1.2,.3,1) both; }
+  .mag { transition: transform .2s cubic-bezier(.2,.8,.2,1); }
+  .menu { transform-origin: top right; transition: opacity .15s, transform .15s; }
+  .menu[hidden] { display: block; opacity: 0; transform: scale(.96); pointer-events: none; }
+  .shimmer { background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899, #6366f1); background-size: 200% 100%; animation: shimmer 2s linear infinite; }
+
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold whitespace-nowrap transition; }
+  .btn:active { transform: scale(.97); }
+  .btn-dark { @apply bg-gray-900 text-white hover:bg-gray-700; }
+  .btn-soft { @apply bg-gray-100 text-gray-900 hover:bg-gray-200; }
+  .btn-glass { @apply bg-white/15 backdrop-blur text-white hover:bg-white/25; }
+  .btn-white { @apply bg-white text-black shadow-2xl shadow-black/20 hover:shadow-black/30; }
+  .btn[disabled], .btn.htmx-request { opacity: .6; pointer-events: none; }
+
+  .chip { @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap; }
+  .op-flash, .flash { @apply mb-5 rounded-2xl px-4 py-3 text-sm; }
+  .op-flash.ok, .flash.ok { @apply bg-emerald-50 text-emerald-700; }
+  .op-flash.warn, .flash.warn { @apply bg-amber-50 text-amber-800; }
+  .op-flash.error, .flash.error { @apply bg-rose-50 text-rose-700; }
+  .spin { @apply hidden; }
+  .htmx-request .spin, .spin.htmx-request { @apply inline-block; }
+}
+
+@keyframes pop { from { opacity: 0; transform: translateY(24px) scale(.96); } }
+@keyframes wv { to { transform: translateX(-50%); } }
+@keyframes nowp { 0% { box-shadow: 0 0 0 0 rgba(99,102,241,.45); } 50% { box-shadow: 0 0 0 8px rgba(99,102,241,0); } }
+@keyframes noteIn { from { opacity: 0; transform: translateX(30px) scale(.95); } }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

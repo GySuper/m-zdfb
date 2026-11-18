@@ -11,7 +11,7 @@ from sqlmodel import Session, col, select
 
 from wxsp.api.deps import get_session, get_settings, templates
 from wxsp.config import Settings
-from wxsp.models import TASK_STATUS_INTERRUPTED, TASK_STATUS_PENDING, Account, Event, Task
+from wxsp.models import TASK_STATUS_INTERRUPTED, TASK_STATUS_PENDING, Account, Event, Task, Video
 
 router = APIRouter()
 
@@ -90,6 +90,32 @@ def dashboard(
             }
         )
 
+    # 当日时间轴 / 正在发布 / 接下来:按定时发布时间排序
+    video_ids = [t.video_id for t in today_tasks]
+    titles = (
+        {
+            v.id: v.title
+            for v in session.exec(select(Video).where(col(Video.id).in_(video_ids))).all()
+        }
+        if video_ids
+        else {}
+    )
+    names = {aid: cfg.display_name for aid, cfg in settings.accounts.items()}
+    timeline: list[dict[str, Any]] = [
+        {
+            "id": t.id,
+            "title": titles.get(t.video_id, ""),
+            "account": names.get(t.account_id, t.account_id),
+            "publish_at": t.publish_at,
+            "status": t.status,
+            "started_at": t.started_at,
+            "error_type": t.last_error_type,
+        }
+        for t in sorted(today_tasks, key=lambda t: t.publish_at)
+    ]
+    running = next((x for x in timeline if x["status"] == "running"), None)
+    upcoming = [x for x in timeline if x["status"] == "pending"][:3]
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -101,5 +127,8 @@ def dashboard(
             "counts": counts,
             "backlog": backlog,
             "recent_events": recent_events,
+            "timeline": timeline,
+            "running": running,
+            "upcoming": upcoming,
         },
     )

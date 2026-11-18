@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from apscheduler.schedulers.base import BaseScheduler  # type: ignore[import-untyped]
 from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-untyped]
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -37,6 +39,7 @@ from wxsp.scheduler import (
 
 _SETUP_PREFIX = "/setup"
 _STATIC_PREFIX = "/static"
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -266,6 +269,7 @@ def create_app() -> FastAPI:
         allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
     )
 
+    app.mount(_STATIC_PREFIX, StaticFiles(directory=str(_STATIC_DIR)), name="static")
     app.include_router(setup_router)
     app.include_router(dashboard_router)
     app.include_router(accounts_router)

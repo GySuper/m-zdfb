@@ -37,3 +37,6 @@ build/
 *.swp
 *.spec  # PyInstaller spec
 .apc-env*
+
+# Tailwind standalone binary (dev-only, compiled CSS is committed)
+tools/

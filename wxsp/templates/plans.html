@@ -1,120 +1,97 @@
-{% extends "base.html" %}
+{% extends "base_v2.html" %}
 {% block page_title %}计划{% endblock %}
+{% block heading %}计划{% endblock %}
+{% block subheading %}<div class="text-white/80 mt-1 text-sm">任意一天的发布清单，按定时发布时间排列，只看不改</div>{% endblock %}
+{% block hero_actions %}
+{% set cur = request.state.current_platform %}
+<a class="btn btn-glass w-11 h-11 p-0" href="/plans?platform={{ cur }}&date={{ prev_date }}" aria-label="前一天">‹</a>
+<form method="get" action="/plans" class="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white text-gray-900 shadow-2xl shadow-black/20">
+  <input type="hidden" name="platform" value="{{ cur }}">
+  <input type="date" name="date" value="{{ filter_date }}" onchange="this.form.submit()" class="bg-transparent outline-none font-semibold" aria-label="选择日期">
+</form>
+<a class="btn btn-glass w-11 h-11 p-0" href="/plans?platform={{ cur }}&date={{ next_date }}" aria-label="后一天">›</a>
+{% if not is_today %}<a class="btn btn-glass px-4 py-3" href="/plans?platform={{ cur }}">回到今天</a>{% endif %}
+{% endblock %}
+
 {% block content %}
+{% set cur = request.state.current_platform %}
+{% set ns = namespace(flat=[]) %}
+{% for account_id, items in groups %}{% for it in items %}{% set _ = ns.flat.append({'account': account_id, 'id': it.id, 'title': it.title, 'publish_at': it.publish_at, 'status': it.status}) %}{% endfor %}{% endfor %}
+{% set timeline = ns.flat | sort(attribute='publish_at') %}
+{% set look = {
+    'success': ('bg-emerald-500', 'bg-emerald-50 text-emerald-700'),
+    'running': ('bg-indigo-500 now', 'bg-indigo-50 text-indigo-700'),
+    'failed': ('bg-rose-500', 'bg-rose-50 text-rose-700'),
+    'interrupted': ('bg-orange-500', 'bg-orange-50 text-orange-700'),
+    'skipped': ('bg-amber-400', 'bg-amber-50 text-amber-800'),
+  } %}
 
-  {# flatten groups → 单一时间线 #}
-  {% set ns = namespace(flat=[]) %}
-  {% for account_id, items in groups %}
-    {% for it in items %}
-      {% set _ = ns.flat.append({"account": account_id, "id": it.id, "title": it.title, "publish_at": it.publish_at, "status": it.status}) %}
-    {% endfor %}
-  {% endfor %}
-  {% set timeline = ns.flat | sort(attribute="publish_at") %}
+<div class="grid grid-cols-12 gap-5">
+  <section class="card col-span-12 lg:col-span-8 p-7 pop">
+    <div class="flex items-baseline justify-between mb-6">
+      <h2 class="text-xl font-bold">{{ filter_date.month }} 月 {{ filter_date.day }} 日 · 星期{{ '一二三四五六日'[filter_date.weekday()] }}</h2>
+      <span class="text-sm text-gray-500">共 {{ total }} 条计划</span>
+    </div>
+    {% if timeline %}
+    <ol class="relative">
+      <span class="absolute left-[71px] top-3 bottom-3 w-px bg-gray-200" aria-hidden="true"></span>
+      {% for it in timeline %}
+      {% set lk = look.get(it.status, ('bg-gray-300', 'bg-gray-100 text-gray-600')) %}
+      <li class="note-in relative flex items-center gap-5 py-2.5" style="animation-delay:{{ [loop.index0, 14] | min * 0.03 }}s">
+        <span class="w-14 shrink-0 text-right text-lg font-black tabular-nums">{{ it.publish_at.strftime('%H:%M') }}</span>
+        <span class="relative z-10 w-[15px] h-[15px] shrink-0 rounded-full border-[3px] border-white shadow {{ lk[0] }}"></span>
+        <a href="/tasks/{{ it.id }}?platform={{ cur }}" class="group min-w-0 flex-1 flex items-center gap-4 p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 transition">
+          <div class="min-w-0 flex-1">
+            <div class="font-semibold truncate group-hover:text-indigo-600">{{ it.title or '（无标题）' }}</div>
+            <div class="text-sm text-gray-500 mt-0.5"><span title="{{ it.account }}">{{ account_names.get(it.account, it.account) }}</span> · #{{ it.id }}</div>
+          </div>
+          <span class="chip {{ lk[1] }} shrink-0">{{ status_cn(it.status) }}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <div class="py-12 text-center">
+      <div class="w-14 h-14 mx-auto rounded-2xl grid place-items-center bg-indigo-50 text-indigo-600 text-2xl">○</div>
+      <div class="mt-4 text-lg font-bold">{{ filter_date }} 没有发布计划</div>
+      <div class="text-sm text-gray-500 mt-1">任务从飞书多维表格同步，哪天发由「执行日期」字段决定</div>
+    </div>
+    {% endif %}
+  </section>
 
-  <div class="page-header">
-    <div>
-      <div class="page-title">{{ platform_cn(request.state.current_platform) }}·发布计划</div>
-      <div class="page-subtitle">按发布时间排序的当日清单 · 只读视图</div>
-    </div>
-    <div class="page-actions">
-      <form method="get" action="/plans" class="date-picker">
-        <input type="hidden" name="platform" value="{{ request.state.current_platform }}">
-        <input type="date" name="date" value="{{ filter_date }}" onchange="this.form.submit()">
-      </form>
-    </div>
-  </div>
+  <aside class="col-span-12 lg:col-span-4 space-y-5">
+    <section class="card p-7 pop" style="animation-delay:.08s">
+      <h2 class="text-xl font-bold mb-4">这一天的状态</h2>
+      {% set done = timeline | selectattr('status', 'equalto', 'success') | list | length %}
+      <div class="flex items-baseline gap-2"><span class="text-5xl font-black" data-count="{{ done }}">{{ done }}</span><span class="text-gray-400 text-xl font-bold">/ {{ total }}</span><span class="text-sm text-gray-500 ml-1">已发布</span></div>
+      <div class="mt-4 h-2.5 rounded-full bg-gray-100 overflow-hidden flex">
+        {% for st, col in [('success','#10b981'),('running','#6366f1'),('failed','#f43f5e'),('interrupted','#f97316'),('skipped','#f59e0b')] %}
+        {% set n = timeline | selectattr('status', 'equalto', st) | list | length %}
+        {% if n %}<div style="width:{{ n / total * 100 }}%;background:{{ col }}"></div>{% endif %}
+        {% endfor %}
+      </div>
+      <div class="grid grid-cols-3 gap-2 mt-4">
+        {% for st in ['pending','running','success','failed','skipped','interrupted'] %}
+        {% set n = timeline | selectattr('status', 'equalto', st) | list | length %}
+        <div class="p-3 rounded-2xl bg-gray-50"><div class="text-[11px] text-gray-400">{{ status_cn(st) }}</div><div class="text-lg font-black {% if not n %}text-gray-300{% endif %}">{{ n }}</div></div>
+        {% endfor %}
+      </div>
+    </section>
 
-  <div class="card">
-    <div class="card-header">
-      <h2>{{ filter_date }}</h2>
-      <span class="card-meta">共 {{ total }} 条计划</span>
-    </div>
-    <div class="card-body">
-      {% if timeline %}
-        <div class="timeline">
-          {% for it in timeline %}
-            {% set hh = it.publish_at.strftime("%H:%M") %}
-            <div class="tl-row tl-{{ it.status }}">
-              <div class="tl-time">{{ hh }}</div>
-              <div class="tl-bar"></div>
-              <div class="tl-content">
-                <a href="/tasks/{{ it.id }}?platform={{ request.state.current_platform }}" class="tl-title">{{ it.title }}</a>
-                <div class="tl-meta">
-                  <code>{{ it.account }}</code>
-                  <span class="text-faint">·</span>
-                  <span>#{{ it.id }}</span>
-                </div>
-              </div>
-              <div class="tl-state">
-                {% if it.status == "success" %}<span class="badge ok">已发布</span>
-                {% elif it.status == "running" %}<span class="badge info">发布中</span>
-                {% elif it.status == "failed" %}<span class="badge error">失败</span>
-                {% elif it.status == "interrupted" %}<span class="badge warn">已中断</span>
-                {% elif it.status == "skipped" %}<span class="badge mute">已跳过</span>
-                {% else %}<span class="badge mute">待发布</span>{% endif %}
-              </div>
-            </div>
-          {% endfor %}
+    {% if groups %}
+    <section class="card p-7 pop" style="animation-delay:.14s">
+      <h2 class="text-xl font-bold mb-4">按账号</h2>
+      <div class="space-y-3">
+        {% for account_id, items in groups %}
+        {% set ok = items | selectattr('status', 'equalto', 'success') | list | length %}
+        <div>
+          <div class="flex items-baseline justify-between text-sm"><span class="font-semibold truncate" title="{{ account_id }}">{{ account_names.get(account_id, account_id) }}</span><span class="tabular-nums text-gray-500">{{ ok }}<span class="text-gray-300">/{{ items|length }}</span></span></div>
+          <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden"><div class="h-full rounded-full bg-gradient-to-r from-indigo-500 to-fuchsia-500" style="width:{{ ok / items|length * 100 }}%"></div></div>
         </div>
-      {% else %}
-        <div class="empty">
-          <div class="empty-title">{{ filter_date }} 没有发布计划</div>
-          <div>任务由飞书 Bitable 创建,执行日期由"执行日期"字段决定</div>
-        </div>
-      {% endif %}
-    </div>
-  </div>
-
-  <style>
-    .date-picker input[type=date] {
-      cursor: pointer;
-    }
-
-    .timeline { display: flex; flex-direction: column; }
-
-    .tl-row {
-      display: grid;
-      grid-template-columns: 56px 16px 1fr auto;
-      align-items: center;
-      gap: var(--space-3);
-      padding: var(--space-3) 0;
-      position: relative;
-    }
-    .tl-row:not(:last-child)::after {
-      content: '';
-      position: absolute;
-      left: 64px; top: 50%; height: calc(100% + 0px);
-      width: 2px;
-      background: var(--color-border-soft);
-    }
-
-    .tl-time {
-      font-size: 15px;
-      font-weight: 500;
-      color: var(--color-text);
-      font-family: "SF Mono", Menlo, Consolas, monospace;
-      text-align: right;
-    }
-
-    .tl-bar {
-      width: 12px; height: 12px;
-      border-radius: 50%;
-      background: var(--color-border);
-      border: 2px solid var(--color-surface);
-      box-shadow: 0 0 0 2px var(--color-border);
-      position: relative;
-      z-index: 1;
-    }
-    .tl-success     .tl-bar { background: var(--color-ok);    box-shadow: 0 0 0 2px var(--color-ok-soft); }
-    .tl-running     .tl-bar { background: var(--color-info);  box-shadow: 0 0 0 2px var(--color-info-soft); }
-    .tl-failed      .tl-bar { background: var(--color-error); box-shadow: 0 0 0 2px var(--color-error-soft); }
-    .tl-interrupted .tl-bar { background: var(--color-warn);  box-shadow: 0 0 0 2px var(--color-warn-soft); }
-
-    .tl-content { min-width: 0; }
-    .tl-title { font-size: 14px; font-weight: 500; color: var(--color-text); display: block; }
-    .tl-title:hover { color: var(--color-primary); }
-    .tl-meta { font-size: 12px; color: var(--color-text-mute); margin-top: 2px; display: flex; gap: 6px; align-items: center; }
-
-    .tl-state { flex-shrink: 0; }
-  </style>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+  </aside>
+</div>
 {% endblock %}

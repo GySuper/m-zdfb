@@ -9,14 +9,15 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date as _date
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlmodel import Session, select
 
-from wxsp.api.deps import get_session, templates
+from wxsp.api.deps import get_session, get_settings, templates
+from wxsp.config import Settings
 from wxsp.models import Task, Video
 
 router = APIRouter()
@@ -28,6 +29,7 @@ def plans_page(
     date: str | None = None,
     platform: str = "tencent_channel",
     session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
     parsed = _parse_date(date) if date else _date.today()
 
@@ -57,6 +59,10 @@ def plans_page(
             "filter_date": parsed,
             "groups": groups,
             "total": sum(len(v) for v in by_account.values()),
+            "account_names": {aid: cfg.display_name for aid, cfg in settings.accounts.items()},
+            "prev_date": parsed - timedelta(days=1),
+            "next_date": parsed + timedelta(days=1),
+            "is_today": parsed == _date.today(),
         },
     )
 

@@ -43,6 +43,11 @@ ERROR_TYPE_CN: dict[str, str] = {
     "unknown": "未知错误",
     "cookie_warning": "Cookie 即将过期",
     "backlog_high": "历史积压超阈值",
+    "topic_not_found": "话题未找到",
+    "product_not_found": "商品未找到",
+    "product_selection_failed": "商品选择失败",
+    "login_required": "需重新登录",
+    "run_summary": "发布完成汇总",
 }
 
 

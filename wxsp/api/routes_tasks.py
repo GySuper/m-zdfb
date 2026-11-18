@@ -187,6 +187,7 @@ def tasks_page(
             "bucket_counts": bucket_counts,
             "backlog_mode": backlog_mode,
             "account_options": account_options,
+            "account_names": {aid: cfg.display_name for aid, cfg in settings.accounts.items()},
             "platform_options": platform_options,
             "status_options": ["pending", "running", "success", "failed", "skipped", "interrupted"],
             "flash": flash,

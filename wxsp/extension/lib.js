@@ -64,10 +64,11 @@ async function probeInPage(spec, mode) {
   const vh = document.documentElement.clientHeight || innerHeight;
   const x = rect.left + rect.width / 2;
   const y = rect.top + rect.height / 2;
-  // 被可滚动容器裁掉(如时间滚轮的一列):在容器上方滚,而不是视口中心(实测会判成被遮挡)
+  // 被可滚动容器裁掉(如时间滚轮的一列):在容器上方滚,而不是视口中心(实测会判成被遮挡)。
+  // 也认 overflow:hidden —— 拼多多 TimePicker 平时 hidden、悬停才 auto,滚轮前会先把鼠标移上去。
   for (let box = el.parentElement; box && box !== document.body; box = box.parentElement) {
     const oy = getComputedStyle(box).overflowY;
-    if (!/(auto|scroll)/.test(oy) || box.scrollHeight <= box.clientHeight + 1) continue;
+    if (!/(auto|scroll|hidden)/.test(oy) || box.scrollHeight <= box.clientHeight + 1) continue;
     const b = box.getBoundingClientRect();
     const cy = b.top + b.height / 2;
     if ((rect.top < b.top || rect.bottom > b.bottom) && cy >= 0 && cy < vh) {

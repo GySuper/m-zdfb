@@ -230,8 +230,10 @@ def test_click_scrolls_inside_a_clipping_list(tmp_path: Path) -> None:
         f'<li onclick="document.body.dataset.picked={i}">{i:02d}</li>' for i in range(60)
     )
     (tmp_path / "list.html").write_text(
-        "<!doctype html><meta charset=utf-8><body style='height:3000px'>"
-        f"<ul style='margin-top:300px;height:196px;overflow-y:auto;width:60px'>{items}</ul></body>",
+        # 同拼多多 TimePicker:平时 overflow:hidden,悬停才 overflow-y:auto
+        "<!doctype html><meta charset=utf-8><style>ul{overflow:hidden} ul:hover{overflow-y:auto}"
+        "</style><body style='height:3000px'>"
+        f"<ul style='margin-top:300px;height:196px;width:60px'>{items}</ul></body>",
         encoding="utf-8",
     )
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))

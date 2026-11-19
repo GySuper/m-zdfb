@@ -95,7 +95,7 @@ wxsp 注入插件时本来就握着这个 Chrome 的 browser 级 CDP 连接,P1 �
 |---|---|---|
 | **P0 验证 ✅** | 脚本:启动本机 Chrome → `loadUnpacked` 最小插件 → WS `hello` → 在本地测试页用 chrome.debugger 点击按钮、`DOM.setFileInputFiles` 上传文件、`captureScreenshot` | 脚本跑通打印 4 个 ok;任一失败就回来改方案,不往下做 |
 | **P1 骨架 ✅** | `managed_chrome.py`(含 CDP 客户端)、`ExtensionSession`、runner `driver` 分支、插件框架(步骤上报/错误上报/截图/可信输入/selftest 自检平台)、拼多多 `open_publish`→`verify_login`→`entry_popups`→`gate`、新 login | 单测:消息泵(步骤、error→异常映射、halted、超时);集成:selftest 真 Chrome 全通路;真机:`wxsp login` 扫码成功 → `wxsp run --task-id N --dry-run` 停在 gate 出截图 |
-| **P2 全步骤** | 上传、描述、话题、商品、封面、定时(日历切月同视频号修法,找不到日期就报错)、内容声明、风控探测、发布、成功判定 | 真机 dry-run 全流程截图核对;**经你同意后**真发 1 条;旧 patchright 路径仍可用开关切回 |
+| **P2 全步骤(代码完成,待真机 dry-run)** | 上传、描述、话题、商品、封面、定时(日历切月同视频号修法,找不到日期就报错)、内容声明、风控探测、发布、成功判定 | 真机 dry-run 全流程截图核对;**经你同意后**真发 1 条;旧 patchright 路径仍可用开关切回 |
 | **P3 收尾** | 全平台步骤上报到工作台、平台间并行锁、CLAUDE.md(§2.5、平台架构、新增平台手册)更新、打包脚本确认 `wxsp/extension` 被带上 | 单测:锁语义(同平台串行/跨平台并行/小红书独占);工作台卡片显示步骤 |
 
 测试原则沿用 CLAUDE.md:Python 侧消息处理用回放消息的单测,不 mock 浏览器;插件行为只用真 Chrome 验证(`@pytest.mark.integration`)。
@@ -116,7 +116,8 @@ wxsp 注入插件时本来就握着这个 Chrome 的 browser 级 CDP 连接,P1 �
 2. **调试提示条**:chrome.debugger 挂上后 Chrome 顶部会出现「xxx 已开始调试此浏览器」提示条。托管窗口只给自动化用,不影响运营;参考项目同样如此。
 3. ~~`Extensions.loadUnpacked` 的开关要求~~ **P0 已验证**:Chrome 157(macOS)只用 `--remote-debugging-port=0` 即可注入。
 4. **Windows**:路径、进程回收沿用 `browser.py` 已有的 Windows 处理;P2 结束后需要一台 Windows 机器验证一次。
-5. **插件更新不生效**:Chrome 对 unpacked 插件有 staging 副本,已用「先 uninstall 再 loadUnpacked」规避;manifest version 仍随改动递增。
+5. **插件更新不生效(P2 实测踩到)**:注入的插件不跨重启保留(uninstall 报找不到),但 profile 里留着上次插件的 Service Worker 注册,它 import 的模块走安装时的脚本缓存,改了代码甚至改了版本号也照跑旧代码。解决:注入前借启动空白页的会话对插件源发 `Storage.clearDataForOrigin(service_workers)`(browser 目标上会报 Internal error;`chrome.runtime.reload()` 后 MV3 后台不自动起,也不行)。只清插件自己的源,不碰平台站点数据。
+6. **测试不弹窗**:本地测试页类集成测试用 `--headless=new`(插件可用);真实平台登录/发布永远开窗。
 
 ## 6. P0 验证结论(2026-11-18,macOS · Chrome 157)
 

@@ -133,7 +133,9 @@ def _browser_ws_url(port: int) -> str:
     return url
 
 
-def _launch(user_data_dir: Path, start_url: str) -> tuple[subprocess.Popen[str], int]:
+def _launch(
+    user_data_dir: Path, start_url: str, *, headless: bool = False
+) -> tuple[subprocess.Popen[str], int]:
     argv = [
         str(_system_chrome_path()),
         f"--user-data-dir={user_data_dir.resolve()}",
@@ -149,6 +151,8 @@ def _launch(user_data_dir: Path, start_url: str) -> tuple[subprocess.Popen[str],
         "--disable-backgrounding-occluded-windows",
         start_url,
     ]
+    if headless:  # 仅本地测试页的集成测试用;真实平台登录/发布永远开窗(风控)
+        argv.insert(1, "--headless=new")
     proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     port = _wait_for_devtools_port(proc, timeout_seconds=20)
     if port is None:
@@ -159,12 +163,12 @@ def _launch(user_data_dir: Path, start_url: str) -> tuple[subprocess.Popen[str],
 
 @contextmanager
 def managed_chrome(
-    user_data_dir: Path, *, start_url: str = "about:blank"
+    user_data_dir: Path, *, start_url: str = "about:blank", headless: bool = False
 ) -> Iterator[ManagedChrome]:
     """启动账号 profile 的系统 Chrome,退出时优雅关闭(保证 cookie 落盘)。"""
     with _profile_session(user_data_dir):
         _reap_stale_profile_lock(user_data_dir)
-        proc, port = _launch(user_data_dir, start_url)
+        proc, port = _launch(user_data_dir, start_url, headless=headless)
         cdp: CdpClient | None = None
         try:
             cdp = CdpClient(_browser_ws_url(port))
@@ -262,12 +266,34 @@ class ExtensionSession:
         return html
 
 
+def _clear_stale_worker(cdp: CdpClient) -> None:
+    """清掉 profile 里上次留下的插件 Service Worker 注册。
+
+    它 import 的模块走安装时的脚本缓存,插件代码更新(哪怕改了版本号)也照跑旧代码(实测)。
+    Storage.clearDataForOrigin 在 browser 目标上报 Internal error,要借启动空白页的会话发;
+    只清插件自己这个源,不碰平台站点数据。
+    """
+    page = next(t for t in cdp.send("Target.getTargets")["targetInfos"] if t["type"] == "page")
+    sid = cdp.send("Target.attachToTarget", {"targetId": page["targetId"], "flatten": True})[
+        "sessionId"
+    ]
+    try:
+        cdp.send(
+            "Storage.clearDataForOrigin",
+            {"origin": f"chrome-extension://{EXTENSION_ID}", "storageTypes": "service_workers"},
+            session_id=sid,
+        )
+    finally:
+        cdp.send("Target.detachFromTarget", {"sessionId": sid})
+
+
 def _attach_extension(cdp: CdpClient) -> str:
     """注入插件 → 附着它的 service worker → 挂回传 binding,返回 sessionId。"""
     try:
         cdp.send("Extensions.uninstall", {"id": EXTENSION_ID})
     except CdpError:
         pass  # 首次启动未安装,正常
+    _clear_stale_worker(cdp)
     loaded = cdp.send("Extensions.loadUnpacked", {"path": str(EXTENSION_DIR)}, timeout=20)
     if loaded.get("id") != EXTENSION_ID:
         raise RuntimeError(f"插件 ID 不符:{loaded.get('id')}(manifest key 与 EXTENSION_ID 不一致)")
@@ -293,6 +319,6 @@ def _attach_extension(cdp: CdpClient) -> str:
 
 
 @contextmanager
-def extension_session(user_data_dir: Path) -> Iterator[ExtensionSession]:
-    with managed_chrome(user_data_dir) as chrome:
+def extension_session(user_data_dir: Path, *, headless: bool = False) -> Iterator[ExtensionSession]:
+    with managed_chrome(user_data_dir, headless=headless) as chrome:
         yield ExtensionSession(chrome.cdp)

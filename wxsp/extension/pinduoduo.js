@@ -65,8 +65,9 @@ async function countDropped(t, spec, before) {
   return false;
 }
 
-// 关闭进入发布页时的未知干扰弹窗:只点弹窗自身的关闭控件或按 Escape,不点任何业务按钮。
-// 只能在上传前调用,此时页面上没有自动化主动打开的业务弹窗。
+// 关闭平台主动弹出的干扰弹窗:只点弹窗自身的关闭控件或按 Escape,不点任何业务按钮。
+// 只能在自动化还没主动打开任何业务弹窗时调用:进入发布页后(entry_popups)、
+// 上传完成后(upload_popups,实测会弹「立即推广 冲顶交易额」盖住描述框)。
 export async function entryPopups(t) {
   const MAX_POPUPS = 5;
   let quiet = 0;
@@ -234,6 +235,7 @@ export const PINDUODUO = {
     ["verify_login", verifyLogin],
     ["entry_popups", entryPopups],
     ["upload", upload],
+    ["upload_popups", entryPopups],
     ["desc", desc],
     ["tags", tags],
     ["products", products],

@@ -85,6 +85,7 @@ _STEP_CN: dict[str, str] = {
     "entry_popups": "清理入口弹窗",
     "wait_upload_area": "等待上传区",
     "upload": "上传视频",
+    "upload_popups": "清理上传后弹窗",
     "title": "填标题",
     "desc": "填描述",
     "tags": "加标签",

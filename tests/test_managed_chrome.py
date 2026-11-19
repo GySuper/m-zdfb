@@ -122,6 +122,12 @@ POPUP_PAGES = {
         document.querySelector('[role=dialog]')?.remove(); });</script>""",
     # 关不掉:必须报错,绝不能去点业务按钮
     "stuck": """<div role=dialog style="width:300px;height:100px">A <button>立即参与</button></div>""",
+    # 2026-11-18 真机:上传完成后弹「立即推广 冲顶交易额」(beast-core modal + 关闭图标 + 去推广)
+    "promo_modal": """<div data-testid="beast-core-modal" class="MDL_outerWrapper_5-180-0 MDL_modal_5-180-0"
+        style="width:400px;height:300px">
+      <svg data-testid="beast-core-icon-close" class="goods_popularize_pop_up_closeBtn__6KE37"
+        width="24" height="24" onclick="this.parentNode.remove()"><rect width="24" height="24"/></svg>
+      <button onclick="document.body.dataset.promoted = 1">去推广</button></div>""",
     # 真实商品推广浮层:无 dialog 容器,只有全局可见的 beast close 图标
     "promo": """<div style="width:300px;height:100px">推广</div>
       <svg data-testid="beast-core-icon-close" width="24" height="24"
@@ -153,16 +159,18 @@ def _run_popups(tmp_path: Path, name: str) -> dict[str, object]:
                         msg["dialogs_left"] = left.count('role="dialog"') + left.count(
                             "beast-core-icon-close"
                         )
+                        msg["promoted"] = "data-promoted" in left
                     return msg
     finally:
         server.shutdown()
 
 
-@pytest.mark.parametrize("name", ["stacked", "escape", "promo"])
+@pytest.mark.parametrize("name", ["stacked", "escape", "promo", "promo_modal"])
 def test_entry_popups_are_closed_safely(tmp_path: Path, name: str) -> None:
     msg = _run_popups(tmp_path, name)
     assert msg["type"] == "gate", msg
     assert msg["dialogs_left"] == 0
+    assert not msg["promoted"]  # 只点关闭,绝不点「去推广」等业务按钮
 
 
 def test_entry_popup_that_cannot_be_closed_fails_closed(tmp_path: Path) -> None:

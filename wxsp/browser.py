@@ -642,6 +642,10 @@ def browser_context(
     _skip_cleanup: bool = False,
 ) -> Iterator[Page]:
     """打开账号浏览器并持有 profile 级会话锁。"""
+    if get_meta(platform).driver == "extension":
+        # 插件版平台的 profile 属于系统 Chrome:patchright 的旧版 Chromium 解不开它的 cookie
+        # (显示未登录),还会写入 Chrome 读不了的 cookie,把真实登录态弄坏(2026-11-19 实测)
+        raise RuntimeError(f"{platform} 的账号 profile 属于系统 Chrome,不能用 patchright 打开")
     with _profile_session(user_data_dir):
         with _browser_context_impl(
             user_data_dir,

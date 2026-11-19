@@ -202,6 +202,20 @@ def wait_logged_in_url(
     return False
 
 
+def open_for_manual_use(user_data_dir: Path, *, start_url: str, max_seconds: float) -> None:
+    """开系统 Chrome 停在 start_url 供人手动操作(不注入插件、不做任何自动动作);
+    窗口全关(或到时)就退出并优雅关闭,保证 cookie 落盘。"""
+    with managed_chrome(user_data_dir, start_url=start_url) as chrome:
+        deadline = time.monotonic() + max_seconds
+        while time.monotonic() < deadline:
+            time.sleep(3)
+            try:
+                if not chrome.page_urls():
+                    return  # 用户关掉了所有窗口(macOS 上 Chrome 进程还在,但没有页面了)
+            except CdpError:
+                return  # Chrome 已退出
+
+
 class ExtensionSession:
     """插件会话。鸭子类型兼容 runner 截图/存 HTML 用到的 `screenshot()` / `content()`。"""
 

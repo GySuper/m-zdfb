@@ -1,6 +1,7 @@
 // 插件自检平台:在本地测试页上走一遍 打开 → 可信点击 → 输入 → 上传 → gate → 发布,
 // 供集成测试验证插件通路(不碰任何真实平台)。
 import { StepError } from "./lib.js";
+import { entryPopups } from "./pinduoduo.js";
 
 export const SELFTEST = {
   pre: [
@@ -21,4 +22,13 @@ export const SELFTEST = {
       },
     ],
   ],
+};
+
+// 拼多多入口弹窗处理在本地夹具页上回归(真实事故场景见 tests/test_managed_chrome.py)
+export const PDD_POPUPS = {
+  pre: [
+    ["open", (t) => t.open(t.job.url)],
+    ["entry_popups", entryPopups],
+  ],
+  post: [],
 };

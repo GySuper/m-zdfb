@@ -15,7 +15,9 @@ export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const rand = (lo, hi) => lo + Math.random() * (hi - lo);
 
 // 在页面内执行(chrome.scripting 序列化函数,必须自包含)。
-// spec: { sel, within?, text?, exact?, pick?: "first" | "last" }
+// spec: { sel, within?, withinIndex?, text?, exact?, pick?: "first" | "last" }
+// within 默认取最后一个可见容器(最上层弹窗);withinIndex 取第 N 个(如时/分/秒三列)。
+// 按 text 过滤时只留最内层匹配(同 Playwright text=),避免点到外层大容器。
 // mode "count" 返回可见匹配数;"probe" 返回 {x, y} / {need_scroll, ax, ay} / {error}。
 async function probeInPage(spec, mode) {
   const visible = (e) => {
@@ -26,8 +28,8 @@ async function probeInPage(spec, mode) {
   let root = document;
   if (spec.within) {
     const boxes = [...document.querySelectorAll(spec.within)].filter(visible);
-    if (!boxes.length) return mode === "count" ? 0 : { error: "所在弹窗未出现" };
-    root = boxes[boxes.length - 1];
+    root = spec.withinIndex != null ? boxes[spec.withinIndex] : boxes[boxes.length - 1];
+    if (!root) return mode === "count" ? 0 : { error: "所在弹窗未出现" };
   }
   let els = [...root.querySelectorAll(spec.sel)].filter(visible);
   if (spec.text != null) {
@@ -35,6 +37,7 @@ async function probeInPage(spec, mode) {
       const t = (e.textContent || "").trim();
       return spec.exact ? t === spec.text : t.includes(spec.text);
     });
+    els = els.filter((e) => !els.some((o) => o !== e && e.contains(o)));
   }
   if (mode === "count") return els.length;
   const el = spec.pick === "last" ? els[els.length - 1] : els[0];
@@ -164,8 +167,9 @@ export class Task {
     }
   }
 
-  async key(key, code = key, windowsVirtualKeyCode = 0) {
-    await this.cdp("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode });
+  // text 非空时按键会输入字符(如空格)
+  async key(key, code = key, windowsVirtualKeyCode = 0, text = undefined) {
+    await this.cdp("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode, text });
     await sleep(rand(40, 80));
     await this.cdp("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode });
   }
@@ -178,6 +182,15 @@ export class Task {
       i += n;
       await sleep(rand(60, 180));
     }
+  }
+
+  hasText(text) {
+    return this.page((t) => document.body.innerText.includes(t), text);
+  }
+
+  // 输入框/只读框的当前值(只读 DOM)
+  inputValue(selector) {
+    return this.page((sel) => document.querySelector(sel)?.value ?? null, selector);
   }
 
   async setFiles(selector, paths) {

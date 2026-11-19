@@ -5,9 +5,9 @@
 
 import { StepError, Task } from "./lib.js";
 import { PINDUODUO } from "./pinduoduo.js";
-import { SELFTEST } from "./selftest.js";
+import { PDD_POPUPS, SELFTEST } from "./selftest.js";
 
-const PLATFORMS = { pinduoduo: PINDUODUO, selftest: SELFTEST };
+const PLATFORMS = { pinduoduo: PINDUODUO, selftest: SELFTEST, selftest_pdd_popups: PDD_POPUPS };
 let current = null;
 
 const emit = (type, data = {}) => globalThis.wxspEmit(JSON.stringify({ type, ...data }));

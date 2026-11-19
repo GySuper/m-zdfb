@@ -205,6 +205,11 @@ class AccountConfig(BaseModel):
     user_data_dir: Path
     video_search_root: Path
     cover_search_root: Path
+    # 账密登录(仅 PlatformMeta.supports_password_login 的平台,目前拼多多):登录过期时
+    # 插件用账号密码自动登录。密码明文存在本平台配置文件里(用户 2026-11-18 选择),界面掩码。
+    password_login: bool = False
+    login_username: str = ""
+    login_password: str = ""
 
     @model_validator(mode="after")
     def _resolve_relative_paths(self) -> AccountConfig:

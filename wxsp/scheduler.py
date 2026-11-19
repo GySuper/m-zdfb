@@ -394,7 +394,9 @@ def run_today_pending(
             # unknown = login 时浏览器异常(用户关窗 / 启动崩了),user_data_dir 里没拿到 cookie。
             # 这俩状态下开 publisher 必然 verify_logged_in 失败,且会写一条误导性"登录态失效"
             # 告警(实际从来就没登录过)。预检在这,task 直接 skip,提醒运营先扫码。
-            if acc.cookie_status == "expired":
+            if account_cfg.password_login:
+                pass  # 开了账密登录:登录失效也照跑,插件会自动用账号密码登录
+            elif acc.cookie_status == "expired":
                 unlogged_accounts[acc_id] = "登录态已失效,请重新扫码"
             elif acc.cookie_status == "unknown":
                 unlogged_accounts[acc_id] = "未完成扫码登录(状态 unknown),请到账号页扫码"

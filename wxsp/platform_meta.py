@@ -46,6 +46,8 @@ class PlatformMeta:
     小红书 True(实测 patchright patched chromium 一天即触发风控,真实 Chrome 是 RPA 验证过的路线)。
     其余平台 False(未被封,不动)。"""
     driver: str = "patchright"
+    supports_password_login: bool = False
+    """账号可开「账密登录」:登录过期时插件用账号密码自动登录(配置页账号弹窗出现开关)。拼多多 True。"""
     """发布/登录/登录态检查用哪种浏览器:"patchright"(browser.browser_context)或
     "extension"(managed_chrome:wxsp 托管系统 Chrome + 自动注入发布插件)。拼多多 extension。"""
 
@@ -169,6 +171,7 @@ REGISTRY: dict[str, PlatformMeta] = {
         needs_fingerprint=False,  # 跟抖音/快手/淘宝一致(用户确认)
         has_title=False,  # 无独立标题框(同快手)
         driver="extension",  # 托管 Chrome + 插件发布(2026-11 改造)
+        supports_password_login=True,
     ),
 }
 

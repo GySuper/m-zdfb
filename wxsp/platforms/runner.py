@@ -349,6 +349,14 @@ def _finalize(
                 account_now.paused_until = datetime.now() + timedelta(hours=24)
                 logger.warning(f"风控触发,账号 {account_id} 暂停 24h")
 
+        # 账密自动登录成功过 → 登录态回到 ok(哪怕后面步骤失败,登录本身是成功的)
+        if result.relogged_in:
+            account_now = session.get(Account, account_id)
+            if account_now is not None:
+                account_now.cookie_status = "ok"
+                account_now.cookie_last_active_at = datetime.now()
+                logger.info(f"账号 {account_id} 已用账号密码自动登录,cookie_status → ok")
+
         # 登录态失效 → 回写 Account.cookie_status=expired(UI + scheduler pre-flight 用)
         if result.error_type == "cookie_expired":
             account_now = session.get(Account, account_id)

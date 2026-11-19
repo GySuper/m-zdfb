@@ -104,6 +104,7 @@ def client(locked: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ite
     from wxsp.api.app import create_app
 
     monkeypatch.setenv("WXSP_DB_PATH", str(tmp_path / "db.sqlite"))  # 不碰仓库里的真实库
+    init_db(get_engine(tmp_path / "db.sqlite"))
     # 不用 with:不跑 lifespan(它会读仓库里的真实平台配置注册 cron),只测中间件和页面
     yield TestClient(create_app())
 

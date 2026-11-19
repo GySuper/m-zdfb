@@ -34,6 +34,7 @@ class PublishResult:
     error_type: str | None = None
     error_msg: str | None = None
     screenshots: list[str] = field(default_factory=list)
+    relogged_in: bool = False  # 本次用账密自动登录成功过(runner 收尾把账号登录态写回 ok)
 
 
 @dataclass

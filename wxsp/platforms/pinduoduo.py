@@ -57,7 +57,10 @@ def _pump(
         except TimeoutError as err:
             raise ElementNotFound(f"插件 {timeout:.0f}s 无进展") from err
         kind = msg.get("type")
-        if kind == "step":
+        if kind == "relogin":
+            ctx.result.relogged_in = True
+            logger.info(f"[pinduoduo] task={ctx.task_id} 登录已过期,已用账号密码自动登录")
+        elif kind == "step":
             ctx.last_step = msg["step"]
             logger.info(f"[pinduoduo] task={ctx.task_id} 步骤 {ctx.last_step}")
         elif kind == "error":
@@ -76,6 +79,13 @@ def _product_ids(bundle: TaskBundle, ctx: PublishContext) -> list[str]:
         )
         return []
     return [str(p) for p in parsed if p] if isinstance(parsed, list) else []
+
+
+def _login_credentials(ctx: PublishContext, account_id: str) -> dict[str, str] | None:
+    cfg = ctx.settings.accounts.get(account_id)
+    if cfg is None or not cfg.password_login or not cfg.login_username or not cfg.login_password:
+        return None
+    return {"username": cfg.login_username, "password": cfg.login_password}
 
 
 def _pre_publish(
@@ -107,6 +117,8 @@ def _pre_publish(
             "declaration": bundle.declaration,
             "detail_float": bundle.detail_float,  # 商详悬浮窗;None = 保持页面默认
             "store_feed": bundle.store_feed,  # 同步店铺动态;None = 保持页面默认
+            # 账密登录:登录过期时插件自动用账号密码登录;遇滑块/短信验证按登录失效处理
+            "login": _login_credentials(ctx, bundle.account_id),
             # APC 拒绝:插件停在上传前,下面装"等待上传区域超时"故障(对齐其他平台)
             "halt_before": None if apc_passed else "upload",
         }

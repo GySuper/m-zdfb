@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from wxsp import managed_chrome
-from wxsp.managed_chrome import ExtensionSession, extension_session
+from wxsp.managed_chrome import CdpError, ExtensionSession, extension_session
 
 pytestmark = [
     pytest.mark.integration,
@@ -209,3 +209,40 @@ def test_relaunch_on_same_profile_runs_current_extension_code(
         with extension_session(tmp_path / "profile", headless=True) as session:
             session.start_job({"platform": "selftest", "halt_before": step, "step_pause": [0, 0]})
             assert session.next_message(timeout=10) == {"type": "halted", "step": step}
+
+
+def test_debug_channel_reads_page_and_refuses_publish(tmp_path: Path, page_url: str) -> None:
+    with extension_session(tmp_path / "profile", headless=True) as session:
+        session.call("debug.open", {"url": page_url, "step_pause": [0, 0]})
+        assert session.call("debug.eval", "document.querySelector('#btn').innerText") == "点我"
+        assert session.call("debug.click", {"sel": "#btn"}) == "点我"
+        with pytest.raises(CdpError, match="禁止点击「发布」"):
+            session.call("debug.click", {"sel": "button", "text": "发布", "exact": True})
+        with pytest.raises(CdpError, match="禁止点击「发布」"):  # 不给 text 也会在命中点拦下
+            session.call("debug.click", {"sel": "button", "pick": "last"})
+        state = session.call("debug.eval", "document.getElementById('log').textContent")
+    assert "published" not in state
+
+
+def test_click_scrolls_inside_a_clipping_list(tmp_path: Path) -> None:
+    """时间滚轮式的列:目标在列里被裁掉时,要在列上滚动再点(2026-11-18 真机踩到)。"""
+    items = "".join(
+        f'<li onclick="document.body.dataset.picked={i}">{i:02d}</li>' for i in range(60)
+    )
+    (tmp_path / "list.html").write_text(
+        "<!doctype html><meta charset=utf-8><body style='height:3000px'>"
+        f"<ul style='margin-top:300px;height:196px;overflow-y:auto;width:60px'>{items}</ul></body>",
+        encoding="utf-8",
+    )
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with extension_session(tmp_path / "profile", headless=True) as session:
+            session.call(
+                "debug.open", {"url": f"http://127.0.0.1:{server.server_address[1]}/list.html"}
+            )
+            session.call("debug.click", {"sel": "li", "text": "45", "exact": True})
+            assert session.call("debug.eval", "document.body.dataset.picked") == "45"
+    finally:
+        server.shutdown()

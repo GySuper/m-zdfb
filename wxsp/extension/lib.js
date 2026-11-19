@@ -64,6 +64,17 @@ async function probeInPage(spec, mode) {
   const vh = document.documentElement.clientHeight || innerHeight;
   const x = rect.left + rect.width / 2;
   const y = rect.top + rect.height / 2;
+  // 被可滚动容器裁掉(如时间滚轮的一列):在容器上方滚,而不是视口中心(实测会判成被遮挡)
+  for (let box = el.parentElement; box && box !== document.body; box = box.parentElement) {
+    const oy = getComputedStyle(box).overflowY;
+    if (!/(auto|scroll)/.test(oy) || box.scrollHeight <= box.clientHeight + 1) continue;
+    const b = box.getBoundingClientRect();
+    const cy = b.top + b.height / 2;
+    if ((rect.top < b.top || rect.bottom > b.bottom) && cy >= 0 && cy < vh) {
+      return { need_scroll: y - cy, ax: Math.max(1, Math.min(vw - 1, b.left + b.width / 2)), ay: cy };
+    }
+    break;
+  }
   if (x < 0 || x >= vw) return { error: "在视口外" };
   if (y < 0 || y >= vh) return { need_scroll: y - vh / 2, ax: Math.max(30, Math.min(vw - 30, x)), ay: vh / 2 };
   const hit = document.elementFromPoint(x, y);

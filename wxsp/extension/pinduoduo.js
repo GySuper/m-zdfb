@@ -33,6 +33,8 @@ const COVER_FILE_INPUT = 'input[type="file"][accept*=".jpg"]';
 const SCHEDULE_DATE_INPUT = 'input[data-testid="beast-core-datePicker-htmlInput"]'; // YYYY-MM-DD HH:MM:SS
 const TIME_PICKER = '[data-testid="beast-core-timePicker-input"]';
 const TIME_COLUMN = 'ul:has(> li[class*="cIL_item"])';
+const CALENDAR_HEADER = '[data-testid="beast-core-datePicker-dropdown-header"]';
+const MODAL = '[data-testid="beast-core-modal"]';
 const DATE_CELL = '[role="date-cell"]:not([class*="disabled"]):not([class*="outOfMonth"])';
 const DECLARATION_TRIGGER = 'input[data-testid="beast-core-select-htmlInput"]';
 const DECLARATIONS = ["内容无需标注", "含AI生成内容", "含虚构演绎内容", "内容含营销信息", "内容为转载", "个人观点，仅供参考"];
@@ -183,13 +185,36 @@ async function cover(t) {
       throw new Error("封面上传框未出现");
     }
     await t.setFiles(COVER_FILE_INPUT, [t.job.cover_path]);
-    await wait(1500, 2500);
-    if (!(await t.waitVisible({ sel: "button", text: "确定" }, 10_000))) throw new Error("封面确定按钮未出现");
-    await t.click({ sel: "button", text: "确定", what: "封面确定" });
+    // 「封面上传中」期间确定按钮是禁用的(实测点了无效),等传完
+    await wait(1000, 1500);
+    if (!(await t.until(async () => !(await t.hasText("封面上传中")), 30_000, 500))) throw new Error("封面上传超时");
+    await wait(500, 1000);
+    // 实测传完弹窗有时自己关;还开着才点确定
+    if ((await t.count({ sel: MODAL })) > 0) {
+      await t.click({ within: MODAL, sel: "button", text: "确定", exact: true, what: "封面确定" });
+    }
+    if (!(await t.until(async () => (await t.count({ sel: MODAL })) === 0, 10_000))) throw new Error("封面弹窗没有关闭");
     console.log("自定义封面设置完成");
   } catch (err) {
     console.warn(`封面设置失败(降级为平台默认封面): ${err.message}`);
   }
+}
+
+// 日历翻到目标年月:头部是年份下拉(值如「2026年」)+ 月份文字(如「12月」)+ 左右箭头
+async function gotoMonth(t, year, month) {
+  for (let i = 0; i <= 12; i++) {
+    const ym = await t.page((h) => {
+      const head = document.querySelector(h);
+      return head ? [parseInt(head.querySelector("input")?.value, 10), parseInt(head.querySelector('[class*="RPR_dateText"]')?.textContent, 10)] : null;
+    }, CALENDAR_HEADER);
+    if (!ym || Number.isNaN(ym[0]) || Number.isNaN(ym[1])) throw new StepError("element_not_found", "日历头部年月未找到");
+    const diff = (year - ym[0]) * 12 + (month - ym[1]);
+    if (diff === 0) return;
+    const dir = diff > 0 ? "right" : "left";
+    await t.click({ sel: `${CALENDAR_HEADER} [data-testid="beast-core-icon-${dir}"]`, what: diff > 0 ? "日历下个月" : "日历上个月" });
+    await wait(400, 800);
+  }
+  throw new StepError("element_not_found", `日历切不到 ${year}年${month}月`);
 }
 
 // 定时发布:选 radio → 日历点日期格子 → 时间滚轮三列各点目标项 → 确认 → 读回日期框逐字核对
@@ -202,6 +227,7 @@ async function schedule(t) {
   if (!(await t.waitVisible({ sel: SCHEDULE_DATE_INPUT }, 10_000))) throw new StepError("element_not_found", "定时日期框未出现");
   await t.click({ sel: SCHEDULE_DATE_INPUT, what: "定时日期框" });
   await wait(1500, 2000);
+  await gotoMonth(t, Number(target.slice(0, 4)), Number(target.slice(5, 7)));
   await t.click({ sel: DATE_CELL, text: day, exact: true, what: `日历 ${day} 号` });
   await wait(500, 1000);
   await t.click({ sel: TIME_PICKER, what: "时间选择框" });
@@ -214,7 +240,7 @@ async function schedule(t) {
   await wait(1500, 2500);
   const actual = await t.inputValue(SCHEDULE_DATE_INPUT);
   if (actual !== target) {
-    throw new StepError("element_not_found", `定时时间没设对:页面 ${actual},应为 ${target}(日历可能需切月)`);
+    throw new StepError("element_not_found", `定时时间没设对:页面 ${actual},应为 ${target}`);
   }
 }
 

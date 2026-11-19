@@ -3,6 +3,7 @@
 //       / done(发布成功)/ error(kind + step + message)。
 // dry-run 不在插件里判断:到 gate 一律停下,只有 wxsp 发 proceed("publish") 才点发布。
 
+import { debugApi } from "./debug.js";
 import { StepError, Task } from "./lib.js";
 import { PINDUODUO } from "./pinduoduo.js";
 import { PDD_POPUPS, SELFTEST } from "./selftest.js";
@@ -61,4 +62,11 @@ globalThis.wxsp = {
   html() {
     return current.html();
   },
+  debug: debugApi(
+    () => current,
+    (t) => {
+      current = t;
+    },
+    PLATFORMS,
+  ),
 };

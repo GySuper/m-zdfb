@@ -64,6 +64,11 @@ class TaskBundle:
     store_feed: str | None = None  # 拼多多:同步店铺动态(None = 保持页面默认)
 
 
+RUNNING_STEPS: dict[int, str] = {}
+"""进程内:运行中 task_id → 当前步骤。PublishContext.last_step 一赋值就同步,工作台据此显示
+「当前步骤」;runner 跑完清掉。独立 CLI 进程里跑的任务不在这里(工作台只显示「发布中」)。"""
+
+
 @dataclass
 class PublishContext:
     """一次发布运行期的可变上下文,跨编排器与平台回调共享。"""
@@ -76,6 +81,11 @@ class PublishContext:
     tmp_root: Path
     settings: Settings
     last_step: str = "init"
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        super().__setattr__(name, value)
+        if name == "last_step":
+            RUNNING_STEPS[self.task_id] = value
 
 
 @dataclass

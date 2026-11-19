@@ -40,6 +40,7 @@ from wxsp.nas import cleanup_tmp, stage_to_tmp
 from wxsp.notify import NotifyEvent, error_type_cn, notify, step_cn
 from wxsp.platform_meta import get_meta
 from wxsp.platforms.base import (
+    RUNNING_STEPS,
     AlreadyClaimed,
     PlatformSpec,
     PublishContext,
@@ -277,7 +278,10 @@ def run_publish(
         return result
     finally:
         unblock_user_input()  # 任何路径(成功/失败/中断)都恢复输入,防锁死
-        _finalize(engine, settings, ctx, bundle, spec)
+        try:
+            _finalize(engine, settings, ctx, bundle, spec)
+        finally:
+            RUNNING_STEPS.pop(task_id, None)
 
 
 def _finalize(

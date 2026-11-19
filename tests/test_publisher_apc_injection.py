@@ -109,9 +109,16 @@ def test_publish_apc_pass_runs_full_pipeline(
 
     monkeypatch.setattr("wxsp.apc.check_pass", lambda: True)
 
+    from wxsp.platforms.base import RUNNING_STEPS
+
     upload_calls: list[bool] = []
+    seen_steps: list[str | None] = []
     overrides = _noop_steps(
-        upload_video=lambda *a, **kw: upload_calls.append(True),
+        # 上传进行中,工作台读到的当前步骤应是 upload
+        upload_video=lambda *a, **kw: (
+            upload_calls.append(True),
+            seen_steps.append(RUNNING_STEPS.get(task_id)),
+        ),
         extract_remote_video_id_and_url=lambda page: ("rid", "https://channels/x"),
     )
 
@@ -126,6 +133,8 @@ def test_publish_apc_pass_runs_full_pipeline(
 
     assert result.ok is True, f"err={result.error_type} {result.error_msg}"
     assert upload_calls == [True]
+    assert seen_steps == ["upload"]
+    assert task_id not in RUNNING_STEPS  # 跑完清掉,工作台不再显示
 
 
 def test_publish_apc_deny_injects_element_not_found(

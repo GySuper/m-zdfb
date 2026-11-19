@@ -9,12 +9,14 @@ import functools
 import http.server
 import json
 import os
+import shutil
 import threading
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from wxsp import managed_chrome
 from wxsp.managed_chrome import ExtensionSession, extension_session
 
 pytestmark = [
@@ -178,3 +180,22 @@ def test_entry_popup_that_cannot_be_closed_fails_closed(tmp_path: Path) -> None:
     assert msg["type"] == "error"
     assert msg["kind"] == "element_not_found"
     assert "无法安全关闭" in str(msg["message"])
+
+
+def test_relaunch_on_same_profile_runs_current_extension_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """profile 里留着上次的插件后台和脚本缓存;插件代码一改,下次启动必须跑新代码。"""
+    ext = tmp_path / "extension"
+    shutil.copytree(managed_chrome.EXTENSION_DIR, ext)
+    monkeypatch.setattr(managed_chrome, "EXTENSION_DIR", ext)
+    selftest = ext / "selftest.js"
+    prev = "open"
+    for step in ("open", "open_v2", "open_v3"):
+        if step != prev:  # 模拟插件升级:改步骤名
+            code = selftest.read_text(encoding="utf-8")
+            selftest.write_text(code.replace(f'["{prev}"', f'["{step}"', 1), encoding="utf-8")
+            prev = step
+        with extension_session(tmp_path / "profile", headless=True) as session:
+            session.start_job({"platform": "selftest", "halt_before": step, "step_pause": [0, 0]})
+            assert session.next_message(timeout=10) == {"type": "halted", "step": step}

@@ -297,25 +297,36 @@ def _attach_extension(cdp: CdpClient) -> str:
     loaded = cdp.send("Extensions.loadUnpacked", {"path": str(EXTENSION_DIR)}, timeout=20)
     if loaded.get("id") != EXTENSION_ID:
         raise RuntimeError(f"插件 ID 不符:{loaded.get('id')}(manifest key 与 EXTENSION_ID 不一致)")
+    # 清缓存后,先冒出来的可能是正在销毁的旧后台,或新后台还没跑完顶层脚本:
+    # 附着后确认 wxsp 已挂上才算就绪,否则断开重找。
     prefix = f"chrome-extension://{EXTENSION_ID}/"
     deadline = time.monotonic() + 10
-    while True:
-        infos = cdp.send("Target.getTargets")["targetInfos"]
-        sw = next(
-            (t for t in infos if t["type"] == "service_worker" and t["url"].startswith(prefix)),
-            None,
-        )
-        if sw is not None:
-            break
-        if time.monotonic() > deadline:
-            raise RuntimeError("插件后台 10s 内未启动")
+    while time.monotonic() < deadline:
+        for t in cdp.send("Target.getTargets")["targetInfos"]:
+            if t["type"] != "service_worker" or not t["url"].startswith(prefix):
+                continue
+            sid: str = cdp.send(
+                "Target.attachToTarget", {"targetId": t["targetId"], "flatten": True}
+            )["sessionId"]
+            try:
+                ready = cdp.send(
+                    "Runtime.evaluate",
+                    {"expression": "typeof globalThis.wxsp", "returnByValue": True},
+                    session_id=sid,
+                    timeout=3,
+                )
+            except CdpError:
+                ready = {}
+            if ready.get("result", {}).get("value") == "object":
+                cdp.send("Runtime.enable", session_id=sid)
+                cdp.send("Runtime.addBinding", {"name": _BINDING}, session_id=sid)
+                return sid
+            try:
+                cdp.send("Target.detachFromTarget", {"sessionId": sid})
+            except CdpError:
+                pass
         time.sleep(0.2)
-    sid: str = cdp.send("Target.attachToTarget", {"targetId": sw["targetId"], "flatten": True})[
-        "sessionId"
-    ]
-    cdp.send("Runtime.enable", session_id=sid)
-    cdp.send("Runtime.addBinding", {"name": _BINDING}, session_id=sid)
-    return sid
+    raise RuntimeError("插件后台 10s 内未就绪")
 
 
 @contextmanager

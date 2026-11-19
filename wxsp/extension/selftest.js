@@ -1,7 +1,7 @@
 // 插件自检平台:在本地测试页上走一遍 打开 → 可信点击 → 输入 → 上传 → gate → 发布,
 // 供集成测试验证插件通路(不碰任何真实平台)。
 import { StepError } from "./lib.js";
-import { entryPopups, passwordLogin, upload } from "./pinduoduo.js";
+import { entryPopups, guard, passwordLogin, upload } from "./pinduoduo.js";
 
 export const SELFTEST = {
   pre: [
@@ -47,6 +47,17 @@ export const PDD_UPLOAD = {
   pre: [
     ["open", (t) => t.open(t.job.url)],
     ["upload", upload],
+  ],
+  post: [],
+};
+
+// 拼多多步骤间保护在仿真页上回归:上一步之后冒出的弹窗,下一步开始前要被清掉
+export const PDD_GUARD = {
+  guard,
+  pre: [
+    ["open", (t) => t.open(t.job.url)],
+    ["first", (t) => t.click({ sel: "#a", what: "按钮 A" })],
+    ["second", (t) => t.click({ sel: "#b", what: "按钮 B", timeoutMs: 3000 })],
   ],
   post: [],
 };

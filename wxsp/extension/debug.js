@@ -79,6 +79,7 @@ export function debugApi(getCurrent, setCurrent, platforms) {
       return text;
     },
     type: (text) => cur().type(text),
+    fill: (spec, text) => cur().fill(spec, text),
     key: (key, code, vk, text) => cur().key(key, code, vk, text),
     setFiles: (selector, paths) => cur().setFiles(selector, paths),
     count: (spec) => cur().count(spec),

@@ -89,6 +89,11 @@ export class Task {
     this.tabId = null;
     this.remoteUrl = null;
     this.release = null;
+    this.aborted = false; // 被新任务顶替(重跑)后置 true:所有等待立即退出,消息不再上报
+  }
+
+  checkAborted() {
+    if (this.aborted) throw new StepError("aborted", "任务已被新一轮重跑取代");
   }
 
   async open(url) {
@@ -123,6 +128,7 @@ export class Task {
   async until(check, timeoutMs, intervalMs = 250) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+      this.checkAborted();
       try {
         const v = await check();
         if (v) return v;
@@ -147,23 +153,62 @@ export class Task {
     return sleep(rand(lo, hi) * 1000);
   }
 
+  // 点击:元素没出现 / 被遮挡(提示、浮层)/ 页面跳转中都会在 timeoutMs(默认 10s)内持续重试;
+  // 视口外先滚入(每次最多 650px,最多 8 次 ≈ 5000px 长表单)。
   async click(spec) {
     const what = spec.what || spec.sel;
-    // 每次最多滚 650px,8 次覆盖约 5000px 的长表单
-    for (let i = 0; i < 8; i++) {
-      const p = await this.page(probeInPage, spec, "probe");
+    const timeoutMs = spec.timeoutMs ?? 10_000;
+    const deadline = Date.now() + timeoutMs;
+    let scrolls = 0;
+    for (;;) {
+      this.checkAborted();
+      let p;
+      try {
+        p = await this.page(probeInPage, spec, "probe");
+      } catch {
+        p = { error: "所在页面加载中" };
+      }
       if (p && typeof p.x === "number") {
         await this.clickAt(p.x, p.y);
         return;
       }
-      if (p && typeof p.need_scroll === "number") {
+      if (p && typeof p.need_scroll === "number" && scrolls < 8) {
+        scrolls++;
         await this.wheelAt(p.ax, p.ay, Math.max(-650, Math.min(650, p.need_scroll)));
         await sleep(rand(250, 450));
         continue;
       }
-      throw new StepError("element_not_found", `${what}${p?.error || "未找到"}`);
+      if (Date.now() > deadline) {
+        const why = p?.error || (typeof p?.need_scroll === "number" ? "滚动后仍不在视口" : "未找到");
+        throw new StepError("element_not_found", `${what}${why}(等了 ${Math.round(timeoutMs / 1000)}s)`);
+      }
+      await sleep(500);
     }
-    throw new StepError("element_not_found", `${what}滚动后仍不在视口`);
+  }
+
+  // 点输入框 → 输入 → 核对页面里的值;没生效(被页面吞掉 / 残留旧值)就全选删掉重输一次。
+  // 核对只比较不回显:报错里不带输入内容(可能是密码)。
+  async fill(spec, text) {
+    const norm = (v) => String(v ?? "").replace(/\u00a0/g, " ").trim();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await this.click(spec);
+      if (attempt > 0) {
+        await this.cdp("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", commands: ["selectAll"] });
+        await this.cdp("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA" });
+        await this.key("Backspace", "Backspace", 8);
+      }
+      await this.type(text);
+      await sleep(rand(200, 400));
+      const value = await this.page(
+        (sel) => {
+          const e = document.querySelector(sel);
+          return e ? (e.value ?? e.innerText) : null;
+        },
+        spec.sel,
+      );
+      if (norm(value) === norm(text) || norm(value).includes(norm(text))) return;
+    }
+    throw new StepError("element_not_found", `${spec.what || spec.sel}输入没有生效(已重输一次)`);
   }
 
   async clickAt(x, y) {

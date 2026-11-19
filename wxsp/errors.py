@@ -42,6 +42,10 @@ class ProductNotFound(PublisherError):
     """飞书填的商品ID在弹窗搜索无结果。"""
 
 
+class PublishUnconfirmed(PublisherError):
+    """已点发布,但在限定时间内没确认成功:可能已经发出,不能自动重试(会重复发布)。"""
+
+
 class ProductSelectionFailed(PublisherError):
     """商品已搜索到,但淘宝受控复选框未能选中。"""
 
@@ -67,6 +71,7 @@ _KIND_BY_TYPE: dict[type[Exception], str] = {
     NetworkError: "network",
     VideoInvalid: "video_invalid",
     ProductNotFound: "product_not_found",
+    PublishUnconfirmed: "publish_unconfirmed",
     ProductSelectionFailed: "product_selection_failed",
     TopicNotFound: "topic_not_found",
     LoginRequired: "login_required",

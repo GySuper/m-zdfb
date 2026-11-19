@@ -795,6 +795,8 @@ tools/tailwindcss -c tailwind.config.js -i wxsp/static/app.src.css -o wxsp/stati
 ## 错误分类与重试策略
 
 > ⚠️ **现状**:`retry.py` 的 `retry_on` 装饰器已实现但**尚未接线到发布步骤**。下表 transient 错误(`network` / `upload_failed` / `nas_unreachable` / `element_not_found`)的"自动重试次数"为**目标设计,待实现**;当前这些错误跑一次失败即按下表的 halt 语义处理(不自动重试)。**已生效**的是 `cookie_expired` / `risk_control` 的"不重试 + 账号级 halt"与 `element_not_found` / `nas_unreachable` 的"全局 halt"。
+>
+> **插件平台(拼多多)已实现**:点发布之前(gate 前)的 `network` 3 / `upload_failed` 2 / `element_not_found` 1 / `unknown` 1 次自动重跑整轮(插件中止旧一轮、新标签页从头来,总共最多 3 轮,每轮失败留 `retry<N>_<step>` 截图,见 `platforms/pinduoduo.py::_RERUN_BUDGET`);用尽后才按下表 halt。元素级:点击等元素出现 / 遮挡消失最多 10s,输入后核对值、没生效重输一次;每步开始前检查掉登录与带容器的干扰弹窗(`extension/pinduoduo.js::guard`)。**点发布之后绝不自动重试。**
 
 | 类型 | 含义 | 重试策略(`*` = 规划中,尚未接线) |
 |------|------|----------|
@@ -807,6 +809,7 @@ tools/tailwindcss -c tailwind.config.js -i wxsp/static/app.src.css -o wxsp/stati
 | `nas_unreachable` | NAS 不可达 | 5 次指数退避 `*`(NAS 可能短暂掉线)(**全局 halt** 已生效) |
 | `feishu_api_error` | 飞书 API 错误 | 3 次重试(回写路径 `writeback_row` 已实现独立退避) |
 | `unknown` | 兜底 | 1 次重试 `*`,然后 failed |
+| `publish_unconfirmed` | 已点发布但限时内没确认成功(可能已发出) | **不重试**(会重复发布),告警让人先去平台后台核对;不触发 halt |
 
 > 飞书回写本身(`feishu.writeback_row`)有独立退避序列 `(1s/3s/10s,共 4 次)` —— 历史 `(1s/2s/3 次)` 在飞书抖动时被实测打穿,最后一条 task 跑完 status="已计划" 不更新。退避总时长 ~14s 远小于一次 publish 的 1-5min,不会拖慢主流程。
 

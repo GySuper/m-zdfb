@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -315,6 +316,12 @@ UPLOAD_CARD = "<div>平台发布激励</div><div>视频上传成功后,选择并
 UPLOAD_PAGES = {
     # 2026-11-18 真机:页面没进入上传状态,但底部卡片有「视频上传成功后…」,不能判成上传完成
     "stuck": f'<input type=file accept=".mp4,.mov">{UPLOAD_CARD}',
+    "fail": f"""<input type=file accept=".mp4,.mov">{UPLOAD_CARD}
+      <script>document.querySelector('input').onchange = (e) => {{
+        const n = e.target.files[0].name;
+        document.body.insertAdjacentHTML('beforeend', `<p>文件名\uff1a${{n}}</p>`);
+        setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<div>上传失败,请重试</div>'), 500);
+      }};</script>""",
     "ok": f"""<input type=file accept=".mp4,.mov">{UPLOAD_CARD}
       <script>document.querySelector('input').onchange = (e) => {{
         const n = e.target.files[0].name;
@@ -361,3 +368,100 @@ def test_upload_not_fooled_by_bottom_card_text(tmp_path: Path) -> None:
 
 def test_upload_done_when_file_name_and_success_line_appear(tmp_path: Path) -> None:
     assert _run_upload(tmp_path, "ok")["type"] == "gate"
+
+
+# ---- 元素级容错:晚出现 / 被遮挡 / 输入被吞 ----
+
+ELEMENT_PAGE = """<!doctype html><meta charset=utf-8><body>
+<div id=overlay style="position:fixed;inset:0;background:rgba(0,0,0,.3)"></div>
+<input id=box><pre id=log></pre>
+<script>
+const log = (k) => document.getElementById('log').textContent += k + ';';
+setTimeout(() => document.body.insertAdjacentHTML('afterbegin',
+  '<button id=late onclick="log(\\'late\\')">晚到的按钮</button>'), 2000);
+setTimeout(() => document.getElementById('overlay').remove(), 2000);  // 2s 后浮层消失
+let swallowed = false;
+document.getElementById('box').addEventListener('input', (e) => {
+  if (!swallowed) { swallowed = true; setTimeout(() => { e.target.value = ''; }, 50); }  // 第一次输入被页面清掉
+});
+</script></body>"""
+
+
+@pytest.fixture
+def element_page(tmp_path: Path) -> Iterator[str]:
+    (tmp_path / "el.html").write_text(ELEMENT_PAGE, encoding="utf-8")
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}/el.html"
+    server.shutdown()
+
+
+def test_click_waits_for_late_and_covered_elements(tmp_path: Path, element_page: str) -> None:
+    with extension_session(tmp_path / "profile", headless=True) as session:
+        session.call("debug.open", {"url": element_page})
+        # 页面刚加载:按钮还没出现,且整页被浮层盖着 → 等到出现且不再被遮挡才点
+        session.call("debug.click", {"sel": "#late"})
+        assert "late;" in session.call("debug.eval", "document.getElementById('log').textContent")
+
+
+def test_fill_retypes_when_the_page_swallows_input(tmp_path: Path, element_page: str) -> None:
+    with extension_session(tmp_path / "profile", headless=True) as session:
+        session.call("debug.open", {"url": element_page})
+        session.call("debug.eval", "document.getElementById('overlay').remove()")
+        session.call("debug.fill", {"sel": "#box"}, "325988807357")
+        assert session.call("debug.eval", "document.getElementById('box').value") == "325988807357"
+
+
+def test_upload_failure_is_reported_fast(tmp_path: Path) -> None:
+    msg = _run_upload(tmp_path, "fail")
+    assert msg["type"] == "error"
+    assert msg["kind"] == "upload_failed"
+    assert "上传失败" in str(msg["message"])
+
+
+# ---- 步骤间保护 / 新一轮顶替旧一轮 ----
+
+GUARD_PAGE = """<!doctype html><meta charset=utf-8><body>
+<button id=a onclick="setTimeout(() => document.body.insertAdjacentHTML('beforeend',
+  '<div role=dialog style=\\'position:fixed;inset:0;background:rgba(0,0,0,.4)\\'>推广'
+  + '<button aria-label=关闭 onclick=this.parentNode.remove()>x</button></div>'), 300)">A</button>
+<button id=b onclick="document.title='clicked-b'">B</button></body>"""
+
+
+def test_guard_clears_popup_that_appears_between_steps(tmp_path: Path) -> None:
+    (tmp_path / "g.html").write_text(GUARD_PAGE, encoding="utf-8")
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with extension_session(tmp_path / "profile", headless=True) as session:
+            session.start_job(
+                {
+                    "platform": "selftest_pdd_guard",
+                    "url": f"http://127.0.0.1:{server.server_address[1]}/g.html",
+                    "step_pause": [0.5, 0.5],
+                }
+            )
+            msgs = _until(session, "gate")
+            assert session.call("debug.eval", "document.title") == "clicked-b"
+    finally:
+        server.shutdown()
+    assert [m.get("step") for m in msgs if m["type"] == "step"] == ["open", "first", "second"]
+
+
+def test_new_job_aborts_the_previous_one_silently(tmp_path: Path, page_url: str) -> None:
+    with extension_session(tmp_path / "profile", headless=True) as session:
+        # 旧一轮:页面上没有 #nope,click 会一直等(默认 10s)
+        session.start_job(
+            {"platform": "selftest_pdd_guard", "url": page_url + "?x", "step_pause": [0, 0]}
+        )
+        assert session.next_message(timeout=10)["step"] == "open"
+        time.sleep(1)
+        session.start_job({"platform": "selftest", "halt_before": "open", "step_pause": [0, 0]})
+        # 旧一轮在被顶替前合法发出的步骤消息可能还排在前面,读到新一轮的 halted 为止
+        while (msg := session.next_message(timeout=10))["type"] != "halted":
+            assert msg["type"] == "step", msg
+        assert msg == {"type": "halted", "step": "open"}
+        with pytest.raises(TimeoutError):  # 旧一轮被中止:之后不能再冒出任何消息
+            session.next_message(timeout=12)

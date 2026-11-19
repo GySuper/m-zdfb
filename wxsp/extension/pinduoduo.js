@@ -83,7 +83,8 @@ async function countDropped(t, spec, before) {
 // 关闭平台主动弹出的干扰弹窗:只点弹窗自身的关闭控件或按 Escape,不点任何业务按钮。
 // 只能在自动化还没主动打开任何业务弹窗时调用:进入发布页后(entry_popups)、
 // 上传完成后(upload_popups,实测会弹「立即推广 冲顶交易额」盖住描述框)。
-export async function entryPopups(t) {
+// dialogsOnly:只处理有弹窗容器的弹窗(步骤间保护用;表单里可能有别的关闭图标,不能碰)
+export async function entryPopups(t, { dialogsOnly = false } = {}) {
   const MAX_POPUPS = 5;
   let quiet = 0;
   let dismissed = 0;
@@ -94,7 +95,7 @@ export async function entryPopups(t) {
       ? { within: ENTRY_DIALOG, sel: ENTRY_DIALOG_CLOSE, pick: "first", what: "弹窗关闭按钮" }
       : { sel: ENTRY_DIALOG_CLOSE, pick: "last", what: "浮层关闭按钮" };
     const watch = dialogs ? { sel: ENTRY_DIALOG } : { sel: ENTRY_DIALOG_CLOSE };
-    const before = dialogs || (await t.count(watch));
+    const before = dialogs || (dialogsOnly ? 0 : await t.count(watch));
     if (!before) {
       if (++quiet >= 8) {
         if (dismissed) console.log(`已关闭入口干扰弹窗 ${dismissed} 个`);
@@ -132,17 +133,20 @@ export async function upload(t) {
   const startMs = Math.min(20_000, t.job.upload_timeout_s * 1000);
   const started = await t.until(() => t.hasText(`文件名：${name}`), startMs, 500);
   if (!started) throw new StepError("upload_failed", "选择视频后页面没有进入上传状态");
-  const done = await t.until(async () => (await pageLines(t)).has(UPLOAD_DONE_TEXT), t.job.upload_timeout_s * 1000, 1000);
+  let failed = false;
+  const done = await t.until(async () => {
+    const lines = await pageLines(t);
+    failed = [...lines].some((l) => l.includes("上传失败"));
+    return failed || lines.has(UPLOAD_DONE_TEXT);
+  }, t.job.upload_timeout_s * 1000, 1000);
+  if (failed) throw new StepError("upload_failed", "页面提示上传失败");
   if (!done) throw new StepError("upload_failed", "视频上传/处理超时");
   console.log("视频上传完成");
 }
 
 async function desc(t) {
   if (!t.job.description) return;
-  if (!(await t.waitVisible({ sel: DESC_EDITOR }, 10_000))) throw new StepError("element_not_found", "描述输入框未出现");
-  await t.click({ sel: DESC_EDITOR, what: "描述输入框" });
-  await wait(500, 1000);
-  await t.type(t.job.description.slice(0, DESC_MAX_LENGTH));
+  await t.fill({ sel: DESC_EDITOR, what: "描述输入框" }, t.job.description.slice(0, DESC_MAX_LENGTH));
 }
 
 // 话题写在描述框里:#话题 → 等候选 → 空格确认
@@ -170,11 +174,9 @@ export async function passwordLogin(t, loginUrl, loggedIn) {
   if (!(await t.waitVisible({ sel: USERNAME_INPUT }, 10_000))) {
     throw new StepError("cookie_expired", "账号登录表单没出现,无法自动登录,需人工扫码");
   }
-  await t.click({ sel: USERNAME_INPUT, what: "登录账号输入框" });
-  await t.type(username);
+  await t.fill({ sel: USERNAME_INPUT, what: "登录账号输入框" }, username);
   await wait(400, 900);
-  await t.click({ sel: PASSWORD_INPUT, what: "登录密码输入框" });
-  await t.type(password);
+  await t.fill({ sel: PASSWORD_INPUT, what: "登录密码输入框" }, password);
   await wait(500, 1000);
   const before = await pageLines(t);
   await t.click({ sel: "button", text: "登录", exact: true, what: "登录按钮" });
@@ -206,8 +208,7 @@ async function products(t) {
   await wait(800, 1500);
   const hints = [];
   for (const pid of t.job.product_ids) {
-    await t.click({ sel: PRODUCT_ID_INPUT, what: "商品ID 输入框" });
-    await t.type(pid);
+    await t.fill({ sel: PRODUCT_ID_INPUT, what: "商品ID 输入框" }, pid);
     await wait(300, 600);
     const before = await pageLines(t);
     await t.click({ sel: "button", text: "下一步", what: "下一步" });
@@ -333,14 +334,29 @@ async function publish(t) {
   await wait(2500, 4500);
 }
 
+// 点了发布就不能再自动重试:没确认成功时报「发布未确认」,让人先去后台核对,避免重复发布
 async function waitSuccess(t) {
-  if (!(await t.until(async () => (await t.url()).includes(SUCCESS_FRAG), 60_000, 500))) {
-    throw new StepError("element_not_found", "发布成功判定超时(URL 未跳转 mall-goods-video)");
+  if (!(await t.until(async () => (await t.url()).includes(SUCCESS_FRAG), 120_000, 500))) {
+    throw new StepError(
+      "publish_unconfirmed",
+      "已点发布,但 120s 内没跳到商家带货视频页;可能已经发出,请先到拼多多后台核对,不要直接重试",
+    );
   }
   console.log("已跳转商家带货视频页,发布成功");
 }
 
+// 每步开始前:掉到登录页 → 登录失效;冒出带容器的干扰弹窗 → 只点关闭 / Escape 清掉。
+// 前两步(打开页、校验登录)自己处理登录页,不在这里拦。
+export async function guard(t, step) {
+  if (t.tabId == null || step === "open_publish" || step === "verify_login") return;
+  if ((await t.url()).includes(LOGIN_FRAG)) {
+    throw new StepError("cookie_expired", "发布途中登录失效(页面跳到了登录页)");
+  }
+  if ((await t.count({ sel: ENTRY_DIALOG })) > 0) await entryPopups(t, { dialogsOnly: true });
+}
+
 export const PINDUODUO = {
+  guard,
   pre: [
     ["open_publish", openPublish],
     ["verify_login", verifyLogin],

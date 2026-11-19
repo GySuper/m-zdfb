@@ -26,13 +26,16 @@ from wxsp.errors import (
     NetworkError,
     ProductNotFound,
     PublisherError,
+    PublishUnconfirmed,
     RiskControl,
     UnknownError,
     UploadFailed,
+    classify,
 )
 from wxsp.managed_chrome import ExtensionSession, wait_logged_in_url
 from wxsp.models import Account
 from wxsp.nas import stage_to_tmp
+from wxsp.notify import step_cn
 from wxsp.platforms import pinduoduo_selectors as sel
 from wxsp.platforms.base import PlatformSpec, PublishContext, PublishResult, TaskBundle
 from wxsp.platforms.runner import run_publish, screenshot
@@ -44,7 +47,14 @@ _EXT_ERRORS: dict[str, type[PublisherError]] = {
     "upload_failed": UploadFailed,
     "product_not_found": ProductNotFound,
     "network": NetworkError,
+    "publish_unconfirmed": PublishUnconfirmed,
 }
+
+# 发布前(gate 之前)的暂时性错误自动重跑整轮:插件中止旧一轮、新标签页从头来,还没点发布所以安全。
+# 次数对齐 CLAUDE.md 错误表;总轮数封顶。登录失效 / 风控 / 商品类错误重跑也没用,不重试。
+# 点发布之后(_post_publish)绝不自动重试,避免重复发布。
+_RERUN_BUDGET = {"network": 3, "upload_failed": 2, "element_not_found": 1, "unknown": 1}
+_MAX_ROUNDS = 3
 
 
 def _pump(
@@ -103,31 +113,51 @@ def _pre_publish(
         )
     upload_timeout = ctx.settings.publisher.upload_timeout_seconds
     apc_passed = wxsp.apc.check_pass()
-    session.start_job(
-        {
-            "platform": "pinduoduo",
-            "step_pause": list(ctx.step_pause),
-            "upload_timeout_s": upload_timeout,
-            # 必须绝对路径:Chrome 是另一个进程,data_dir 配成 ./data 时相对路径它找不到,
-            # 页面收到空文件(拼多多提示「已过滤空文件」,2026-11-19 任务 58)
-            "video_path": str(staged.absolute()),
-            "cover_path": str(staged_cover.absolute()) if staged_cover else None,
-            "description": bundle.description or "",
-            "tags": _json.loads(bundle.tags_json or "[]"),
-            "product_ids": product_ids,
-            "publish_at": bundle.publish_at.strftime("%Y-%m-%d %H:%M:%S"),  # 与页面日期框同格式
-            "declaration": bundle.declaration,
-            "detail_float": bundle.detail_float,  # 商详悬浮窗;None = 保持页面默认
-            "store_feed": bundle.store_feed,  # 同步店铺动态;None = 保持页面默认
-            # 账密登录:登录过期时插件自动用账号密码登录;遇滑块/短信验证按登录失效处理
-            "login": _login_credentials(ctx, bundle.account_id),
-            "login_url": sel.LOGIN_URL,  # 带「账号登录」表单的 SSO 登录页(登录后跳回视频首页)
-            # APC 拒绝:插件停在上传前,下面装"等待上传区域超时"故障(对齐其他平台)
-            "halt_before": None if apc_passed else "upload",
-        }
-    )
-    # 上传期间插件不发消息,单条消息的等待上限按上传超时放宽
-    _pump(session, ctx, "gate", timeout=upload_timeout + 120)
+    job: dict[str, Any] = {
+        "platform": "pinduoduo",
+        "step_pause": list(ctx.step_pause),
+        "upload_timeout_s": upload_timeout,
+        # 必须绝对路径:Chrome 是另一个进程,data_dir 配成 ./data 时相对路径它找不到,
+        # 页面收到空文件(拼多多提示「已过滤空文件」,2026-11-19 任务 58)
+        "video_path": str(staged.absolute()),
+        "cover_path": str(staged_cover.absolute()) if staged_cover else None,
+        "description": bundle.description or "",
+        "tags": _json.loads(bundle.tags_json or "[]"),
+        "product_ids": product_ids,
+        "publish_at": bundle.publish_at.strftime("%Y-%m-%d %H:%M:%S"),  # 与页面日期框同格式
+        "declaration": bundle.declaration,
+        "detail_float": bundle.detail_float,  # 商详悬浮窗;None = 保持页面默认
+        "store_feed": bundle.store_feed,  # 同步店铺动态;None = 保持页面默认
+        # 账密登录:登录过期时插件自动用账号密码登录;遇滑块/短信验证按登录失效处理
+        "login": _login_credentials(ctx, bundle.account_id),
+        "login_url": sel.LOGIN_URL,  # 带「账号登录」表单的 SSO 登录页(登录后跳回视频首页)
+        # APC 拒绝:插件停在上传前,下面装"等待上传区域超时"故障(对齐其他平台)
+        "halt_before": None if apc_passed else "upload",
+    }
+    used: dict[str, int] = {}
+    for round_no in range(1, _MAX_ROUNDS + 1):
+        session.start_job(job)
+        try:
+            # 上传期间插件不发消息,单条消息的等待上限按上传超时放宽
+            _pump(session, ctx, "gate", timeout=upload_timeout + 120)
+            break
+        except PublisherError as exc:
+            kind = classify(exc)
+            if round_no == _MAX_ROUNDS or used.get(kind, 0) >= _RERUN_BUDGET.get(kind, 0):
+                raise
+            used[kind] = used.get(kind, 0) + 1
+            shot = screenshot(
+                session,
+                task_id=ctx.task_id,
+                step=f"retry{round_no}_{ctx.last_step}",
+                screenshots_root=ctx.screenshots_root,
+            )
+            ctx.result.screenshots.append(str(shot))
+            logger.warning(
+                f"[pinduoduo] task={ctx.task_id} 第 {round_no} 轮在「{step_cn(ctx.last_step)}」失败"
+                f"({kind}: {exc}),{5 * round_no}s 后开新标签页重跑"
+            )
+            time.sleep(5 * round_no)
     if not apc_passed:
         ctx.last_step = "wait_upload_area"
         time.sleep(random.uniform(45, 75))

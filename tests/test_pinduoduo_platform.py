@@ -220,3 +220,107 @@ def test_pre_publish_hands_absolute_file_paths_to_the_extension(
     job = session.start_job.call_args[0][0]
     assert job["video_path"] == str(tmp_path / "data/tmp/58/v.mp4")
     assert job["cover_path"] == str(tmp_path / "data/tmp/58/c.png")
+
+
+# ---- 发布前暂时性错误自动重跑整轮(新标签页从头来;点发布之后绝不重试)----
+
+
+class _RoundsSession:
+    """每次 start_job 开一轮,按轮回放插件消息。"""
+
+    def __init__(self, *rounds: list[dict[str, object]]) -> None:
+        self.rounds = list(rounds)
+        self.jobs: list[dict[str, object]] = []
+        self.msgs: list[dict[str, object]] = []
+
+    def start_job(self, job: dict[str, object]) -> None:
+        self.jobs.append(job)
+        self.msgs = list(self.rounds.pop(0))
+
+    def next_message(self, timeout: float) -> dict[str, object]:
+        if not self.msgs:
+            raise TimeoutError
+        return self.msgs.pop(0)
+
+
+def _err(kind: str) -> dict[str, object]:
+    return {"type": "error", "kind": kind, "step": "upload", "message": "坏了"}
+
+
+def _run_pre(monkeypatch: pytest.MonkeyPatch, session: _RoundsSession) -> MagicMock:
+    from wxsp.platforms import pinduoduo
+
+    monkeypatch.setattr("wxsp.apc.check_pass", lambda: True)
+    monkeypatch.setattr(pinduoduo.time, "sleep", lambda s: None)
+    monkeypatch.setattr(pinduoduo, "screenshot", lambda *a, **k: Path("shot.png"))
+    bundle = MagicMock(
+        product_ids_json='["1"]',
+        video_cover_path=None,
+        tags_json="[]",
+        description="d",
+        publish_at=datetime(2026, 12, 1, 10, 30),
+        declaration=None,
+        detail_float=None,
+        store_feed=None,
+        account_id="a",
+    )
+    ctx = MagicMock()
+    ctx.settings.accounts = {}
+    ctx.settings.publisher.upload_timeout_seconds = 600
+    ctx.step_pause = (0, 0)
+    ctx.result.screenshots = []
+    pinduoduo._pre_publish(session, bundle, Path("/v.mp4"), ctx)  # type: ignore[arg-type]
+    return ctx
+
+
+def test_pre_publish_reruns_after_transient_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _RoundsSession([_err("network")], [{"type": "gate"}])
+    ctx = _run_pre(monkeypatch, session)
+    assert len(session.jobs) == 2
+    assert ctx.result.screenshots == ["shot.png"]  # 失败那一轮留截图
+
+
+@pytest.mark.parametrize("kind", ["cookie_expired", "risk_control", "product_not_found"])
+def test_pre_publish_does_not_rerun_hopeless_errors(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    from wxsp.errors import PublisherError
+
+    session = _RoundsSession([_err(kind)], [{"type": "gate"}])
+    with pytest.raises(PublisherError):
+        _run_pre(monkeypatch, session)
+    assert len(session.jobs) == 1
+
+
+def test_pre_publish_rerun_budget_per_kind_and_total(monkeypatch: pytest.MonkeyPatch) -> None:
+    from wxsp.errors import ElementNotFound, NetworkError
+
+    # element_not_found 只重跑 1 次
+    session = _RoundsSession(
+        [_err("element_not_found")], [_err("element_not_found")], [{"type": "gate"}]
+    )
+    with pytest.raises(ElementNotFound):
+        _run_pre(monkeypatch, session)
+    assert len(session.jobs) == 2
+    # 网络错误预算 3 次,但总共最多 3 轮
+    session = _RoundsSession(*[[_err("network")]] * 4)
+    with pytest.raises(NetworkError):
+        _run_pre(monkeypatch, session)
+    assert len(session.jobs) == 3
+
+
+def test_publish_unconfirmed_is_its_own_error() -> None:
+    from wxsp.errors import PublishUnconfirmed, classify
+    from wxsp.platforms.pinduoduo import _pump
+
+    session = _ScriptedSession(
+        {
+            "type": "error",
+            "kind": "publish_unconfirmed",
+            "step": "wait_success",
+            "message": "可能已发出",
+        }
+    )
+    with pytest.raises(PublishUnconfirmed) as exc:
+        _pump(session, _ctx(), "done", timeout=1)  # type: ignore[arg-type]
+    assert classify(exc.value) == "publish_unconfirmed"

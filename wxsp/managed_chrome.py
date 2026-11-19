@@ -185,10 +185,13 @@ def wait_logged_in_url(
     """打开 start_url,轮询任一标签页 URL 含 fragment 即已登录(扫码登录 / doctor 共用)。"""
     with managed_chrome(user_data_dir, start_url=start_url) as chrome:
         deadline = time.monotonic() + timeout_s
+        urls: list[str] = []
         while time.monotonic() < deadline:
-            if any(fragment in u for u in chrome.page_urls()):
+            urls = chrome.page_urls()
+            if any(fragment in u for u in urls):
                 return True
             time.sleep(2)
+        logger.warning(f"[managed_chrome] 等登录超时,窗口停在: {urls}")
     return False
 
 

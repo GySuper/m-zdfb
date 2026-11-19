@@ -37,7 +37,7 @@ export const PDD_POPUPS = {
 export const PDD_LOGIN = {
   pre: [
     ["open", (t) => t.open(t.job.url)],
-    ["password_login", (t) => passwordLogin(t, async () => (await t.url()).endsWith("/home.html"))],
+    ["password_login", (t) => passwordLogin(t, t.job.login_url, async () => (await t.url()).endsWith("/home.html"))],
   ],
   post: [],
 };

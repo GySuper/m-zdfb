@@ -269,6 +269,10 @@ function go() {
 def _run_login(tmp_path: Path, password: str) -> tuple[dict[str, object], str]:
     (tmp_path / "login.html").write_text(LOGIN_PAGE, encoding="utf-8")
     (tmp_path / "home.html").write_text("<meta charset=utf-8>首页", encoding="utf-8")
+    # 2026-11-18 真机:登录过期打开首页落到「请选择登录身份」页,没有账号密码表单
+    (tmp_path / "identity.html").write_text(
+        "<meta charset=utf-8>请选择登录身份<div>我是商家</div><div>我是达人</div>", encoding="utf-8"
+    )
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -277,7 +281,8 @@ def _run_login(tmp_path: Path, password: str) -> tuple[dict[str, object], str]:
             session.start_job(
                 {
                     "platform": "selftest_pdd_login",
-                    "url": f"http://127.0.0.1:{server.server_address[1]}/login.html",
+                    "url": f"http://127.0.0.1:{server.server_address[1]}/identity.html",
+                    "login_url": f"http://127.0.0.1:{server.server_address[1]}/login.html",
                     "login": {"username": "13800000000", "password": password},
                     "step_pause": [0, 0],
                 }

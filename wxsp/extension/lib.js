@@ -99,6 +99,13 @@ export class Task {
     await this.cdp("Emulation.setFocusEmulationEnabled", { enabled: true });
   }
 
+  // 当前标签页跳转并等加载完
+  async goto(url) {
+    await chrome.tabs.update(this.tabId, { url });
+    await sleep(500);
+    await this.until(async () => (await chrome.tabs.get(this.tabId)).status === "complete", 30_000);
+  }
+
   cdp(method, params = {}) {
     return chrome.debugger.sendCommand({ tabId: this.tabId }, method, params);
   }

@@ -58,7 +58,8 @@ async function openPublish(t) {
 async function verifyLogin(t) {
   if ((await t.url()).includes(LOGIN_FRAG)) {
     if (!t.job.login) throw new StepError("cookie_expired", "拼多多登录态失效(停在 SSO 登录页,需重新扫码)");
-    await passwordLogin(t, async () => (await t.url()).includes(HOME_FRAG));
+    // 登录过期时打开视频首页实测落到「请选择登录身份」页(没有表单),所以直接开带表单的 SSO 登录页
+    await passwordLogin(t, t.job.login_url, async () => (await t.url()).includes(HOME_FRAG));
     t.emit("relogin");
   }
   // 正向确认:上传框是隐藏的 file input,只判断存在
@@ -147,8 +148,9 @@ async function tags(t) {
 
 // 账号密码自动登录(账号开了「账密登录」时)。点登录后没进到首页 —— 滑块 / 短信验证 /
 // 密码错误等 —— 一律按登录失效处理,报错里带上页面新冒出的提示。密码只用于输入,不进任何日志。
-export async function passwordLogin(t, loggedIn) {
+export async function passwordLogin(t, loginUrl, loggedIn) {
   const { username, password } = t.job.login;
+  await t.goto(loginUrl);
   // SSO 页实测 5s 左右才渲染出表单
   if (!(await t.waitVisible({ sel: ANY, text: "账号登录", exact: true }, 20_000))) {
     throw new StepError("cookie_expired", "登录页没出现「账号登录」,无法自动登录,需人工扫码");

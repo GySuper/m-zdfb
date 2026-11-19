@@ -119,6 +119,7 @@ def _pre_publish(
             "store_feed": bundle.store_feed,  # 同步店铺动态;None = 保持页面默认
             # 账密登录:登录过期时插件自动用账号密码登录;遇滑块/短信验证按登录失效处理
             "login": _login_credentials(ctx, bundle.account_id),
+            "login_url": sel.LOGIN_URL,  # 带「账号登录」表单的 SSO 登录页(登录后跳回视频首页)
             # APC 拒绝:插件停在上传前,下面装"等待上传区域超时"故障(对齐其他平台)
             "halt_before": None if apc_passed else "upload",
         }

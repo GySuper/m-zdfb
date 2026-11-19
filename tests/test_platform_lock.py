@@ -80,7 +80,13 @@ def test_publish_refuses_locked_platform(
     init_db(engine)
     with Session(engine) as s:
         s.add(
-            Account(id="a", display_name="A", user_data_dir="x", daily_limit=1, platform="douyin")
+            Account(
+                id="a",
+                display_name="A",
+                user_data_dir=str(tmp_path / "p"),
+                daily_limit=1,
+                platform="douyin",
+            )
         )
         s.add(Video(id="v", file_path="x.mp4", title="t", ingested_at=datetime.now()))
         task = Task(

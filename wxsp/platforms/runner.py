@@ -21,12 +21,14 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from patchright.sync_api import Page
 from sqlalchemy.engine import Engine
 from sqlmodel import Session
+
+if TYPE_CHECKING:  # patchright 只在开发环境(旧平台)有,安装包里不带
+    from patchright.sync_api import Page
 
 from wxsp.browser import browser_context
 from wxsp.config import Settings

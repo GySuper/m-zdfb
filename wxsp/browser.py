@@ -30,13 +30,15 @@ import time as _time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from patchright.sync_api import Page, sync_playwright
 
 from wxsp.config import get_user_data_dir, is_packaged
 from wxsp.platform_meta import get_meta
+
+if TYPE_CHECKING:  # patchright 只在开发环境(旧平台)有,安装包里不带
+    from patchright.sync_api import Page
 
 
 @contextmanager
@@ -476,6 +478,8 @@ def _browser_context_impl(
     # 不处理 fp_init_script;cookie 走 cookies.json 显式持久化(同 launch 分支)。
     if use_real_chrome:
         chrome_proc, chrome_port = _launch_real_chrome(user_data_dir, headless=headless)
+        from patchright.sync_api import sync_playwright
+
         with sync_playwright() as p:
             try:
                 browser = p.chromium.connect_over_cdp(
@@ -563,6 +567,8 @@ def _browser_context_impl(
                     except Exception:
                         pass
         return
+
+    from patchright.sync_api import sync_playwright
 
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(**launch_kwargs)

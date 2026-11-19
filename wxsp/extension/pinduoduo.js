@@ -138,21 +138,35 @@ async function tags(t) {
   }
 }
 
+async function pageLines(t) {
+  const text = await t.page(() => document.body.innerText);
+  return new Set(text.split("\n").map((l) => l.trim()).filter(Boolean));
+}
+
 // 点「添加商品」→ 切「商品ID」tab → 逐个填 ID → 下一步绑定 → 等「删除商品」出现
 async function products(t) {
   await t.click({ sel: ANY, text: "添加商品", what: "添加商品" });
   await wait(1000, 2000);
   await t.click({ sel: ANY, text: "商品ID", what: "商品ID 页签" });
   await wait(800, 1500);
+  const hints = [];
   for (const pid of t.job.product_ids) {
     await t.click({ sel: PRODUCT_ID_INPUT, what: "商品ID 输入框" });
     await t.type(pid);
     await wait(300, 600);
+    const before = await pageLines(t);
     await t.click({ sel: "button", text: "下一步", what: "下一步" });
-    await wait(2000, 3000);
+    // 平台的「商品不存在」等轻提示几秒就消失,点完立刻收集新冒出的文字写进报错
+    for (let i = 0; i < 6; i++) {
+      await sleep(500);
+      for (const line of await pageLines(t)) {
+        if (!before.has(line) && line.length <= 60 && !hints.includes(line)) hints.push(line);
+      }
+    }
   }
   if (!(await t.waitVisible({ sel: "button", text: "删除商品" }, 10_000))) {
-    throw new StepError("product_not_found", `商品绑定失败(ID: ${t.job.product_ids.join(",")})`);
+    const hint = hints.length ? `;页面提示:${hints.slice(0, 3).join(" / ")}` : ";页面无提示";
+    throw new StepError("product_not_found", `商品绑定失败(ID: ${t.job.product_ids.join(",")})${hint}`);
   }
   console.log(`绑定商品完成 ${t.job.product_ids.join(",")}`);
 }

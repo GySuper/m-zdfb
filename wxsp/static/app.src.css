@@ -46,6 +46,7 @@
 @keyframes nowp { 0% { box-shadow: 0 0 0 0 rgba(99,102,241,.45); } 50% { box-shadow: 0 0 0 8px rgba(99,102,241,0); } }
 @keyframes noteIn { from { opacity: 0; transform: translateX(30px) scale(.95); } }
 @keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes op-spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

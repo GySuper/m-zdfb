@@ -95,7 +95,7 @@ wxsp 注入插件时本来就握着这个 Chrome 的 browser 级 CDP 连接,P1 �
 |---|---|---|
 | **P0 验证 ✅** | 脚本:启动本机 Chrome → `loadUnpacked` 最小插件 → WS `hello` → 在本地测试页用 chrome.debugger 点击按钮、`DOM.setFileInputFiles` 上传文件、`captureScreenshot` | 脚本跑通打印 4 个 ok;任一失败就回来改方案,不往下做 |
 | **P1 骨架 ✅** | `managed_chrome.py`(含 CDP 客户端)、`ExtensionSession`、runner `driver` 分支、插件框架(步骤上报/错误上报/截图/可信输入/selftest 自检平台)、拼多多 `open_publish`→`verify_login`→`entry_popups`→`gate`、新 login | 单测:消息泵(步骤、error→异常映射、halted、超时);集成:selftest 真 Chrome 全通路;真机:`wxsp login` 扫码成功 → `wxsp run --task-id N --dry-run` 停在 gate 出截图 |
-| **P2 全步骤(代码完成,待真机 dry-run)** | 上传、描述、话题、商品、封面、定时(日历切月同视频号修法,找不到日期就报错)、内容声明、风控探测、发布、成功判定 | 真机 dry-run 全流程截图核对;**经你同意后**真发 1 条;旧 patchright 路径仍可用开关切回 |
+| **P2 全步骤 ✅(封面结果待下次真机确认)** | 上传、描述、话题、商品、封面、定时(日历切月同视频号修法,找不到日期就报错)、内容声明、风控探测、发布、成功判定 | 真机 dry-run 全流程截图核对;**经你同意后**真发 1 条;旧 patchright 路径仍可用开关切回 |
 | **P3 收尾** | 全平台步骤上报到工作台、平台间并行锁、CLAUDE.md(§2.5、平台架构、新增平台手册)更新、打包脚本确认 `wxsp/extension` 被带上 | 单测:锁语义(同平台串行/跨平台并行/小红书独占);工作台卡片显示步骤 |
 
 测试原则沿用 CLAUDE.md:Python 侧消息处理用回放消息的单测,不 mock 浏览器;插件行为只用真 Chrome 验证(`@pytest.mark.integration`)。
@@ -122,3 +122,11 @@ wxsp 注入插件时本来就握着这个 Chrome 的 browser 级 CDP 连接,P1 �
 ## 6. P0 验证结论(2026-11-18,macOS · Chrome 157)
 
 后台标签页内:CDP 注入插件 ✓;WS 握手 Origin 为固定扩展 ID ✓;`Input.dispatchMouseEvent` 点击 `isTrusted=true` ✓(需焦点仿真);`Input.insertText` 中文输入 ✓;`DOM.setFileInputFiles` 本地文件 ✓;`Page.captureScreenshot` ✓。
+
+## 7. P2 真机结论(2026-11-18,逐步探查 + 完整 dry-run)
+
+- 完整 dry-run 13 步 109s 到 gate:定时 2026-12-01 10:30:00(跨月 + 滚动选时)、商详悬浮窗「不展示」、同步店铺动态「取消同步」、商品、声明、描述话题全部按预期。
+- 探查发现并修复:上传后推广弹窗 / 内嵌提示条误关;时间滚轮列平时 `overflow:hidden`、悬停才可滚;日历不会切月;封面「上传中」确定按钮禁用(旧 patchright 的封面选择器 `[accept=".jpg"]` 根本匹配不到,以前自定义封面一直静默失败)。
+- 测试商品 858612559443 已下架;绑商品失败时会把页面提示(如「商品已下架」)写进报错。
+- 新增飞书字段:商详悬浮窗(展示/不展示)、同步店铺动态(开启同步/取消同步),留空=页面默认。
+- 调试通道 `wxsp.debug.*`:窗口不关、单步驱动 / 只读 DOM,禁止发布阶段步骤与「发布」类按钮。

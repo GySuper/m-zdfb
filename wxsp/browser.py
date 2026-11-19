@@ -728,6 +728,18 @@ def check_cookie(
 
     `account_id` 传入时,本次启动会带上该账号的指纹(必须跟登录时的指纹一致,否则
     平台会把它当 "异常设备登录" 直接踢);省略时退化到无指纹模式。
+
+    driver="extension" 的平台(拼多多)profile 属于系统真实 Chrome,不能用 patchright 打开。
     """
+    if get_meta(platform).driver == "extension":
+        from wxsp.managed_chrome import wait_logged_in_url  # 局部导入:managed_chrome 依赖本模块
+
+        meta = login_meta_for(platform)
+        return wait_logged_in_url(
+            user_data_dir,
+            start_url=meta["home_url"],
+            fragment=meta["logged_in_fragment"],
+            timeout_s=timeout_ms / 1000,
+        )
     with browser_context(user_data_dir, account_id=account_id, platform=platform) as page:
         return wait_for_logged_in(page, timeout_ms=timeout_ms, platform=platform)

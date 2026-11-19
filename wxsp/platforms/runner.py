@@ -18,8 +18,10 @@ import json as _json
 import random
 import time
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from patchright.sync_api import Page
@@ -32,9 +34,11 @@ from wxsp.db import claim_task, get_engine, init_db, session_scope, transition_t
 from wxsp.errors import PublisherError, classify
 from wxsp.feishu import FeishuApiError, make_client, writeback_row
 from wxsp.human_input import block_user_input, unblock_user_input
+from wxsp.managed_chrome import ExtensionSession, extension_session
 from wxsp.models import Account, Task, Video
 from wxsp.nas import cleanup_tmp, stage_to_tmp
 from wxsp.notify import NotifyEvent, error_type_cn, notify, step_cn
+from wxsp.platform_meta import get_meta
 from wxsp.platforms.base import (
     AlreadyClaimed,
     PlatformSpec,
@@ -57,7 +61,7 @@ _NOTIFY_BY_ERROR: dict[str, tuple[str, str, str]] = {
 
 
 def screenshot(
-    page: Page,
+    page: Page | ExtensionSession,
     *,
     task_id: int,
     step: str,
@@ -118,7 +122,7 @@ def load_task_bundle(session: Session, task_id: int) -> TaskBundle:
     )
 
 
-def _capture_error_artifacts(page: Page, ctx: PublishContext) -> None:
+def _capture_error_artifacts(page: Page | ExtensionSession, ctx: PublishContext) -> None:
     """趁 page 还活着:截图 err_{last_step}.png + 落一份同名 .html,失败不外抛。"""
     if not ctx.settings.publisher.screenshot_on_error:
         return
@@ -211,18 +215,25 @@ def run_publish(
         ctx.last_step = "stage"
         staged = stage_to_tmp(bundle.video_file_path, task_id=task_id, tmp_root=tmp_root)
 
-        # [2] 启浏览器(带账号指纹避免"同设备多账号"风控)
+        # [2] 启浏览器:patchright(带账号指纹避免"同设备多账号"风控)或托管 Chrome + 插件
         ctx.last_step = "browser"
-        with browser_context(
-            bundle.user_data_dir,
-            headless=settings.publisher.headless,
-            account_id=bundle.account_id,
-            platform=spec.platform_key,
-        ) as page:
+        extension_driver = get_meta(spec.platform_key).driver == "extension"
+        if extension_driver:
+            session_cm: AbstractContextManager[Any] = extension_session(bundle.user_data_dir)
+        else:
+            session_cm = browser_context(
+                bundle.user_data_dir,
+                headless=settings.publisher.headless,
+                account_id=bundle.account_id,
+                platform=spec.platform_key,
+            )
+        with session_cm as page:
             # 禁用真实键盘/鼠标输入:浏览器已激活,物理操作(上传/填表/发布)开始前
             # 锁定,防人碰键盘鼠标打乱 pyautogui 屏幕坐标操作。锁不影响 pyautogui
             # (SendInput 注入不被 BlockInput 拦),任何路径都在 finally 解锁。
-            block_user_input()
+            # 插件走 chrome.debugger 注入输入,不受人碰键鼠影响,不锁。
+            if not extension_driver:
+                block_user_input()
             try:
                 spec.pre_publish(page, bundle, staged, ctx)
 

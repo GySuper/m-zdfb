@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Auto 发布助手",
+  "version": "0.1.0",
+  "description": "由 Auto(wxsp)自动注入,在托管 Chrome 里执行短视频发布步骤。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8TOZTs46AKlUH9iOaJojmkMkV11msaS3AhTA2Sr5+DPQs9NC40CUoWU0DBhEA7OKwz49syMJVxMLA9srQX/2UZTupHh1sC1MRsY5z4R50xvTxSz3gfICJLrfKE7Rb0dCorYpUt9s1PtghfElV5T28jG5DEoU3lftfYQOK/vRzJsHQngiZK2BVXJPjWv9k36wCrUkPteSsse0R05/AHemOrH28ONa6j/5VOycGkO7hh4rS8vHvUV0geQapuE1nBub2dJN8pjjpQY9YJCufm9cXBWCEa8fVTZhsKk3iWit7ZNs9sL0Fvh+opawsB9BbVFW+9Ui627/5yF1SlGpHvhP3QIDAQAB",
+  "permissions": ["debugger", "tabs", "scripting"],
+  "host_permissions": ["https://*.pinduoduo.com/*", "http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js", "type": "module" }
+}

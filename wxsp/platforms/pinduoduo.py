@@ -16,21 +16,24 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from patchright.sync_api import Page
 
 import wxsp.apc
-from wxsp.browser import browser_context
 from wxsp.config import Settings
 from wxsp.errors import (
     CookieExpired,
     ElementNotFound,
     NetworkError,
     ProductNotFound,
+    PublisherError,
     RiskControl,
+    UnknownError,
     UploadFailed,
 )
+from wxsp.managed_chrome import ExtensionSession, wait_logged_in_url
 from wxsp.models import Account
 from wxsp.nas import stage_to_tmp
 from wxsp.platforms import pinduoduo_selectors as sel
@@ -427,11 +430,81 @@ def _post_publish(page: Page, bundle: TaskBundle, ctx: PublishContext) -> None:
     _wait_for_success(page)
 
 
+# ---------------------------------------------------------------------------
+# 插件驱动:托管 Chrome + wxsp/extension/pinduoduo.js(上面的 patchright 步骤
+# 是 P2 逐个移植的对照,移植完删除)
+# ---------------------------------------------------------------------------
+
+_EXT_ERRORS: dict[str, type[PublisherError]] = {
+    "cookie_expired": CookieExpired,
+    "risk_control": RiskControl,
+    "element_not_found": ElementNotFound,
+    "upload_failed": UploadFailed,
+    "product_not_found": ProductNotFound,
+    "network": NetworkError,
+}
+
+
+def _pump(
+    session: ExtensionSession, ctx: PublishContext, until: str, timeout: float
+) -> dict[str, Any]:
+    """收插件消息直到 `until` 或 halted;step 同步到 ctx.last_step,error 转成 errors.py 异常。"""
+    while True:
+        try:
+            msg = session.next_message(timeout=timeout)
+        except TimeoutError as err:
+            raise ElementNotFound(f"插件 {timeout:.0f}s 无进展") from err
+        kind = msg.get("type")
+        if kind == "step":
+            ctx.last_step = msg["step"]
+            logger.info(f"[pinduoduo] task={ctx.task_id} 步骤 {ctx.last_step}")
+        elif kind == "error":
+            ctx.last_step = msg.get("step") or ctx.last_step
+            raise _EXT_ERRORS.get(msg.get("kind", ""), UnknownError)(msg.get("message", ""))
+        elif kind in (until, "halted"):
+            return msg
+
+
+def _pre_publish_ext(
+    session: ExtensionSession, bundle: TaskBundle, staged: Path, ctx: PublishContext
+) -> None:
+    apc_passed = wxsp.apc.check_pass()
+    session.start_job(
+        {
+            "platform": "pinduoduo",
+            "step_pause": list(ctx.step_pause),
+            "video_path": str(staged),
+            # APC 拒绝:插件停在上传前,下面装"等待上传区域超时"故障(对齐其他平台)
+            "halt_before": None if apc_passed else "upload",
+        }
+    )
+    # 上传等长步骤期间插件不发消息,单条消息的等待上限按上传超时放宽
+    _pump(session, ctx, "gate", timeout=ctx.settings.publisher.upload_timeout_seconds + 120)
+    if not apc_passed:
+        ctx.last_step = "wait_upload_area"
+        time.sleep(random.uniform(45, 75))
+        shot = screenshot(
+            session,
+            task_id=ctx.task_id,
+            step="wait_upload_area",
+            screenshots_root=ctx.screenshots_root,
+        )
+        ctx.result.screenshots.append(str(shot))
+        raise ElementNotFound("等待上传区域超时(60s)")
+
+
+def _post_publish_ext(session: ExtensionSession, bundle: TaskBundle, ctx: PublishContext) -> None:
+    session.proceed("publish")
+    done = _pump(session, ctx, "done", timeout=120)
+    if done.get("remote_url"):
+        ctx.result.remote_url = done["remote_url"]
+
+
 PINDUODUO_SPEC = PlatformSpec(
     platform_key="pinduoduo",
     display_name="拼多多",
-    pre_publish=_pre_publish,
-    post_publish=_post_publish,
+    pre_publish=_pre_publish_ext,
+    post_publish=_post_publish_ext,
 )
 
 
@@ -439,29 +512,25 @@ class PinduoduoPublisher:
     platform_key = "pinduoduo"
 
     def login(self, account: Account) -> bool:
-        """开浏览器到拼多多 SSO 登录页等扫码。
+        """托管 Chrome 打开拼多多 SSO 登录页等扫码(不需要插件)。
 
         用正向判据:扫码成功后跳转到 n-creator/video/home,URL 含该片段 = 成功。
-        cookie 由 browser_context 退出时落盘。
+        cookie 由真实 Chrome profile 自己持久化,managed_chrome 退出时优雅关闭保证落盘。
         """
         user_data_dir = Path(account.user_data_dir)
         logger.info(f"[pinduoduo] 开始登录 account={account.id}")
         try:
-            with browser_context(
+            ok = wait_logged_in_url(
                 user_data_dir,
-                headless=False,
-                account_id=account.id,
-                platform="pinduoduo",
-            ) as page:
-                page.goto(sel.LOGIN_URL, wait_until="domcontentloaded")
-                deadline = time.time() + 300
-                while time.time() < deadline:
-                    if sel.LOGGED_IN_URL_FRAGMENT in page.url:
-                        logger.info(f"[pinduoduo] 登录成功 account={account.id}")
-                        return True
-                    time.sleep(2)
+                start_url=sel.LOGIN_URL,
+                fragment=sel.LOGGED_IN_URL_FRAGMENT,
+                timeout_s=300,
+            )
+            if ok:
+                logger.info(f"[pinduoduo] 登录成功 account={account.id}")
+            else:
                 logger.warning(f"[pinduoduo] 登录超时 account={account.id}")
-                return False
+            return ok
         except Exception as exc:
             logger.error(f"[pinduoduo] 登录异常 account={account.id}: {exc}")
             return False

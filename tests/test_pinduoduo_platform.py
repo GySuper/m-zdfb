@@ -110,12 +110,80 @@ def test_pinduoduo_routing_returns_pinduoduo_publisher() -> None:
 
 
 def test_pinduoduo_spec_wiring() -> None:
-    from wxsp.platforms.pinduoduo import PINDUODUO_SPEC, _post_publish, _pre_publish
+    from wxsp.platform_meta import get_meta
+    from wxsp.platforms.pinduoduo import PINDUODUO_SPEC, _post_publish_ext, _pre_publish_ext
 
     assert PINDUODUO_SPEC.platform_key == "pinduoduo"
     assert PINDUODUO_SPEC.display_name == "拼多多"
-    assert PINDUODUO_SPEC.pre_publish is _pre_publish
-    assert PINDUODUO_SPEC.post_publish is _post_publish
+    assert get_meta("pinduoduo").driver == "extension"
+    assert PINDUODUO_SPEC.pre_publish is _pre_publish_ext
+    assert PINDUODUO_SPEC.post_publish is _post_publish_ext
+
+
+class _ScriptedSession:
+    """按顺序回放插件消息;耗尽后模拟插件无响应。"""
+
+    def __init__(self, *msgs: dict[str, object]) -> None:
+        self.msgs = list(msgs)
+
+    def next_message(self, timeout: float) -> dict[str, object]:
+        if not self.msgs:
+            raise TimeoutError
+        return self.msgs.pop(0)
+
+
+def _ctx() -> MagicMock:
+    ctx = MagicMock()
+    ctx.task_id = 7
+    ctx.last_step = "browser"
+    return ctx
+
+
+def test_pump_tracks_steps_until_gate() -> None:
+    from wxsp.platforms.pinduoduo import _pump
+
+    ctx = _ctx()
+    session = _ScriptedSession(
+        {"type": "step", "step": "open_publish"},
+        {"type": "step", "step": "verify_login"},
+        {"type": "gate"},
+        {"type": "step", "step": "never_read"},
+    )
+    assert _pump(session, ctx, "gate", timeout=1) == {"type": "gate"}  # type: ignore[arg-type]
+    assert ctx.last_step == "verify_login"
+
+
+@pytest.mark.parametrize(
+    ("kind", "exc_name"),
+    [
+        ("cookie_expired", "CookieExpired"),
+        ("risk_control", "RiskControl"),
+        ("element_not_found", "ElementNotFound"),
+        ("upload_failed", "UploadFailed"),
+        ("product_not_found", "ProductNotFound"),
+        ("network", "NetworkError"),
+        ("something_new", "UnknownError"),
+    ],
+)
+def test_pump_maps_extension_errors_to_publisher_errors(kind: str, exc_name: str) -> None:
+    import wxsp.errors
+    from wxsp.platforms.pinduoduo import _pump
+
+    ctx = _ctx()
+    session = _ScriptedSession({"type": "error", "kind": kind, "step": "upload", "message": "坏了"})
+    with pytest.raises(getattr(wxsp.errors, exc_name), match="坏了"):
+        _pump(session, ctx, "gate", timeout=1)  # type: ignore[arg-type]
+    assert ctx.last_step == "upload"
+
+
+def test_pump_returns_on_halted_and_times_out_when_silent() -> None:
+    from wxsp.errors import ElementNotFound
+    from wxsp.platforms.pinduoduo import _pump
+
+    halted = {"type": "halted", "step": "upload"}
+    assert _pump(_ScriptedSession(halted), _ctx(), "gate", timeout=1) == halted  # type: ignore[arg-type]
+    with pytest.raises(ElementNotFound, match="无进展"):
+        _pump(_ScriptedSession(), _ctx(), "gate", timeout=1)  # type: ignore[arg-type]
 
 
 def test_pinduoduo_add_tags_types_space_after_fixed_wait() -> None:

@@ -9,15 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from wxsp.config import Settings
 from wxsp.models import Account
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from patchright.sync_api import Page
 
 
 class AlreadyClaimed(Exception):
@@ -85,12 +83,14 @@ class PlatformSpec:
     pre_publish:打开页 → 填表 → 风控探测(止于 dry-run gate 之前)。
     post_publish:点发布 → 等成功 →(可选)抽取 remote_url(写入 ctx.result)。
     display_name:中文平台名,用于"元素未找到"告警标题(如 "视频号" / "淘宝光合")。
+    回调第一个参数:patchright Page,或 managed_chrome.ExtensionSession
+    (平台 meta 的 driver="extension" 时)。
     """
 
     platform_key: str
     display_name: str
-    pre_publish: Callable[[Page, TaskBundle, Path, PublishContext], None]
-    post_publish: Callable[[Page, TaskBundle, PublishContext], None]
+    pre_publish: Callable[[Any, TaskBundle, Path, PublishContext], None]
+    post_publish: Callable[[Any, TaskBundle, PublishContext], None]
 
 
 class PlatformPublisher(Protocol):

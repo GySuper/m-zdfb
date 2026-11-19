@@ -253,7 +253,11 @@ class ExtensionSession:
                 text = " ".join(
                     str(a.get("value", a.get("description", ""))) for a in params.get("args", [])
                 )
-                logger.debug(f"[extension] {text}")
+                # 插件的 console.warn(如封面降级)要进正常日志,不然 best-effort 步骤失败没人知道
+                if params.get("type") in ("warning", "error"):
+                    logger.warning(f"[extension] {text}")
+                else:
+                    logger.info(f"[extension] {text}")
             elif method == "Runtime.exceptionThrown":
                 desc = params.get("exceptionDetails", {}).get("exception", {}).get("description")
                 logger.warning(f"[extension] 未捕获异常: {desc}")

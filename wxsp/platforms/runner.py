@@ -37,7 +37,7 @@ from wxsp.human_input import block_user_input, unblock_user_input
 from wxsp.managed_chrome import ExtensionSession, extension_session
 from wxsp.models import Account, Task, Video
 from wxsp.nas import cleanup_tmp, stage_to_tmp
-from wxsp.notify import NotifyEvent, error_type_cn, notify, step_cn
+from wxsp.notify import NotifyEvent, describe_failure, notify
 from wxsp.platform_meta import get_meta
 from wxsp.platforms.base import (
     RUNNING_STEPS,
@@ -48,13 +48,12 @@ from wxsp.platforms.base import (
     TaskBundle,
 )
 
-# error_type → (notify type, level, 中文标题)。element_not_found 的标题在派发时
-# 会用 step + 平台名重写,所以这里它的标题串只是占位(只取 type / level)。
-_NOTIFY_BY_ERROR: dict[str, tuple[str, str, str]] = {
-    "cookie_expired": ("cookie_expired", "error", "登录态失效,等待扫码"),
-    "risk_control": ("risk_control", "error", "风控触发,账号已暂停 24 小时"),
-    "element_not_found": ("element_not_found", "warn", "页面元素未找到,可能改版"),
-    "nas_unreachable": ("nas_unreachable", "error", "存储不可达"),
+# error_type → (事件 type, level);其余失败记 task_failed / error
+_NOTIFY_BY_ERROR: dict[str, tuple[str, str]] = {
+    "cookie_expired": ("cookie_expired", "error"),
+    "risk_control": ("risk_control", "error"),
+    "element_not_found": ("element_not_found", "warn"),
+    "nas_unreachable": ("nas_unreachable", "error"),
 }
 
 
@@ -364,36 +363,28 @@ def _finalize(
                 account_now.cookie_status = "expired"
                 logger.warning(f"登录态失效,账号 {account_id} cookie_status → expired")
 
-        # 失败派 NotifyEvent(dry-run 不告警;同账号同类失败由 halt 机制去重)
+        # 失败只写 Event(工作台「最近事件」用),不推送:每轮结束由 run_summary 统一汇总,
+        # 避免多个失败刷屏(2026-11-19 运营要求)
         if not result.ok and not result.dry_run:
             error_type = result.error_type or "unknown"
-            notify_type, level, title = _NOTIFY_BY_ERROR.get(
-                error_type,
-                ("task_failed", "error", f"任务失败:{error_type_cn(error_type)}"),
-            )
-            # element_not_found 给 title 拼上"在哪一步 + 平台名",运营一眼看到改版位置
-            if error_type == "element_not_found":
-                step_zh = step_cn(ctx.last_step)
-                title = f"元素未找到 · {step_zh} —— {spec.display_name}可能改版"
+            notify_type, level = _NOTIFY_BY_ERROR.get(error_type, ("task_failed", "error"))
+            reason, action = describe_failure(error_type, result.error_msg)
             account_cfg = settings.accounts.get(account_id)
-            display_name = account_cfg.display_name if account_cfg else None
             notify(
                 NotifyEvent(
                     type=notify_type,
                     level=level,
-                    title=title,
-                    content=result.error_msg or "(无错误信息)",
-                    context={
-                        "错误类型": error_type_cn(error_type),
-                        "最近步骤": step_cn(ctx.last_step),
-                    },
+                    title="发布失败",
+                    content=reason,
+                    context={"处理": action},
                     task_id=task_id,
                     account_id=account_id,
-                    account_display_name=display_name,
+                    account_display_name=account_cfg.display_name if account_cfg else None,
                     platform=bundle.platform,
                 ),
                 session=session,
                 settings=settings,
+                dispatch=False,
             )
 
     # 终态回写飞书(HTTP 调用放 session_scope 之外,不持 DB 事务)

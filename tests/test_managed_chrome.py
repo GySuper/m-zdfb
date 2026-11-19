@@ -190,7 +190,7 @@ def test_entry_popup_that_cannot_be_closed_fails_closed(tmp_path: Path) -> None:
     msg = _run_popups(tmp_path, "stuck")
     assert msg["type"] == "error"
     assert msg["kind"] == "element_not_found"
-    assert "无法安全关闭" in str(msg["message"])
+    assert "关不掉" in str(msg["message"])
 
 
 def test_relaunch_on_same_profile_runs_current_extension_code(
@@ -363,7 +363,7 @@ def test_upload_not_fooled_by_bottom_card_text(tmp_path: Path) -> None:
     msg = _run_upload(tmp_path, "stuck")
     assert msg["type"] == "error"
     assert msg["kind"] == "upload_failed"
-    assert "没有进入上传状态" in str(msg["message"])
+    assert "没开始上传" in str(msg["message"])
 
 
 def test_upload_done_when_file_name_and_success_line_appear(tmp_path: Path) -> None:

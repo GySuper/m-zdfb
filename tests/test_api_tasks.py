@@ -156,12 +156,14 @@ def test_retry_resets_to_pending_and_spawns(
     engine = get_engine(tmp_path / "db.sqlite")
 
     def fake_spawn(name, fn, *args, **kwargs):
+        # 单条重试和「开始任务」走同一条通道(run_today_pending 指定 task_ids),跑完推汇总
         _ = fn, kwargs
+        _settings, _platform, ids = args
         with Session(engine) as separate_session:
-            task = separate_session.get(Task, args[0])
+            task = separate_session.get(Task, ids[0])
             assert task is not None
             assert task.status == "pending"
-        calls.append((name, args[0]))
+        calls.append((name, ids[0]))
 
     monkeypatch.setattr(routes_tasks, "_spawn", fake_spawn)
 

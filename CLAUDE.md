@@ -847,22 +847,19 @@ class NotifyEvent:
 
 **第一版只实现 `WecomNotifier`**(企微机器人,Markdown 消息;飞书做协作平台,企微做告警,职责分工)。`FeishuNotifier` / `DingtalkNotifier` 留作接口预留,需要时几十行代码即可加上。
 
-**通知文案约定(全中文,无英文穿透)**:
-- 所有 markdown 标题前缀平台中文名(如 `[视频号]` / `[小红书]`),由 `notify._platform_tag` 从 `REGISTRY` 取;未知平台回退 `[视频号]`
-- `level` 渲染为中文标签:`info → [信息]` / `warn → [警告]` / `error → [错误]`
-- `error_type` 通过 `error_type_cn()` 映射(如 `cookie_expired → 登录态失效`),未知 key 兜底"未知错误"
-- 发布步骤(`step`)通过 `step_cn()` 映射(如 `upload → 上传视频`)。`element_not_found` 的 title 会拼上 step,例如"元素未找到 · 设置封面 —— 视频号可能改版"
-- 账号优先显示 `display_name`,没有时回退到 `account_id`
+**通知排版约定(运营友好:全中文、不出现代码、不啰嗦;2026-11-19 运营确认)**:
+- 统一由 `notify._format_markdown` 渲染:**`平台 · 标题`** + 带色状态词(`NotifyEvent.status`,如「需要处理」「全部成功」,颜色随 level)/ 正文 / 引用行字段(`> 账号　xx`,账号优先 `display_name`,其余来自 `context`)/ 灰色页脚(任务号 + 时间)。不再有 `[错误]` 这类方括号标签
+- 飞书(纯文本)用同一份内容去掉颜色 / 加粗 / 引用符号(`_format_plain`)
+- 发布失败的原因 + 处理办法统一走 `notify.describe_failure(error_type, error_msg)`(`_FAILURE_HINTS` 表):去掉 `step=xxx:` 前缀,改版类拼上「卡在「步骤」」,夹带英文异常原文时只留中文类别
+- 插件 / 发布器的报错文案只写「发生了什么」的中文细节,类别和处理办法由上面统一补,不要在报错里写「需重新扫码」这类处理话术
 
 ### 通知规则
 
-- ✅ 任务**失败**(重试用完后) → 企微告警(同账号同类失败已被 halt 机制去重,见上节)
-- ✅ **风控** → 高优告警 + 账号自动暂停 24h
-- ✅ **登录失效** → 提醒扫码;`cookie_warning`(距上次 active 超阈值但本次还能登)也推一条
-- ✅ **元素找不到**(可能改版) → 告警(标题拼步骤名,运营一眼看到改版位置)
-- ✅ **历史积压超阈值**(`backlog_high`) → 告警;**24h 冷却**(进程级 `threading.Lock` + Lock 内 commit 保证查写原子化,防 daemon 反复重启 / cron 多次触发刷屏)
-- ✅ **日汇总**(`run_summary`) → 每轮 `run_today_pending` 跑完推一条:成功 N / 失败 M / 暂停跳过 K,按账号 breakdown + 失败明细。整轮 halt 时头部高亮原因。失败 > 0 时 level=warn,否则 info
-- ⚠️ 单条任务**成功** → 默认**不发**(80 条/天会刷屏);汇总在 run_summary 里出
+- **发布失败不单独推送**(避免多个失败刷屏):runner 只写 Event(`notify(..., dispatch=False)`,工作台「最近事件」用),每轮 `run_today_pending` 结束推**一条** `run_summary`
+- **`run_summary`**:数字一行 → 整轮中止说明(原因 / 影响条数 / 处理)→「需要处理」逐条(视频 · 账号 · 定时 · 任务号 · 原因 · 处理;被跳过的账号合并一块)→「跳过」(人为暂停 / 停用,只说明)→「各账号」(多账号时)。全部成功只发标题 + 一行数字;0 任务不发
+- 单条「重试」也走 `run_today_pending(task_ids=[id])`,跑完同样推汇总
+- 风控 / 登录失效 / 改版不再即时推送,随本轮汇总一起到(期间风控账号已自动暂停、登录失效账号本轮跳过)
+- 仍单独推送的提醒:`backlog_high`(24h 冷却,进程级 `threading.Lock` + Lock 内 commit 防刷屏)、`cookie_warning`、通知测试
 - ❌ 不做"每日日报"(被 run_summary 覆盖,YAGNI)
 
 ### 路由

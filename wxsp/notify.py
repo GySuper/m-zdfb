@@ -17,6 +17,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -51,6 +52,7 @@ class NotifyEvent:
     account_id: str | None = None
     account_display_name: str | None = None
     platform: str = "tencent_channel"
+    status: str | None = None  # 标题后的状态词:如「需要处理」「全部成功」;颜色随 level
 
 
 # 通知里出现的英文术语 → 中文映射。运营看的全中文,且与 UI 侧 api.i18n 不依赖
@@ -106,6 +108,53 @@ _STEP_CN: dict[str, str] = {
     "wait_success": "等待成功",
     "extract": "抓取链接",
 }
+
+
+# 发布失败 → (运营看的原因, 处理办法)。通知只给这两句话,不出现错误码 / 步骤英文名。
+_FAILURE_HINTS: dict[str, tuple[str, str]] = {
+    "product_not_found": ("商品问题", "在飞书换成在架商品,状态改回「待入库」"),
+    "product_selection_failed": ("商品勾选失败", "在飞书核对商品 ID,状态改回「待入库」"),
+    "topic_not_found": ("话题没找到", "在飞书改成平台上已有的话题,状态改回「待入库」"),
+    "video_invalid": ("视频文件有问题", "在飞书换个视频文件,状态改回「待入库」"),
+    "upload_failed": ("视频上传失败", "稍后到「任务」页点「重试」"),
+    "network": ("网络不稳定", "稍后到「任务」页点「重试」"),
+    "cookie_expired": ("账号登录失效", "到「账号」页扫码登录,登录后自动补发"),
+    "risk_control": ("触发平台风控", "已自动暂停 24 小时,期间别手动操作这个账号"),
+    "element_not_found": ("发布页可能改版", "请联系技术同学排查,截图已保存"),
+    "nas_unreachable": ("读不到视频存储", "确认 NAS 已开机、电脑已连上共享盘"),
+    "publish_unconfirmed": (
+        "发布结果未确认",
+        "先去平台后台看有没有发出,没发出再到「任务」页点「重试」",
+    ),
+    "interrupted": ("任务被中断", "到「任务」页点「重试」"),
+    "unknown": ("未知问题", "稍后到「任务」页点「重试」,反复出现请联系技术同学"),
+}
+_STEP_PREFIX = re.compile(r"^step=(\w+):\s*")
+_CODE_LIKE = re.compile(r"[A-Za-z]{6,}")  # 夹带英文异常原文(如 Python 报错)就不展示细节
+
+
+def describe_failure(error_type: str | None, error_msg: str | None) -> tuple[str, str]:
+    """发布失败 → (原因, 处理办法),给运营看的大白话。
+
+    原因 = 中文类别 + 页面 / 插件给的中文细节(去掉 `step=xxx:` 前缀);
+    细节里夹带英文异常原文时只留类别,不让代码穿透到通知里。
+    """
+    kind = error_type if error_type in _FAILURE_HINTS else "unknown"
+    label, action = _FAILURE_HINTS[kind]
+    first = (error_msg or "").strip().splitlines()[0] if error_msg else ""
+    m = _STEP_PREFIX.match(first)
+    step = m.group(1) if m else None
+    detail = (first[m.end() :] if m else first).strip()
+    if kind == "unknown" or _CODE_LIKE.search(detail):
+        detail = ""
+    if len(detail) > 60:
+        detail = detail[:60] + "…"
+    reason = label
+    if kind == "element_not_found" and step:
+        reason += f",卡在「{step_cn(step)}」"
+    if detail:
+        reason += f":{detail}"
+    return reason, action
 
 
 def error_type_cn(value: str | None) -> str:
@@ -235,46 +284,40 @@ def _platform_tag(platform: str | None) -> str:
     return get_meta(platform).label
 
 
-def _format_markdown(event: NotifyEvent) -> str:
-    """渲染 Markdown:平台标识 + 中文 level 标签 + title + 正文 + 可选 任务编号/账号/上下文。
+_STATUS_COLOR = {"info": "info", "warn": "warning", "error": "warning"}
+_FIELD_GAP = "\u3000"  # 全角空格:字段名和值之间留一格
 
-    平台标识按 event.platform 取中文名(如"[视频号]" / "[淘宝光合]")。
-    全中文输出 —— 运营收到企微推送一眼看明白,不出现英文 level / 字段名 / 账号 ID。
+
+def _format_markdown(event: NotifyEvent) -> str:
+    """企微 Markdown:**平台 · 标题** 状态词(带色)/ 正文 / 引用行字段 / 灰色页脚。
+
+    字段(`> 账号  美食号`)= 账号(优先 display_name)+ context 依序;页脚 = 任务编号 + 时间。
+    全中文、无方括号标签、无错误码 —— 运营一眼看懂该干什么。
     """
-    platform_label = _platform_tag(event.platform)
-    tag = {"info": "[信息]", "warn": "[警告]", "error": "[错误]"}.get(event.level, "[通知]")
-    lines = [f"## [{platform_label}] {tag} {event.title}", "", event.content]
-    if event.task_id is not None:
-        lines.append(f"> 任务编号:{event.task_id}")
+    head = f"**{_platform_tag(event.platform)} · {event.title}**"
+    if event.status:
+        head += f' <font color="{_STATUS_COLOR.get(event.level, "comment")}">{event.status}</font>'
+    lines = [head]
+    if event.content:
+        lines.append(event.content)
+    fields: dict[str, Any] = {}
     if event.account_id is not None:
-        # 优先 display_name(中文友好名),没有时回退到 account_id 字符串
-        shown = event.account_display_name or event.account_id
-        lines.append(f"> 账号:{shown}")
-    if event.context:
-        lines.append("")
-        for k, v in event.context.items():
-            lines.append(f"- **{k}**:{v}")
+        fields["账号"] = event.account_display_name or event.account_id
+    fields.update(event.context)
+    lines += [f"> {k}{_FIELD_GAP}{v}" for k, v in fields.items()]
+    foot = [f"任务 #{event.task_id}"] if event.task_id is not None else []
+    foot.append(f"{datetime.now():%m-%d %H:%M}")
+    lines.append(f'<font color="comment">{" · ".join(foot)}</font>')
     return "\n".join(lines)
+
+
+_MARKUP = re.compile(r"</?font[^>]*>|\*\*")
 
 
 def _format_plain(event: NotifyEvent) -> str:
-    """纯文本渲染(飞书文本消息用)。与 `_format_markdown` 同信息,但不带 markdown 符号。
-
-    飞书文本不解析 markdown,`##`/`**`/`>` 会裸露,故单独排版成纯文本。
-    """
-    platform_label = _platform_tag(event.platform)
-    tag = {"info": "[信息]", "warn": "[警告]", "error": "[错误]"}.get(event.level, "[通知]")
-    lines = [f"【{platform_label}】{tag} {event.title}", event.content]
-    if event.task_id is not None:
-        lines.append(f"任务编号:{event.task_id}")
-    if event.account_id is not None:
-        shown = event.account_display_name or event.account_id
-        lines.append(f"账号:{shown}")
-    if event.context:
-        lines.append("")
-        for k, v in event.context.items():
-            lines.append(f"{k}:{v}")
-    return "\n".join(lines)
+    """纯文本(飞书文本消息不解析 markdown):同一份内容去掉颜色 / 加粗 / 引用符号。"""
+    text = _MARKUP.sub("", _format_markdown(event))
+    return "\n".join(line[2:] if line.startswith("> ") else line for line in text.splitlines())
 
 
 def build_notifiers_from_settings(
@@ -304,6 +347,7 @@ def notify(
     settings: Settings,
     platform: str = "tencent_channel",
     notifiers: list[Notifier] | None = None,
+    dispatch: bool = True,
 ) -> None:
     """统一入口:写 Event 审计 + 按 notify_on 过滤后派发到外部渠道。
 
@@ -332,8 +376,8 @@ def notify(
     except Exception as exc:
         logger.exception(f"[notify] 写 Event 表失败 type={event.type}: {exc}")
 
-    # ② 派发外部渠道(白名单 + 单渠道失败不影响其它)
-    if event.type not in notify_on:
+    # ② 派发外部渠道(白名单 + 单渠道失败不影响其它);dispatch=False 只记 Event 不推送
+    if not dispatch or event.type not in notify_on:
         return
     if notifiers is None:
         notifiers = build_notifiers_from_settings(settings, platform=effective_platform)

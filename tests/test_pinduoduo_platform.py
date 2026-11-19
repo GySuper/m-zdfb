@@ -183,7 +183,7 @@ def test_pump_returns_on_halted_and_times_out_when_silent() -> None:
 
     halted = {"type": "halted", "step": "upload"}
     assert _pump(_ScriptedSession(halted), _ctx(), "gate", timeout=1) == halted  # type: ignore[arg-type]
-    with pytest.raises(ElementNotFound, match="无进展"):
+    with pytest.raises(ElementNotFound, match="没有任何进展"):
         _pump(_ScriptedSession(), _ctx(), "gate", timeout=1)  # type: ignore[arg-type]
 
 

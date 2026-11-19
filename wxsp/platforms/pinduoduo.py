@@ -65,7 +65,7 @@ def _pump(
         try:
             msg = session.next_message(timeout=timeout)
         except TimeoutError as err:
-            raise ElementNotFound(f"插件 {timeout:.0f}s 无进展") from err
+            raise ElementNotFound(f"页面 {timeout / 60:.0f} 分钟没有任何进展") from err
         kind = msg.get("type")
         if kind == "relogin":
             ctx.result.relogged_in = True
@@ -105,7 +105,7 @@ def _pre_publish(
     product_ids = _product_ids(bundle, ctx)
     if not product_ids:
         ctx.last_step = "products"
-        raise ProductNotFound("拼多多必挂商品,但 product_ids 为空")
+        raise ProductNotFound("飞书里没填商品 ID(拼多多必须挂商品)")
     staged_cover = None
     if bundle.video_cover_path is not None:
         staged_cover = stage_to_tmp(

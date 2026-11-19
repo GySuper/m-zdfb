@@ -1058,8 +1058,9 @@ def test_wecom(
             NotifyEvent(
                 type="config_test",
                 level="info",
-                title="自动发布平台 · 测试推送",
-                content="如果你看到这条消息,说明机器人地址配置正确。",
+                title="通知测试",
+                status="正常",
+                content="能看到这条,说明企业微信机器人配置正确",
             )
         )
     except Exception as exc:
@@ -1103,8 +1104,9 @@ def test_lark(
             NotifyEvent(
                 type="config_test",
                 level="info",
-                title="自动发布平台 · 测试推送",
-                content="如果你看到这条消息,说明飞书机器人配置正确。",
+                title="通知测试",
+                status="正常",
+                content="能看到这条,说明飞书机器人配置正确",
             )
         )
     except Exception as exc:

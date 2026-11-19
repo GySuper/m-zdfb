@@ -52,12 +52,12 @@ async function openPublish(t) {
     const u = await t.url();
     return u.includes(LOGIN_FRAG) || u.includes(HOME_FRAG);
   }, 30_000);
-  if (!landed) throw new StepError("network", "拼多多发布页加载超时");
+  if (!landed) throw new StepError("network", "发布页打不开(30 秒没加载出来)");
 }
 
 async function verifyLogin(t) {
   if ((await t.url()).includes(LOGIN_FRAG)) {
-    if (!t.job.login) throw new StepError("cookie_expired", "拼多多登录态失效(停在 SSO 登录页,需重新扫码)");
+    if (!t.job.login) throw new StepError("cookie_expired", "页面停在登录页");
     // 登录过期时打开视频首页实测落到「请选择登录身份」页(没有表单),所以直接开带表单的 SSO 登录页
     await passwordLogin(t, t.job.login_url, async () => (await t.url()).includes(HOME_FRAG));
     t.emit("relogin");
@@ -68,7 +68,7 @@ async function verifyLogin(t) {
   }
   // 正向确认:上传框是隐藏的 file input,只判断存在
   const ok = await t.until(() => t.page((sel) => !!document.querySelector(sel), VIDEO_FILE_INPUT), 8_000);
-  if (!ok) throw new StepError("cookie_expired", "拼多多登录态失效(上传入口未出现,需重新扫码登录)");
+  if (!ok) throw new StepError("cookie_expired", "发布页没出现上传入口");
 }
 
 // 等弹窗数量下降(最多 2s)
@@ -105,7 +105,7 @@ export async function entryPopups(t, { dialogsOnly = false } = {}) {
       continue;
     }
     quiet = 0;
-    if (dismissed >= MAX_POPUPS) throw new StepError("element_not_found", `拼多多入口弹窗超过 ${MAX_POPUPS} 个,停止自动关闭`);
+    if (dismissed >= MAX_POPUPS) throw new StepError("element_not_found", `弹窗太多(超过 ${MAX_POPUPS} 个),已停止自动关闭`);
     let closed = false;
     if ((await t.count(closeSpec)) > 0) {
       try {
@@ -119,10 +119,10 @@ export async function entryPopups(t, { dialogsOnly = false } = {}) {
       await t.key("Escape", "Escape", 27);
       closed = await countDropped(t, watch, before);
     }
-    if (!closed) throw new StepError("element_not_found", "拼多多入口弹窗无法安全关闭(仅允许关闭按钮或 Escape)");
+    if (!closed) throw new StepError("element_not_found", "有弹窗关不掉(只会点关闭按钮或按退出键)");
     dismissed++;
   }
-  throw new StepError("element_not_found", "拼多多入口弹窗持续出现,页面未在 10 秒内稳定");
+  throw new StepError("element_not_found", "弹窗一直冒出来,页面 10 秒内没稳定");
 }
 
 // 上传完成 = 页面出现「文件名:<本次文件>」且有一行恰好是「视频上传成功」。
@@ -132,7 +132,7 @@ export async function upload(t) {
   await t.setFiles(VIDEO_FILE_INPUT, [t.job.video_path]);
   const startMs = Math.min(20_000, t.job.upload_timeout_s * 1000);
   const started = await t.until(() => t.hasText(`文件名：${name}`), startMs, 500);
-  if (!started) throw new StepError("upload_failed", "选择视频后页面没有进入上传状态");
+  if (!started) throw new StepError("upload_failed", "选完视频后页面没开始上传");
   let failed = false;
   const done = await t.until(async () => {
     const lines = await pageLines(t);
@@ -140,7 +140,7 @@ export async function upload(t) {
     return failed || lines.has(UPLOAD_DONE_TEXT);
   }, t.job.upload_timeout_s * 1000, 1000);
   if (failed) throw new StepError("upload_failed", "页面提示上传失败");
-  if (!done) throw new StepError("upload_failed", "视频上传/处理超时");
+  if (!done) throw new StepError("upload_failed", "上传超时(视频还没处理完)");
   console.log("视频上传完成");
 }
 
@@ -167,12 +167,12 @@ export async function passwordLogin(t, loginUrl, loggedIn) {
   await t.goto(loginUrl);
   // SSO 页实测 5s 左右才渲染出表单
   if (!(await t.waitVisible({ sel: ANY, text: "账号登录", exact: true }, 20_000))) {
-    throw new StepError("cookie_expired", "登录页没出现「账号登录」,无法自动登录,需人工扫码");
+    throw new StepError("cookie_expired", "登录页没有「账号登录」入口,没法自动登录");
   }
   await t.click({ sel: ANY, text: "账号登录", exact: true, what: "账号登录页签" });
   await wait(800, 1500);
   if (!(await t.waitVisible({ sel: USERNAME_INPUT }, 10_000))) {
-    throw new StepError("cookie_expired", "账号登录表单没出现,无法自动登录,需人工扫码");
+    throw new StepError("cookie_expired", "账号登录表单没出现,没法自动登录");
   }
   await t.fill({ sel: USERNAME_INPUT, what: "登录账号输入框" }, username);
   await wait(400, 900);
@@ -190,7 +190,7 @@ export async function passwordLogin(t, loginUrl, loggedIn) {
   }, 30_000, 1000);
   if (!ok) {
     const why = hints.length ? `页面提示:${hints.slice(0, 3).join(" / ")}` : "可能需要滑块或短信验证";
-    throw new StepError("cookie_expired", `账号密码自动登录没成功(${why}),需人工扫码`);
+    throw new StepError("cookie_expired", `自动登录没成功(${why})`);
   }
   console.log("已用账号密码自动登录");
 }
@@ -221,8 +221,9 @@ async function products(t) {
     }
   }
   if (!(await t.waitVisible({ sel: "button", text: "删除商品" }, 10_000))) {
-    const hint = hints.length ? `;页面提示:${hints.slice(0, 3).join(" / ")}` : ";页面无提示";
-    throw new StepError("product_not_found", `商品绑定失败(ID: ${t.job.product_ids.join(",")})${hint}`);
+    const ids = t.job.product_ids.join("、");
+    const msg = hints.length ? `${hints.slice(0, 3).join(" / ")}(商品 ID ${ids})` : `商品 ${ids} 没绑上`;
+    throw new StepError("product_not_found", msg);
   }
   console.log(`绑定商品完成 ${t.job.product_ids.join(",")}`);
 }
@@ -265,7 +266,7 @@ async function publishOptions(t) {
       (c) => [...document.querySelectorAll('input[type="radio"]')].some((r) => r.checked && (r.closest("label") || r.parentElement).innerText.trim() === c),
       choice,
     );
-    if (!checked) throw new StepError("element_not_found", `「${choice}」没有选中`);
+    if (!checked) throw new StepError("element_not_found", `「${choice}」没选上`);
   }
 }
 
@@ -276,7 +277,7 @@ async function gotoMonth(t, year, month) {
       const head = document.querySelector(h);
       return head ? [parseInt(head.querySelector("input")?.value, 10), parseInt(head.querySelector('[class*="RPR_dateText"]')?.textContent, 10)] : null;
     }, CALENDAR_HEADER);
-    if (!ym || Number.isNaN(ym[0]) || Number.isNaN(ym[1])) throw new StepError("element_not_found", "日历头部年月未找到");
+    if (!ym || Number.isNaN(ym[0]) || Number.isNaN(ym[1])) throw new StepError("element_not_found", "日历上找不到年月");
     const diff = (year - ym[0]) * 12 + (month - ym[1]);
     if (diff === 0) return;
     const dir = diff > 0 ? "right" : "left";
@@ -293,7 +294,7 @@ async function schedule(t) {
   const [hh, mm, ss] = target.slice(11).split(":");
   await t.click({ sel: ANY, text: "定时发布", exact: true, what: "定时发布" });
   await wait(1000, 2000);
-  if (!(await t.waitVisible({ sel: SCHEDULE_DATE_INPUT }, 10_000))) throw new StepError("element_not_found", "定时日期框未出现");
+  if (!(await t.waitVisible({ sel: SCHEDULE_DATE_INPUT }, 10_000))) throw new StepError("element_not_found", "定时日期框没出现");
   await t.click({ sel: SCHEDULE_DATE_INPUT, what: "定时日期框" });
   await wait(1500, 2000);
   await gotoMonth(t, Number(target.slice(0, 4)), Number(target.slice(5, 7)));
@@ -309,7 +310,7 @@ async function schedule(t) {
   await wait(1500, 2500);
   const actual = await t.inputValue(SCHEDULE_DATE_INPUT);
   if (actual !== target) {
-    throw new StepError("element_not_found", `定时时间没设对:页面 ${actual},应为 ${target}`);
+    throw new StepError("element_not_found", `定时没设对:页面上是 ${actual},应为 ${target}`);
   }
 }
 
@@ -325,7 +326,7 @@ async function declaration(t) {
 async function risk(t) {
   const text = await t.page(() => document.body.innerText);
   const hit = RISK_CONTROL_KEYWORDS.find((kw) => text.includes(kw));
-  if (hit) throw new StepError("risk_control", `页面命中风控关键词: ${hit}`);
+  if (hit) throw new StepError("risk_control", `页面提示「${hit}」`);
 }
 
 // 主发布按钮文案就是「发布」二字(排除顶部「发布视频」、底部「一键发布」/「取消发布」)
@@ -350,7 +351,7 @@ async function waitSuccess(t) {
 export async function guard(t, step) {
   if (t.tabId == null || step === "open_publish" || step === "verify_login") return;
   if ((await t.url()).includes(LOGIN_FRAG)) {
-    throw new StepError("cookie_expired", "发布途中登录失效(页面跳到了登录页)");
+    throw new StepError("cookie_expired", "发布途中跳到了登录页");
   }
   if ((await t.count({ sel: ENTRY_DIALOG })) > 0) await entryPopups(t, { dialogsOnly: true });
 }

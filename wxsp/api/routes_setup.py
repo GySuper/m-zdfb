@@ -386,8 +386,9 @@ def test_wecom(webhook: str = Form(...)) -> HTMLResponse:
             NotifyEvent(
                 type="setup_test",
                 level="info",
-                title="自动发布平台 · 安装测试",
-                content="如果你看到这条消息,说明机器人地址配置正确。",
+                title="通知测试",
+                status="正常",
+                content="能看到这条,说明机器人配置正确",
             )
         )
         return HTMLResponse(

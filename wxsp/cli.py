@@ -251,12 +251,14 @@ def doctor(
                         NotifyEvent(
                             type="cookie_warning",
                             level="warn",
-                            title=f"登录态即将过期:{display_name}",
-                            content=(
-                                f"账号「{display_name}」距上次成功活跃已超过 "
-                                f"{settings.monitoring.cookie_warn_days} 天,"
-                                f"登录态可能不稳定,建议到管理后台账号页扫码续命。"
-                            ),
+                            title="账号登录快到期",
+                            status="提醒",
+                            content="",
+                            context={
+                                "说明": f"已经 {settings.monitoring.cookie_warn_days} 天"
+                                "没成功用过,登录可能快失效了",
+                                "处理": "有空去「账号」页点「扫码续期」,避免下次发布时掉线",
+                            },
                             account_id=row.account_id,
                             account_display_name=display_name,
                         ),

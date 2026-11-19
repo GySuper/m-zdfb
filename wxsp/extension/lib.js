@@ -76,7 +76,7 @@ async function probeInPage(spec, mode) {
     }
     break;
   }
-  if (x < 0 || x >= vw) return { error: "在视口外" };
+  if (x < 0 || x >= vw) return { error: "不在可见区域" };
   if (y < 0 || y >= vh) return { need_scroll: y - vh / 2, ax: Math.max(30, Math.min(vw - 30, x)), ay: vh / 2 };
   const hit = document.elementFromPoint(x, y);
   if (!hit || (hit !== el && !el.contains(hit) && !hit.contains(el))) return { error: "被遮挡" };
@@ -180,7 +180,7 @@ export class Task {
       }
       if (Date.now() > deadline) {
         const why = p?.error || (typeof p?.need_scroll === "number" ? "滚动后仍不在视口" : "未找到");
-        throw new StepError("element_not_found", `${what}${why}(等了 ${Math.round(timeoutMs / 1000)}s)`);
+        throw new StepError("element_not_found", `${what}${why}(等了 ${Math.round(timeoutMs / 1000)} 秒)`);
       }
       await sleep(500);
     }
@@ -208,7 +208,7 @@ export class Task {
       );
       if (norm(value) === norm(text) || norm(value).includes(norm(text))) return;
     }
-    throw new StepError("element_not_found", `${spec.what || spec.sel}输入没有生效(已重输一次)`);
+    throw new StepError("element_not_found", `${spec.what || spec.sel}输入没生效(已重输一次)`);
   }
 
   async clickAt(x, y) {
@@ -260,7 +260,7 @@ export class Task {
   async setFiles(selector, paths) {
     const { root } = await this.cdp("DOM.getDocument", { depth: 0 });
     const { nodeId } = await this.cdp("DOM.querySelector", { nodeId: root.nodeId, selector });
-    if (!nodeId) throw new StepError("element_not_found", `上传框未找到:${selector}`);
+    if (!nodeId) throw new StepError("element_not_found", "上传框没找到");
     await this.cdp("DOM.setFileInputFiles", { nodeId, files: paths });
   }
 

@@ -271,7 +271,8 @@ def retry_task(
     session.add(task)
     # 后台线程使用独立 session,必须先提交 pending,否则 claim_task 会读到旧状态。
     session.commit()
-    _spawn("retry", _run_publish, task_id, settings)
+    # 和「开始任务」走同一条通道:跑完同样推一条汇总(单条失败不再单独推送)
+    _spawn("retry", _run_selected, settings, plat, [task_id])
     return RedirectResponse(
         url=f"/tasks/{task_id}?flash=已加入队列重试&platform={plat}", status_code=303
     )
@@ -458,10 +459,10 @@ def _fragment(level: str, text: str) -> str:
 # ---------- 后台 worker ----------
 
 
-def _run_publish(task_id: int, settings: Settings) -> None:
-    from wxsp.publisher import publish
+def _run_selected(settings: Settings, platform: str, ids: list[int]) -> None:
+    from wxsp.scheduler import run_today_pending
 
-    publish(task_id, settings=settings)
+    run_today_pending(settings, do_sync=False, platform=platform, task_ids=ids)
 
 
 def _run_today_pending(settings: Settings, *, platform: str = "tencent_channel") -> None:

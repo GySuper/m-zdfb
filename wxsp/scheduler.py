@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import threading
 from dataclasses import dataclass, field
 from datetime import date as _date
@@ -27,8 +26,9 @@ from wxsp.models import (
     Account,
     Event,
     Task,
+    Video,
 )
-from wxsp.notify import NotifyEvent, error_type_cn, notify
+from wxsp.notify import NotifyEvent, describe_failure, notify
 from wxsp.publisher import AlreadyClaimed, publish
 from wxsp.sync import sync_now
 
@@ -45,7 +45,10 @@ class AccountRunStat:
     succeeded: int = 0
     failed: int = 0
     skipped: int = 0
-    halt_reason: str | None = None
+    halt_reason: str | None = None  # 本轮跳过该账号的原因(大白话,汇总里直接展示)
+    halt_action: str | None = None  # 对应的处理办法
+    halt_actionable: bool = False  # 需要运营处理(登录失效 / 风控);人为暂停、停用不算
+    global_skipped: int = 0  # 因整轮中止被跳过的条数(汇总在顶部统一说明,不进账号明细)
 
 
 # 触发"本轮停掉该账号剩余 task"的错误类型。第一条命中后,后续直接 skip,不再
@@ -74,6 +77,8 @@ class RunSummary:
     # 整轮被全局错误中断(如视频号改版 / NAS 掉线);set 后剩余 task 全跳过,
     # run_summary 文案头部高亮提示。
     global_halt_reason: str | None = None
+    global_halt_action: str | None = None
+    global_skipped: int = 0
 
 
 def queue_today(
@@ -152,13 +157,13 @@ def maybe_warn_backlog(
             NotifyEvent(
                 type="backlog_high",
                 level="warn",
-                title=f"历史积压 {backlog} 条",
-                content=(
-                    f"今天之前还有 {backlog} 条任务没跑完(待发布或已中断),"
-                    f"超过阈值 {threshold}。"
-                    "建议到管理后台的「历史积压」视图里逐条处理。"
-                ),
-                context={"积压条数": backlog},
+                title=f"有 {backlog} 条任务积压",
+                status="提醒",
+                content="",
+                context={
+                    "说明": "都是今天之前没发出去的任务(待发布或中断)",
+                    "处理": "到「任务」页的「历史积压」里重新入队或取消",
+                },
                 platform=platform,
             ),
             session=session,
@@ -189,27 +194,101 @@ def mark_stale_running_as_interrupted(session: Session, *, now: datetime | None 
     return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
 
-# 失败消息里 publisher 拼的 "step=xxx: " 前缀对运营无意义,文案展示前剥掉。
-_STEP_PREFIX_RE = re.compile(r"^step=\S+:\s*")
+_LOGIN_ACTION = "到「账号」页扫码登录,登录后自动补发"
+_FIELD_GAP = "\u3000"
 
 
-def _short_failure_reason(task: Task) -> str:
-    """把 task.last_error_type + last_error_msg 压成一行运营能直接看懂的中文。
+def _video_name(video: Video | None, task_id: int) -> str:
+    """汇总里怎么称呼这条视频:标题 → 描述开头(拼多多 / 快手无标题)→ 任务号。"""
+    text = ((video.title or video.description or "") if video else "").strip().splitlines()
+    name = text[0] if text else ""
+    if not name:
+        return f"任务 #{task_id}"
+    return name if len(name) <= 24 else name[:24] + "…"
 
-    格式:`错误类型 —— 简短描述`(描述为空时只显示错误类型)。
-    msg 取首行 + 截到 50 字符,避免一条 publisher 长 traceback 撑爆通知。
+
+def _run_summary_body(
+    settings: Settings, summary: RunSummary, failed_task_ids: list[int]
+) -> tuple[str, int]:
+    """汇总正文(企微 markdown)+ 需要处理的条数。
+
+    结构:数字一行 → 整轮中止说明 → 需要处理(每条失败:视频 / 账号 + 定时 / 原因 / 处理;
+    每个被跳过的账号一块)→ 跳过(人为暂停 / 停用,只说明)→ 各账号(多账号时)。
     """
-    etype_cn = error_type_cn(task.last_error_type)
-    raw = (task.last_error_msg or "").strip()
-    if not raw:
-        return etype_cn
-    first_line = raw.splitlines()[0]
-    cleaned = _STEP_PREFIX_RE.sub("", first_line).strip()
-    if not cleaned:
-        return etype_cn
-    if len(cleaned) > 50:
-        cleaned = cleaned[:50] + "…"
-    return f"{etype_cn} —— {cleaned}"
+    names = {aid: cfg.display_name for aid, cfg in settings.accounts.items()}
+    lines = [
+        f'成功 <font color="info">{summary.succeeded}</font> · 失败 {summary.failed}'
+        f" · 跳过 {summary.skipped_paused}"
+    ]
+    if summary.global_halt_reason is not None:
+        lines += [
+            "",
+            f"> 原因{_FIELD_GAP}{summary.global_halt_reason}",
+            f"> 影响{_FIELD_GAP}剩下 {summary.global_skipped} 条任务已暂停,没有发出",
+            f"> 处理{_FIELD_GAP}{summary.global_halt_action}",
+        ]
+
+    blocks: list[list[str]] = []
+    failures: list[tuple[datetime, list[str]]] = []
+    if failed_task_ids:
+        with Session(get_engine()) as session:
+            for tid in failed_task_ids:
+                task = session.get(Task, tid)
+                if task is None:
+                    continue
+                reason, action = describe_failure(task.last_error_type, task.last_error_msg)
+                account = names.get(task.account_id, task.account_id)
+                failures.append(
+                    (
+                        task.publish_at,
+                        [
+                            f"{_video_name(session.get(Video, task.video_id), tid)}",
+                            f"账号{_FIELD_GAP}{account} · 定时 {task.publish_at:%m-%d %H:%M}"
+                            f" · 任务 #{tid}",
+                            f"原因{_FIELD_GAP}{reason}",
+                            f"处理{_FIELD_GAP}{action}",
+                        ],
+                    )
+                )
+    blocks += [b for _, b in sorted(failures, key=lambda x: x[0])]
+    notes: list[str] = []
+    needs = len(failures)
+    for aid, stat in summary.per_account.items():
+        skipped_here = stat.skipped - stat.global_skipped
+        if not skipped_here or stat.halt_reason is None:
+            continue
+        name = names.get(aid, aid)
+        if stat.halt_actionable:
+            needs += skipped_here
+            blocks.append(
+                [
+                    f"{name}:{skipped_here} 条没跑",
+                    f"原因{_FIELD_GAP}{stat.halt_reason}",
+                    f"处理{_FIELD_GAP}{stat.halt_action}",
+                ]
+            )
+        else:
+            notes.append(f"{name} {skipped_here} 条:{stat.halt_reason},{stat.halt_action}")
+
+    if blocks:
+        lines += ["", "**需要处理**"]
+        for i, block in enumerate(blocks, 1):
+            lines.append(f"> **{i}. {block[0]}**")
+            lines += [f"> {line}" for line in block[1:]]
+            lines.append("")
+        lines.pop()
+    if notes:
+        lines += ["", "**跳过**", *notes]
+    if len(summary.per_account) > 1:
+        lines += ["", "**各账号**"]
+        for aid, stat in summary.per_account.items():
+            bits = [f"成功 {stat.succeeded}"]
+            if stat.failed:
+                bits.append(f"失败 {stat.failed}")
+            if stat.skipped:
+                bits.append(f"跳过 {stat.skipped}")
+            lines.append(f"{names.get(aid, aid)} {' · '.join(bits)}")
+    return "\n".join(lines), needs
 
 
 def _emit_run_summary(
@@ -219,95 +298,27 @@ def _emit_run_summary(
     failed_task_ids: list[int],
     platform: str = "tencent_channel",
 ) -> None:
-    """跑完后推一条 run_summary。
-
-    `attempted == 0 and skipped_paused == 0` 时直接返回(没动静不刷屏)。
-
-    文案示例:
-
-        时间:2026-05-19 19:27:16
-        汇总:4 个账号,成功 11,失败 2
-
-        各账号明细:
-        - [美食号] 新增 6,成功 5,失败 1
-          失败原因:上传失败 —— 页面提示上传失败
-        - [健身号] 新增 0,成功 0,失败 0,跳过 5
-          跳过原因:登录态失效
-        - [旅游号] 新增 4,成功 4,失败 0
-        - [搞笑号] 新增 3,成功 2,失败 1
-          失败原因:风控触发 —— 操作过于频繁
-
-    整轮 halt 时顶部加一行 `⚠ 本轮中止 —— 原因:xxx`,标题前缀 `⚠`。
-    """
+    """每轮结束只发这一条汇总(单条失败不再单独推送,避免多个失败刷屏)。"""
     if summary.attempted == 0 and summary.skipped_paused == 0:
         return
-
-    engine = get_engine()
-    # 收集每个失败 task 的可读信息,按 account_id 分组挂到 breakdown 行下面
-    failures_by_account: dict[str, list[str]] = {}
-    if failed_task_ids:
-        with Session(engine) as session:
-            for tid in failed_task_ids:
-                task = session.get(Task, tid)
-                if task is None:
-                    continue
-                failures_by_account.setdefault(task.account_id, []).append(
-                    _short_failure_reason(task)
-                )
-
-    lines: list[str] = []
-    if summary.global_halt_reason is not None:
-        lines.append(f"⚠ 本轮中止 —— 原因:{summary.global_halt_reason}")
-        lines.append("")
-    lines.append(f"时间:{datetime.now():%Y-%m-%d %H:%M:%S}")
-    skip_suffix = f",跳过 {summary.skipped_paused}" if summary.skipped_paused else ""
-    lines.append(
-        f"汇总:{len(summary.per_account)} 个账号,"
-        f"成功 {summary.succeeded},失败 {summary.failed}{skip_suffix}"
-    )
-    if summary.per_account:
-        lines.append("")
-        lines.append("各账号明细:")
-        for aid, stat in summary.per_account.items():
-            display = settings.accounts[aid].display_name if aid in settings.accounts else aid
-            # "新增" = 该账号实际启动 publish 的条数(=成功+失败),paused/halt 跳过的不算"新增"。
-            new_count = stat.succeeded + stat.failed
-            bits = [
-                f"新增 {new_count}",
-                f"成功 {stat.succeeded}",
-                f"失败 {stat.failed}",
-            ]
-            if stat.skipped:
-                bits.append(f"跳过 {stat.skipped}")
-            lines.append(f"- [{display}] {','.join(bits)}")
-            for failure_line in failures_by_account.get(aid, []):
-                lines.append(f"  失败原因:{failure_line}")
-            if stat.skipped and stat.halt_reason:
-                lines.append(f"  跳过原因:{stat.halt_reason}")
-
-    # halt_reason(cookie_expired / risk_control)需要运营干预,即使 failed=0 也用 ⚠;
-    # paused_only(运营手动暂停)halt_reason 为 None,保持 ✓ 不打扰。
-    has_halt = any(stat.halt_reason for stat in summary.per_account.values())
-    needs_attention = summary.failed > 0 or summary.global_halt_reason is not None or has_halt
-    level = "warn" if needs_attention else "info"
-    title_prefix = "⚠" if needs_attention else "✓"
-    from wxsp.notify import _platform_tag
-
-    plat_tag = _platform_tag(platform)
-    title = f"{title_prefix} {plat_tag}发布完成"
-    with session_scope(engine) as session:
+    body, needs = _run_summary_body(settings, summary, failed_task_ids)
+    halted = summary.global_halt_reason is not None
+    if halted:
+        status = "需要处理"
+    elif needs:
+        status = f"{needs} 条需要处理"
+    elif summary.skipped_paused:
+        status = "完成"
+    else:
+        status = "全部成功"
+    with session_scope(get_engine()) as session:
         notify(
             NotifyEvent(
                 type="run_summary",
-                level=level,
-                title=title,
-                content="\n".join(lines),
-                context={
-                    "尝试": summary.attempted,
-                    "成功": summary.succeeded,
-                    "失败": summary.failed,
-                    "暂停跳过": summary.skipped_paused,
-                },
+                level="warn" if halted or needs else "info",
+                title="本轮发布中止" if halted else "本轮发布完成",
+                status=status,
+                content=body,
                 platform=platform,
             ),
             session=session,
@@ -373,7 +384,7 @@ def run_today_pending(
                 continue
             plan.append((tid, t.account_id))
         # 一次性拿账号快照:paused_until + cookie_status,避免发布时才发现 cookie 没登录
-        paused_accounts: set[str] = set()
+        paused_accounts: dict[str, datetime] = {}  # acc_id → 暂停到期时间
         disabled_accounts: set[str] = set()
         unlogged_accounts: dict[str, str] = {}  # acc_id → 中文跳过原因
         for acc_id in {acc for _, acc in plan}:
@@ -388,7 +399,7 @@ def run_today_pending(
                 # but handle defensively.
                 continue
             if acc.paused_until is not None and acc.paused_until > now:
-                paused_accounts.add(acc_id)
+                paused_accounts[acc_id] = acc.paused_until
                 continue  # 暂停优先级高,不再判 cookie
             # cookie_status != ok → 跳过本账号所有 task。expired = login 时检测到未登录;
             # unknown = login 时浏览器异常(用户关窗 / 启动崩了),user_data_dir 里没拿到 cookie。
@@ -397,14 +408,14 @@ def run_today_pending(
             if account_cfg.password_login:
                 pass  # 开了账密登录:登录失效也照跑,插件会自动用账号密码登录
             elif acc.cookie_status == "expired":
-                unlogged_accounts[acc_id] = "登录态已失效,请重新扫码"
+                unlogged_accounts[acc_id] = "账号登录失效"
             elif acc.cookie_status == "unknown":
-                unlogged_accounts[acc_id] = "未完成扫码登录(状态 unknown),请到账号页扫码"
+                unlogged_accounts[acc_id] = "账号还没扫码登录"
 
     # 本轮中触发账号级不可恢复错误(登录态失效 / 风控)的账号 → 后续 task 全跳过。
     # 这么做有两个好处:① 不浪费时间反复开浏览器跑同一个会失败的账号;
     # ② publisher 的 notify 只会推第一条,避免企微群里 20 条一样的"登录态失效"刷屏。
-    halted_accounts: dict[str, str] = {}
+    halted_accounts: dict[str, tuple[str, str]] = {}  # acc_id → (原因, 处理办法)
 
     for task_id, account_id in plan:
         # 即使账号被暂停 / 全局 halt 也建条 per_account 槽,文案里好展示"被跳过"
@@ -413,9 +424,9 @@ def run_today_pending(
         # 整轮 abort:全局错误(改版/NAS)出现后,后面所有账号 task 全 skip
         if summary.global_halt_reason is not None:
             summary.skipped_paused += 1
+            summary.global_skipped += 1
             acc_stat.skipped += 1
-            if acc_stat.halt_reason is None:
-                acc_stat.halt_reason = summary.global_halt_reason
+            acc_stat.global_skipped += 1
             logger.info(f"[scheduler] 跳过 task={task_id}:整轮已中止({summary.global_halt_reason})")
             continue
 
@@ -427,17 +438,21 @@ def run_today_pending(
         ):
             summary.skipped_paused += 1
             acc_stat.skipped += 1
-            reason = (
-                unlogged_accounts.get(account_id)
-                or halted_accounts.get(account_id)
-                or ("账号已禁用或配置已删除" if account_id in disabled_accounts else "账号暂停中")
-            )
-            # 未登录的也写进 halt_reason,让 run_summary 显示"跳过(原因:请扫码)"
-            # 而不是只写"暂停跳过 N"(运营一头雾水)
-            if (
-                account_id in unlogged_accounts or account_id in disabled_accounts
-            ) and acc_stat.halt_reason is None:
-                acc_stat.halt_reason = reason
+            actionable = account_id in unlogged_accounts or account_id in halted_accounts
+            if account_id in unlogged_accounts:
+                reason, action = unlogged_accounts[account_id], _LOGIN_ACTION
+            elif account_id in halted_accounts:
+                reason, action = halted_accounts[account_id]
+            elif account_id in disabled_accounts:
+                reason, action = "账号已停用或已从配置删除", "要发的话到「配置」页重新启用"
+            else:
+                until = paused_accounts[account_id]
+                reason = f"账号暂停中(到 {until:%m-%d %H:%M} 恢复)"
+                action = "到期自动恢复;要提前发,到「账号」页点「恢复」"
+            # 跳过原因 + 处理办法写进账号统计,汇总里给运营看
+            if acc_stat.halt_reason is None:
+                acc_stat.halt_reason, acc_stat.halt_action = reason, action
+                acc_stat.halt_actionable = actionable
             logger.info(f"[scheduler] 跳过 task={task_id}:账号 {account_id} {reason}")
             continue
         summary.attempted += 1
@@ -464,10 +479,11 @@ def run_today_pending(
             # 也避免反复推 cookie_expired 告警)。运营扫码后下轮自动重跑。
             summary.skipped_paused += 1
             acc_stat.skipped += 1
-            reason_cn = error_type_cn(result.error_type)
-            halted_accounts[account_id] = reason_cn
+            reason_cn, action = describe_failure(result.error_type, result.error_msg)
+            halted_accounts[account_id] = (reason_cn, action)
             if acc_stat.halt_reason is None:
-                acc_stat.halt_reason = reason_cn
+                acc_stat.halt_reason, acc_stat.halt_action = reason_cn, action
+                acc_stat.halt_actionable = True
             logger.warning(
                 f"[scheduler] 账号 {account_id} task={task_id} 触发 {reason_cn};"
                 "task 回退 pending 等扫码后重跑,本轮剩余 task 全跳过"
@@ -476,16 +492,14 @@ def run_today_pending(
             summary.failed += 1
             acc_stat.failed += 1
             failed_task_ids.append(task_id)
-            reason_cn = error_type_cn(result.error_type)
-            # 全局错误(平台改版/NAS 掉线)→ 立刻中止整轮,通知就 publisher 第一条
+            reason_cn, action = describe_failure(result.error_type, result.error_msg)
+            # 全局错误(平台改版/NAS 掉线)→ 立刻中止整轮,剩余 task 全跳过,汇总顶部说明
             if result.error_type in _GLOBAL_HALT_ERRORS:
-                summary.global_halt_reason = reason_cn
+                summary.global_halt_reason, summary.global_halt_action = reason_cn, action
                 logger.warning(f"[scheduler] 整轮中止:遇到 {reason_cn},剩余 task 全跳过")
             # 账号级错误(risk_control 等)→ 仅停该账号剩余 task
             elif result.error_type in _ACCOUNT_HALT_ERRORS:
-                halted_accounts[account_id] = reason_cn
-                if acc_stat.halt_reason is None:
-                    acc_stat.halt_reason = reason_cn
+                halted_accounts[account_id] = (reason_cn, action)
                 logger.warning(
                     f"[scheduler] 账号 {account_id} 触发 {reason_cn},本轮剩余 task 全跳过"
                 )

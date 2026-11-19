@@ -182,6 +182,7 @@ wxsp/platforms/
 | `tags_max` 标签上限(默认 5;小红书 10) | `validator` 标签校验 |
 | `use_real_chrome` 走 CDP 连系统真实 Chrome(默认 False;小红书 True) | `browser.browser_context` |
 | `driver` 发布方式:`patchright`(默认)/ `extension`(托管 Chrome + 插件;拼多多) | `runner.run_publish` / `browser.check_cookie` / `platform_meta.is_available` |
+| `supports_password_login` 账号可开「账密登录」(拼多多 True):登录过期时插件用账号密码自动登录,遇滑块 / 短信验证 / 密码错误按 `cookie_expired` 处理;开了的账号 run_today 预检不因登录失效跳过,自动登录成功后 cookie_status 回 ok | `routes_config` 账号弹窗 / `scheduler.run_today_pending` / `extension/pinduoduo.js::passwordLogin` |
 
 这些消费方一律 `get_meta(platform)` 读表,**不再各存一份 per-platform map**。`config.ALL_PLATFORMS = list(REGISTRY)` 也从这里派生。回归保障见 `tests/test_platform_meta_single_source.py`(注入假平台断言各消费方都从 `REGISTRY` 读)。
 
@@ -892,7 +893,7 @@ class NotifyEvent:
 ## 安全 / 不允许做的事
 
 - ❌ 不要绕过平台风控强行高频操作
-- ❌ 不要存储账号密码,只存 Cookie
+- ❌ 不要存储账号密码,只存 Cookie —— **唯一例外**:`supports_password_login` 平台(拼多多)的账号可在配置页开「账密登录」(用户 2026-11-18 决定):登录账号 / 密码明文存在本机 `config_{platform}.yaml`(gitignore),页面从不回显(只显示「已设置」,留空保持原值),密码只用于插件输入,不进日志 / 报错 / 告警
 - ❌ 不要把视频或 Cookie 上传到任何第三方
 - ❌ 不要在生产用 headless 跑视频号
 - ❌ 不要静默忽略 risk_control 类错误

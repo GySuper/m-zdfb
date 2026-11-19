@@ -248,3 +248,57 @@ def test_click_scrolls_inside_a_clipping_list(tmp_path: Path) -> None:
             assert session.call("debug.eval", "document.body.dataset.picked") == "45"
     finally:
         server.shutdown()
+
+
+# ---- 拼多多账密登录(插件 passwordLogin 跑在仿真登录页上)----
+
+LOGIN_PAGE = """<!doctype html><meta charset=utf-8>
+<div><span>扫码登录</span> | <span onclick="document.getElementById('f').style.display='block'">账号登录</span></div>
+<div id=f style="display:none">
+  <input id=usernameId placeholder="请输入账号名/手机号"><input id=passwordId type=password>
+  <button onclick="go()">登录</button></div>
+<script>
+function go() {
+  const u = document.getElementById('usernameId').value, p = document.getElementById('passwordId').value;
+  if (u === '13800000000' && p === 'pa$$ 中文') { location.href = '/home.html'; return; }
+  const d = document.createElement('div'); d.textContent = '账号或密码错误'; document.body.appendChild(d);
+}
+</script>"""
+
+
+def _run_login(tmp_path: Path, password: str) -> tuple[dict[str, object], str]:
+    (tmp_path / "login.html").write_text(LOGIN_PAGE, encoding="utf-8")
+    (tmp_path / "home.html").write_text("<meta charset=utf-8>首页", encoding="utf-8")
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with extension_session(tmp_path / "profile", headless=True) as session:
+            session.start_job(
+                {
+                    "platform": "selftest_pdd_login",
+                    "url": f"http://127.0.0.1:{server.server_address[1]}/login.html",
+                    "login": {"username": "13800000000", "password": password},
+                    "step_pause": [0, 0],
+                }
+            )
+            while True:
+                msg = session.next_message(timeout=60)
+                if msg["type"] in ("gate", "error"):
+                    return msg, session.call("debug.url")
+    finally:
+        server.shutdown()
+
+
+def test_password_login_fills_form_and_reaches_home(tmp_path: Path) -> None:
+    msg, url = _run_login(tmp_path, "pa$$ 中文")
+    assert msg["type"] == "gate", msg
+    assert url.endswith("/home.html")
+
+
+def test_password_login_failure_is_cookie_expired_with_page_hint(tmp_path: Path) -> None:
+    msg, _ = _run_login(tmp_path, "wrong-secret")
+    assert msg["type"] == "error"
+    assert msg["kind"] == "cookie_expired"
+    assert "账号或密码错误" in str(msg["message"])
+    assert "wrong-secret" not in str(msg["message"])  # 密码绝不进报错

@@ -27,6 +27,9 @@ const ENTRY_DIALOG_CLOSE = [
   .map((sel) => `${sel}:not([data-testid="beast-core-noticeBar"] *)`)
   .join(", ");
 
+// SSO 登录页「账号登录」表单(2026-11-18 探查:无协议勾选、无图形验证码输入框)
+const USERNAME_INPUT = "#usernameId";
+const PASSWORD_INPUT = "#passwordId";
 const PRODUCT_ID_INPUT = 'input[placeholder*="商品id"]';
 const COVER_FILE_INPUT = 'input[type="file"][accept*=".jpg"]';
 // beast-core 日期/时间框都是 readonly,只能走面板 UI
@@ -54,7 +57,9 @@ async function openPublish(t) {
 
 async function verifyLogin(t) {
   if ((await t.url()).includes(LOGIN_FRAG)) {
-    throw new StepError("cookie_expired", "拼多多登录态失效(停在 SSO 登录页,需重新扫码)");
+    if (!t.job.login) throw new StepError("cookie_expired", "拼多多登录态失效(停在 SSO 登录页,需重新扫码)");
+    await passwordLogin(t, async () => (await t.url()).includes(HOME_FRAG));
+    t.emit("relogin");
   }
   // 正向确认:上传框是隐藏的 file input,只判断存在
   const ok = await t.until(() => t.page((sel) => !!document.querySelector(sel), VIDEO_FILE_INPUT), 8_000);
@@ -138,6 +143,42 @@ async function tags(t) {
     await sleep(1500);
     await t.key(" ", "Space", 32, " ");
   }
+}
+
+// 账号密码自动登录(账号开了「账密登录」时)。点登录后没进到首页 —— 滑块 / 短信验证 /
+// 密码错误等 —— 一律按登录失效处理,报错里带上页面新冒出的提示。密码只用于输入,不进任何日志。
+export async function passwordLogin(t, loggedIn) {
+  const { username, password } = t.job.login;
+  // SSO 页实测 5s 左右才渲染出表单
+  if (!(await t.waitVisible({ sel: ANY, text: "账号登录", exact: true }, 20_000))) {
+    throw new StepError("cookie_expired", "登录页没出现「账号登录」,无法自动登录,需人工扫码");
+  }
+  await t.click({ sel: ANY, text: "账号登录", exact: true, what: "账号登录页签" });
+  await wait(800, 1500);
+  if (!(await t.waitVisible({ sel: USERNAME_INPUT }, 10_000))) {
+    throw new StepError("cookie_expired", "账号登录表单没出现,无法自动登录,需人工扫码");
+  }
+  await t.click({ sel: USERNAME_INPUT, what: "登录账号输入框" });
+  await t.type(username);
+  await wait(400, 900);
+  await t.click({ sel: PASSWORD_INPUT, what: "登录密码输入框" });
+  await t.type(password);
+  await wait(500, 1000);
+  const before = await pageLines(t);
+  await t.click({ sel: "button", text: "登录", exact: true, what: "登录按钮" });
+  const hints = [];
+  const ok = await t.until(async () => {
+    if (await loggedIn()) return true;
+    for (const line of await pageLines(t)) {
+      if (!before.has(line) && line.length <= 60 && !hints.includes(line)) hints.push(line);
+    }
+    return false;
+  }, 30_000, 1000);
+  if (!ok) {
+    const why = hints.length ? `页面提示:${hints.slice(0, 3).join(" / ")}` : "可能需要滑块或短信验证";
+    throw new StepError("cookie_expired", `账号密码自动登录没成功(${why}),需人工扫码`);
+  }
+  console.log("已用账号密码自动登录");
 }
 
 async function pageLines(t) {

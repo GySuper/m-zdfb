@@ -6,15 +6,16 @@
 import { debugApi } from "./debug.js";
 import { StepError, Task } from "./lib.js";
 import { PINDUODUO } from "./pinduoduo.js";
-import { PDD_POPUPS, SELFTEST } from "./selftest.js";
+import { PDD_LOGIN, PDD_POPUPS, SELFTEST } from "./selftest.js";
 
-const PLATFORMS = { pinduoduo: PINDUODUO, selftest: SELFTEST, selftest_pdd_popups: PDD_POPUPS };
+const PLATFORMS = { pinduoduo: PINDUODUO, selftest: SELFTEST, selftest_pdd_popups: PDD_POPUPS, selftest_pdd_login: PDD_LOGIN };
 let current = null;
 
 const emit = (type, data = {}) => globalThis.wxspEmit(JSON.stringify({ type, ...data }));
 
 async function runJob(job) {
   const task = new Task(job);
+  task.emit = emit; // 步骤里需要额外上报(如 relogin)时用
   current = task;
   let step = "init";
   try {

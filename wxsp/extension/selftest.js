@@ -1,7 +1,7 @@
 // 插件自检平台:在本地测试页上走一遍 打开 → 可信点击 → 输入 → 上传 → gate → 发布,
 // 供集成测试验证插件通路(不碰任何真实平台)。
 import { StepError } from "./lib.js";
-import { entryPopups } from "./pinduoduo.js";
+import { entryPopups, passwordLogin } from "./pinduoduo.js";
 
 export const SELFTEST = {
   pre: [
@@ -29,6 +29,15 @@ export const PDD_POPUPS = {
   pre: [
     ["open", (t) => t.open(t.job.url)],
     ["entry_popups", entryPopups],
+  ],
+  post: [],
+};
+
+// 拼多多账密登录在本地仿真登录页上回归:登录成功 = 跳到 /home.html
+export const PDD_LOGIN = {
+  pre: [
+    ["open", (t) => t.open(t.job.url)],
+    ["password_login", (t) => passwordLogin(t, async () => (await t.url()).endsWith("/home.html"))],
   ],
   post: [],
 };

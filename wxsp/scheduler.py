@@ -16,6 +16,7 @@ from loguru import logger
 from sqlalchemy import update
 from sqlmodel import Session, col, select
 
+from wxsp import platform_meta
 from wxsp.archive import cleanup_old_files, install_file_sink
 from wxsp.config import Settings
 from wxsp.db import get_engine, init_db, session_scope
@@ -337,7 +338,12 @@ def run_today_pending(
     任何一条 task 失败 / 抛 AlreadyClaimed 都不阻断后面的;细节走 publish 自己的回写。
     跑完后推一条 run_summary 汇总通知(attempted=0 时静默)。
     """
-    if do_sync:
+    if platform is not None and not platform_meta.is_available(platform):
+        logger.info(
+            f"[scheduler] [{platform}] 平台已锁定({platform_meta.LOCKED_HINT}),不同步不发布"
+        )
+        return RunSummary()
+    if do_sync and platform_meta.is_available(platform or "tencent_channel"):
         try:
             sync_now(settings, platform=platform or "tencent_channel")
         except Exception as exc:
@@ -362,6 +368,8 @@ def run_today_pending(
                 continue
             # Per-platform:skip tasks not matching the target platform
             if platform is not None and t.platform != platform:
+                continue
+            if not platform_meta.is_available(t.platform):  # platform=None 跑全部时也不碰锁定平台
                 continue
             plan.append((tid, t.account_id))
         # 一次性拿账号快照:paused_until + cookie_status,避免发布时才发现 cookie 没登录
@@ -542,6 +550,11 @@ def _register_daily_crons(scheduler: BaseScheduler, settings: Settings) -> list[
     platform_keys = [p for p in ALL_PLATFORMS if _get_cfg_path(p).exists()]
     registered: list[str] = []
     for platform_key in platform_keys:
+        if not platform_meta.is_available(platform_key):
+            logger.info(
+                f"[scheduler] 平台 [{platform_key}] 已锁定({platform_meta.LOCKED_HINT}),不注册 cron"
+            )
+            continue
         try:
             plat_settings = load_settings(platform=platform_key)
         except Exception:

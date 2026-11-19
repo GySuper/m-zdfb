@@ -1,0 +1,14 @@
+{% extends "base_v2.html" %}
+{% block page_title %}没权限{% endblock %}
+{% block heading %}没权限{% endblock %}
+{% block subheading %}<div class="text-white/80 mt-1 text-sm">{{ locked_label }}{{ locked_hint }}</div>{% endblock %}
+{% block content %}
+<section class="card p-12 text-center pop">
+  <div class="w-14 h-14 mx-auto rounded-2xl grid place-items-center bg-gray-100 text-gray-500">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+  </div>
+  <div class="mt-4 text-lg font-bold">没有{{ locked_label }}的使用权限</div>
+  <div class="text-sm text-gray-500 mt-1">{{ locked_label }}{{ locked_hint }}。已开放的平台可以在右上角切换。</div>
+  <a class="btn btn-dark mt-6 inline-flex" href="/?platform={{ request.state.current_platform }}">回到{{ platform_cn(request.state.current_platform) }}</a>
+</section>
+{% endblock %}

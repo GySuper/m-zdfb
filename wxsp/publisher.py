@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 
+from wxsp import platform_meta
 from wxsp.config import Settings, load_settings
 from wxsp.db import get_engine, init_db
 from wxsp.models import Account, Task
@@ -62,6 +63,9 @@ def publish(
         if task is None:
             raise ValueError(f"Task {task_id} not found")
         platform = getattr(task, "platform", "tencent_channel")
+        if not platform_meta.is_available(platform):
+            label = platform_meta.get_meta(platform).label
+            raise ValueError(f"{label}已锁定({platform_meta.LOCKED_HINT}),不发布 Task {task_id}")
         account = session.get(Account, task.account_id)
         if account is None or not account.is_active:
             raise ValueError(f"Task {task_id} 的账号不存在或已禁用")

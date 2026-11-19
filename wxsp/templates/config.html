@@ -468,7 +468,7 @@
                 <label>默认平台</label>
                 <div class="cfg-control">
                   <select name="default_platform" onchange="saveDefaultPlatform(this.value)">
-                    {% for p in all_platforms %}
+                    {% for p in all_platforms if platform_available(p) %}
                     <option value="{{ p }}" {% if vm.webui_default_platform == p %}selected{% endif %}>{{ platform_cn(p) }}</option>
                     {% endfor %}
                   </select>

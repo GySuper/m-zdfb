@@ -64,16 +64,18 @@ def get_default_platform() -> str:
     """Read the global default platform from the shared file.
     Falls back to the first configured platform, then to tencent_channel.
     """
+    from wxsp.platform_meta import is_available  # 局部导入:运行时读锁定开关
+
     path = _default_platform_path()
     if path.exists():
         val = path.read_text(encoding="utf-8").strip()
-        if val in REGISTRY:
+        if is_available(val):
             return val
-    # Fallback: first platform with a config file
+    # Fallback: first available platform with a config file, then first available at all
     for p in ALL_PLATFORMS:
-        if get_config_path(p).exists():
+        if is_available(p) and get_config_path(p).exists():
             return p
-    return "tencent_channel"
+    return next((p for p in ALL_PLATFORMS if is_available(p)), "tencent_channel")
 
 
 def set_default_platform(platform: str) -> None:

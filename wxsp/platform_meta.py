@@ -174,6 +174,19 @@ REGISTRY: dict[str, PlatformMeta] = {
 
 ALL_PLATFORMS: list[str] = list(REGISTRY)
 
+# 插件化改造(拼多多起)完成前,其余平台锁定:界面切换显示没权限,定时 / 手动 / 命令行发布
+# 都不执行(2026-11-18 决定)。某平台改成 driver="extension" 即自动解锁,无需另维护名单。
+# 测试里由 conftest 关掉,让各平台的通用逻辑照常被测。
+LOCK_UNMIGRATED = True
+LOCKED_HINT = "正在改造为插件发布,完成前暂不开放"
+
+
+def is_available(platform: str) -> bool:
+    """该平台当前能否使用(界面可切换、会被调度、允许发布)。"""
+    meta = REGISTRY.get(platform)
+    return meta is not None and (not LOCK_UNMIGRATED or meta.driver == "extension")
+
+
 _FALLBACK = "tencent_channel"
 
 

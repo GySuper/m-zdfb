@@ -22,6 +22,13 @@ from wxsp.config import (
 
 
 @pytest.fixture(autouse=True)
+def _unlock_platforms(monkeypatch: pytest.MonkeyPatch) -> None:
+    """生产里非插件平台是锁定的;测试默认解锁,让各平台通用逻辑照常被测。
+    锁定行为本身在 tests/test_platform_lock.py 里打开开关测。"""
+    monkeypatch.setattr("wxsp.platform_meta.LOCK_UNMIGRATED", False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_default_platform(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """隔离机器全局的 data/default_platform 文件,固定指向 tencent_channel。
 

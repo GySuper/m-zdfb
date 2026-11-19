@@ -68,6 +68,9 @@ class Video(SQLModel, table=True):
     declaration: str | None = None  # 创作者声明
     ai_optimize: bool = False  # AI优化开关
     product_ids_json: str = "[]"  # 商品ID列表(JSON array)
+    # pinduoduo-specific:页面单选原文,None = 保持页面默认
+    detail_float: str | None = None  # 商详悬浮窗:展示 / 不展示
+    store_feed: str | None = None  # 同步店铺动态:开启同步 / 取消同步
     file_hash: str | None = None
     ingested_at: datetime
 

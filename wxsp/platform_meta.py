@@ -163,6 +163,8 @@ REGISTRY: dict[str, PlatformMeta] = {
             "cover": "封面文件",
             "declaration": "内容声明",  # 拼多多特有(同淘宝)
             "product_ids": "商品ID",  # 拼多多特有(同淘宝)
+            "detail_float": "商详悬浮窗",  # 拼多多特有:展示 / 不展示(留空=页面默认)
+            "store_feed": "同步店铺动态",  # 拼多多特有:开启同步 / 取消同步(留空=页面默认)
         },
         needs_fingerprint=False,  # 跟抖音/快手/淘宝一致(用户确认)
         has_title=False,  # 无独立标题框(同快手)

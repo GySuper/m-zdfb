@@ -103,6 +103,8 @@ def _migrate_add_video_columns(engine: Engine) -> None:
         "declaration": "VARCHAR",
         "ai_optimize": "BOOLEAN NOT NULL DEFAULT 0",
         "product_ids_json": "VARCHAR NOT NULL DEFAULT '[]'",
+        "detail_float": "VARCHAR",
+        "store_feed": "VARCHAR",
     }
     with engine.begin() as conn:
         for column, definition in definitions.items():

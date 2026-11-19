@@ -200,6 +200,21 @@ async function cover(t) {
   }
 }
 
+// 绑商品后出现的两组单选:商详悬浮窗(展示/不展示)、同步店铺动态(开启同步/取消同步)。
+// 飞书留空 = 保持页面默认;填了就点对应选项并核对确实选中。
+async function publishOptions(t) {
+  for (const choice of [t.job.detail_float, t.job.store_feed]) {
+    if (!choice) continue;
+    await t.click({ sel: ANY, text: choice, exact: true, what: `「${choice}」选项` });
+    await wait(300, 700);
+    const checked = await t.page(
+      (c) => [...document.querySelectorAll('input[type="radio"]')].some((r) => r.checked && (r.closest("label") || r.parentElement).innerText.trim() === c),
+      choice,
+    );
+    if (!checked) throw new StepError("element_not_found", `「${choice}」没有选中`);
+  }
+}
+
 // 日历翻到目标年月:头部是年份下拉(值如「2026年」)+ 月份文字(如「12月」)+ 左右箭头
 async function gotoMonth(t, year, month) {
   for (let i = 0; i <= 12; i++) {
@@ -283,6 +298,7 @@ export const PINDUODUO = {
     ["tags", tags],
     ["products", products],
     ["cover", cover],
+    ["publish_options", publishOptions],
     ["schedule", schedule],
     ["declaration", declaration],
     ["risk", risk],

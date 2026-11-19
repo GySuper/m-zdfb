@@ -94,6 +94,8 @@ def test_init_db_adds_new_video_columns_to_legacy_table(tmp_path: Path) -> None:
         assert "declaration" in cols
         assert "ai_optimize" in cols
         assert "product_ids_json" in cols
+        assert "detail_float" in cols  # 拼多多:商详悬浮窗
+        assert "store_feed" in cols  # 拼多多:同步店铺动态
         row = conn.execute(
             text("SELECT declaration, ai_optimize, product_ids_json FROM video WHERE id='v1'")
         ).one()

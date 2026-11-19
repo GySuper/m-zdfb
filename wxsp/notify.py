@@ -96,6 +96,7 @@ _STEP_CN: dict[str, str] = {
     "declaration": "创作者声明",
     "ai": "AI 优化",
     "location": "选位置",
+    "publish_options": "发布选项",
     "schedule": "定时发布",
     "download": "下载素材",
     "risk": "风控探测",

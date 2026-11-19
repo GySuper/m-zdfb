@@ -58,6 +58,16 @@ class ValidationResult:
     declaration: str | None = None
     ai_optimize: bool = False
     product_ids: list[str] = field(default_factory=list)
+    # pinduoduo-specific(None = 保持页面默认)
+    detail_float: str | None = None
+    store_feed: str | None = None
+
+
+# 拼多多发布页单选项:飞书单选的选项文字 = 页面原文
+_PDD_CHOICES = {
+    "detail_float": ("展示", "不展示"),
+    "store_feed": ("开启同步", "取消同步"),
+}
 
 
 class NasFinder(Protocol):
@@ -198,6 +208,15 @@ def validate(
         errors.append(FieldError("商品ID", f"{len(product_ids)} 个商品(最多 6 个)"))
         product_ids = product_ids[:6]
 
+    pdd_options: dict[str, str | None] = {}
+    for key, choices in _PDD_CHOICES.items():
+        name = getattr(fm, key)
+        value = _get_str(row.fields.get(name)) if name else None
+        if value and value not in choices:
+            errors.append(FieldError(name, f"'{value}' 不在有效选项中({' / '.join(choices)})"))
+            value = None
+        pdd_options[key] = value or None
+
     if errors:
         return ValidationResult(
             ok=False,
@@ -205,6 +224,8 @@ def validate(
             declaration=declaration,
             ai_optimize=ai_optimize,
             product_ids=product_ids,
+            detail_float=pdd_options["detail_float"],
+            store_feed=pdd_options["store_feed"],
         )
     return ValidationResult(
         ok=True,
@@ -221,6 +242,8 @@ def validate(
         declaration=declaration,
         ai_optimize=ai_optimize,
         product_ids=product_ids,
+        detail_float=pdd_options["detail_float"],
+        store_feed=pdd_options["store_feed"],
     )
 
 

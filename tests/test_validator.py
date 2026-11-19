@@ -873,3 +873,39 @@ def test_validate_text_array_concatenated_when_multipart(tmp_path: Path) -> None
         active_accounts={"account_a": "测试号"},
     )
     assert "标题" not in {e.field for e in result.errors}, result.errors
+
+
+# ---------------------------------------------------------------------------
+# 拼多多发布选项:商详悬浮窗 / 同步店铺动态(单选,选项=页面原文;留空=保持页面默认)
+# ---------------------------------------------------------------------------
+
+
+def _validate_options(tmp_path: Path, **fields: object) -> object:
+    return validate(
+        _row_with(tmp_path, 标题="字" * 16, **fields),
+        config=_make_settings(tmp_path),
+        now=datetime(2026, 5, 12, 9, 0),
+        nas_finder=_stub_nas_with_video(tmp_path),
+        active_accounts={"account_a": "测试号"},
+    )
+
+
+def test_publish_options_empty_keeps_page_default(tmp_path: Path) -> None:
+    result = _validate_options(tmp_path)
+    assert result.ok is True  # type: ignore[attr-defined]
+    assert result.detail_float is None  # type: ignore[attr-defined]
+    assert result.store_feed is None  # type: ignore[attr-defined]
+
+
+def test_publish_options_valid_choices_are_kept(tmp_path: Path) -> None:
+    result = _validate_options(tmp_path, 商详悬浮窗="不展示", 同步店铺动态="取消同步")
+    assert result.ok is True  # type: ignore[attr-defined]
+    assert result.detail_float == "不展示"  # type: ignore[attr-defined]
+    assert result.store_feed == "取消同步"  # type: ignore[attr-defined]
+
+
+def test_publish_options_reject_unknown_choice(tmp_path: Path) -> None:
+    result = _validate_options(tmp_path, 商详悬浮窗="隐藏", 同步店铺动态="同步")
+    assert result.ok is False  # type: ignore[attr-defined]
+    fields = {e.field for e in result.errors}  # type: ignore[attr-defined]
+    assert {"商详悬浮窗", "同步店铺动态"} <= fields

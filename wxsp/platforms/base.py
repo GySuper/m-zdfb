@@ -60,6 +60,8 @@ class TaskBundle:
     product_ids_json: str
     declaration: str | None
     ai_optimize: bool
+    detail_float: str | None = None  # 拼多多:商详悬浮窗(None = 保持页面默认)
+    store_feed: str | None = None  # 拼多多:同步店铺动态(None = 保持页面默认)
 
 
 @dataclass

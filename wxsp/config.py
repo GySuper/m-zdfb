@@ -257,6 +257,9 @@ class FeishuFieldMap(BaseModel):
     declaration: str = "创作者声明"
     ai_optimize: str = "AI优化"
     product_ids: str = "商品ID"
+    # pinduoduo-specific
+    detail_float: str = "商详悬浮窗"
+    store_feed: str = "同步店铺动态"
 
 
 class FeishuBitableConfig(BaseModel):

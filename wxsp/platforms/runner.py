@@ -119,6 +119,8 @@ def load_task_bundle(session: Session, task_id: int) -> TaskBundle:
         product_ids_json=video.product_ids_json or "[]",
         declaration=getattr(video, "declaration", None),
         ai_optimize=getattr(video, "ai_optimize", False),
+        detail_float=video.detail_float,
+        store_feed=video.store_feed,
     )
 
 

@@ -67,6 +67,8 @@ def test_pinduoduo_registered_in_registry() -> None:
         "cover": "封面文件",
         "declaration": "内容声明",
         "product_ids": "商品ID",
+        "detail_float": "商详悬浮窗",
+        "store_feed": "同步店铺动态",
     }
     # 登录态:goto SSO 入口,已登录跳 home(含 fragment),未登录停 mms/login → logged_in_url 正面判
     assert m.login_meta["mode"] == "logged_in_url"

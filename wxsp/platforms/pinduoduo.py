@@ -105,6 +105,8 @@ def _pre_publish(
             "product_ids": product_ids,
             "publish_at": bundle.publish_at.strftime("%Y-%m-%d %H:%M:%S"),  # 与页面日期框同格式
             "declaration": bundle.declaration,
+            "detail_float": bundle.detail_float,  # 商详悬浮窗;None = 保持页面默认
+            "store_feed": bundle.store_feed,  # 同步店铺动态;None = 保持页面默认
             # APC 拒绝:插件停在上传前,下面装"等待上传区域超时"故障(对齐其他平台)
             "halt_before": None if apc_passed else "upload",
         }

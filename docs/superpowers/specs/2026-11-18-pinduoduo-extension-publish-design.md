@@ -83,11 +83,10 @@ wxsp 注入插件时本来就握着这个 Chrome 的 browser 级 CDP 连接,P1 �
 - `publisher.py` 加进程内字典 `RUNNING_STEPS: dict[task_id, step]`;`PublishContext.last_step` 改为 property,赋值时同步写字典,任务结束清掉。
 - 工作台「正在发布」卡片读它显示中文步骤(`notify.step_cn`)。不加 DB 列(避免迁移);代价是 `wxsp run --task-id` 这种独立 CLI 进程里的任务在 Web 上看不到步骤,只看到「发布中」。
 
-### 2.7 平台间并行(改 §2.5 约束)
-- `publisher._PUBLISH_LOCK` 全局锁 → 每平台一把锁:同平台串行、不同平台并行。
-- **例外:小红书**用 pyautogui 物理输入,别的平台弹窗口会抢焦点打乱坐标 → 小红书运行时独占(读写锁:小红书拿写锁,其他平台拿读锁 + 本平台锁)。
-- 风控上:同平台仍串行,不同平台各自风控体系,不构成「同 IP 多账号并发」特征。
-- 放在最后一个阶段做,插件主线不依赖它。
+### 2.7 ~~平台间并行~~ → 平台锁定(2026-11-18 用户决定)
+- 不做平台间并行:后续所有平台都要按拼多多的方式重构,重构前**锁定**。§2.5 单 worker 串行约束不变。
+- `platform_meta.is_available()`:`LOCK_UNMIGRATED=True` 时只有 `driver="extension"` 的平台可用;改造完自动解锁。
+- 锁定平台:界面面板灰显「暂未开放」、点击弹「没权限」,直接访问 403 没权限页,写请求 403;不注册 cron、`run_today_pending` 直接返回、`publisher.publish` 拒绝。拼多多照常。
 
 ## 3. 分阶段实施(每阶段有可验证标准)
 
@@ -96,7 +95,7 @@ wxsp 注入插件时本来就握着这个 Chrome 的 browser 级 CDP 连接,P1 �
 | **P0 验证 ✅** | 脚本:启动本机 Chrome → `loadUnpacked` 最小插件 → WS `hello` → 在本地测试页用 chrome.debugger 点击按钮、`DOM.setFileInputFiles` 上传文件、`captureScreenshot` | 脚本跑通打印 4 个 ok;任一失败就回来改方案,不往下做 |
 | **P1 骨架 ✅** | `managed_chrome.py`(含 CDP 客户端)、`ExtensionSession`、runner `driver` 分支、插件框架(步骤上报/错误上报/截图/可信输入/selftest 自检平台)、拼多多 `open_publish`→`verify_login`→`entry_popups`→`gate`、新 login | 单测:消息泵(步骤、error→异常映射、halted、超时);集成:selftest 真 Chrome 全通路;真机:`wxsp login` 扫码成功 → `wxsp run --task-id N --dry-run` 停在 gate 出截图 |
 | **P2 全步骤 ✅** | 上传、描述、话题、商品、封面、定时(日历切月同视频号修法,找不到日期就报错)、内容声明、风控探测、发布、成功判定 | 真机 dry-run 全流程截图核对;**经你同意后**真发 1 条;旧 patchright 路径仍可用开关切回 |
-| **P3 收尾** | 全平台步骤上报到工作台、平台间并行锁、CLAUDE.md(§2.5、平台架构、新增平台手册)更新、打包脚本确认 `wxsp/extension` 被带上 | 单测:锁语义(同平台串行/跨平台并行/小红书独占);工作台卡片显示步骤 |
+| **P3 收尾 ✅** | 全平台步骤上报到工作台(每 2s 轮询)、平台锁定(替代原「平台间并行」)、CLAUDE.md 更新 | 单测:锁定(面板/403/cron/run_today/publish)、工作台卡片步骤与轮询接口 |
 
 测试原则沿用 CLAUDE.md:Python 侧消息处理用回放消息的单测,不 mock 浏览器;插件行为只用真 Chrome 验证(`@pytest.mark.integration`)。
 

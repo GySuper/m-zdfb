@@ -5,6 +5,8 @@
 
 **当前支持平台**(6 个):视频号(tencent_channel)、淘宝光合(taobao_guanghe)、抖音(douyin)、快手(kuaishou)、小红书(xiaohongshu)、拼多多(pinduoduo)
 
+> **插件化改造进行中(2026-11 起)**:拼多多已改为「wxsp 托管系统 Chrome + 自动注入的 MV3 插件」发布(`driver="extension"`,见 [设计文档](docs/superpowers/specs/2026-11-18-pinduoduo-extension-publish-design.md))。其余 5 个平台**逐个按同样方式重构,重构前锁定**:界面切换显示没权限,定时 / 手动 / 命令行都不发布(见「平台锁定」)。
+
 ---
 
 ## 编码行为准则(每次写代码前必读)
@@ -118,6 +120,7 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 |------|------|------|
 | 后端语言 | Python 3.10+ | 可参考 social-auto-upload 代码 |
 | 浏览器自动化 | **patchright** (Playwright fork) | 比原版深度修补 CDP 指纹泄漏,API 完全兼容;视频号风控敏感时表现更好 |
+| 插件发布(拼多多起) | 系统 Chrome + **MV3 插件**(`wxsp/extension/`,纯 JS 无构建)+ `websockets`(CDP) | 品牌版 Chrome、无自动化注入;chrome.debugger 可信输入;后台标签页 |
 | CLI | Typer | 类型友好 |
 | Web 框架 | FastAPI | async,自动 OpenAPI,SSE 友好 |
 | 前端 | **Jinja2 + HTMX** | 单进程、纯 Python、SSE/局部刷新天然支持;运维控制台不需要 SaaS 级前端 |
@@ -178,10 +181,17 @@ wxsp/platforms/
 | `title_max` 标题上限(默认 30;小红书 20) | `validator._check_title` |
 | `tags_max` 标签上限(默认 5;小红书 10) | `validator` 标签校验 |
 | `use_real_chrome` 走 CDP 连系统真实 Chrome(默认 False;小红书 True) | `browser.browser_context` |
+| `driver` 发布方式:`patchright`(默认)/ `extension`(托管 Chrome + 插件;拼多多) | `runner.run_publish` / `browser.check_cookie` / `platform_meta.is_available` |
 
 这些消费方一律 `get_meta(platform)` 读表,**不再各存一份 per-platform map**。`config.ALL_PLATFORMS = list(REGISTRY)` 也从这里派生。回归保障见 `tests/test_platform_meta_single_source.py`(注入假平台断言各消费方都从 `REGISTRY` 读)。
 
+### 平台锁定(插件化改造期间)
+
+`platform_meta.is_available(platform)`:`LOCK_UNMIGRATED=True` 时只有 `driver="extension"` 的平台可用。锁定平台:顶栏面板灰显「暂未开放」、点击弹「没权限」,直接访问返回 403 没权限页,写请求 403;不注册每日 cron、`run_today_pending` 直接返回(不同步飞书)、`publisher.publish` 拒绝。某平台改成 `driver="extension"` 即自动解锁。测试里 conftest 默认解锁,锁定行为在 `tests/test_platform_lock.py`。
+
 ### 新增一个平台(操作手册)
+
+> 新平台 / 重构平台一律走**插件驱动**(参考拼多多):`PlatformMeta.driver="extension"`,页面步骤写在 `wxsp/extension/<平台>.js`(选择器也在那里),Python 侧只把任务数据交给插件、把插件消息翻成 `ctx.last_step` / errors 异常(见 `platforms/pinduoduo.py`)。下面 5 步里「选择器 / 步骤实现」对插件平台指 JS 文件。
 
 以平台 key `X` 为例,**按顺序**做完这 5 步,然后 `pytest` + `wxsp run --task-id <N> --dry-run` 验证:
 
@@ -207,6 +217,8 @@ wxsp/platforms/
 - **需要全新飞书字段时**:`TaskBundle` 是字段超集;复用现有字段(title/desc/topic/tags/cover/products/declaration/ai)无需动,但要读**全新**字段得顺着 `models.Video`(加列)→ `config.FeishuFieldMap` → `feishu`/`validator`(入库)→ `base.TaskBundle` → `runner.load_task_bundle` 整条链加,别只加一头。
 - **dry-run 红线**:`pre_publish` 之后是 dry-run gate,`--dry-run` 在这里截断;点发布只能写在 `post_publish`,否则 dry-run 会真发出去。
 - **风控约束照旧**:视频号系平台 headless 禁用、最小发布间隔、步骤间随机停顿等仍受"核心约束"管;风控文案配进 selectors 的 `RISK_CONTROL_KEYWORDS`,命中即 `RiskControl`(账号暂停 24h)。
+- **插件平台的坑(拼多多实测)**:托管 Chrome 带调试端口启动会让 `navigator.webdriver=true`,必须 `--disable-blink-features=AutomationControlled`;profile 里会留着旧插件 Service Worker 的脚本缓存,注入前要清(`managed_chrome._clear_stale_worker`);后台标签页点击要开 `Emulation.setFocusEmulationEnabled`;被 `overflow:hidden`(悬停才可滚)容器裁掉的元素要在容器上滚动。
+- **插件平台排查改版**:用调试通道 `wxsp.debug.*`(窗口不关、单步执行发布前步骤 / 只读 DOM / 点击,禁止发布阶段与「发布」类按钮),逐步对照后统一修,不要一轮轮整跑 dry-run。
 
 ### 配置文件:每平台独立
 
@@ -257,6 +269,8 @@ wxsp/
 │   │   ├── xiaohongshu.py / xiaohongshu_selectors.py  # 小红书(真实 Chrome + 物理输入)
 │   │   └── pinduoduo.py / pinduoduo_selectors.py      # 拼多多
 │   ├── browser.py                     # patchright context 工厂 + per-account 指纹注入
+│   ├── managed_chrome.py              # 托管系统 Chrome + CDP 注入插件 + ExtensionSession(插件驱动平台)
+│   ├── extension/                     # MV3 发布插件(纯 JS):background / lib(可信输入)/ debug / 各平台步骤 / selftest
 │   ├── fingerprint.py                 # per-account 设备指纹生成 + JSON 持久化 + JS init script
 │   ├── stealth_js.py                  # 上一代静态 init script(已被 fingerprint 取代,保留回滚)
 │   ├── human_input.py                 # pyautogui OS 级鼠标/键盘(isTrusted=true,小红书用)
@@ -487,6 +501,8 @@ SQLite 是唯一的运行时事实来源,所有任务从飞书拉取。Web UI **
 | 状态 | 单选 | 否 | **写** | 工具回写:待入库 / 已计划 / 发布中 / 已发布 / 失败 |
 | 已发布链接 | URL | 否 | **写** | 工具回写 |
 | 错误信息 | 多行文本 | 否 | **写** | 工具回写(校验失败的具体原因 / 发布失败的错误类型) |
+| 商详悬浮窗 | 单选 | 否 | 读 | **拼多多**:展示 / 不展示(选项 = 页面原文;留空保持页面默认) |
+| 同步店铺动态 | 单选 | 否 | 读 | **拼多多**:开启同步 / 取消同步(留空保持页面默认) |
 
 **约束**:`执行日期 ≤ date(定时发布时间)`(可以前一天跑、第二天发,反之不行)
 
@@ -867,6 +883,7 @@ class NotifyEvent:
 - 单元测试覆盖纯函数(validator / nas.find_video / errors.classify),pre-commit 跑
 - 集成测试(DB):幂等锁、状态机
 - 集成测试(浏览器):用真 patchright + 真页面 + `--dry-run`,标记 `@pytest.mark.integration`,CI 跳过
+- 插件通路集成测试:`WXSP_CHROME_IT=1 pytest tests/test_managed_chrome.py`,真 Chrome **无窗口**(`--headless=new`)跑本地夹具页;真实平台登录 / dry-run 才开窗,且先征得用户同意
 - 冒烟测试:测试号 + 预制视频跑 dry-run 全流程,发版前手动跑
 - **绝不 mock 浏览器**:选择器超时是最常见问题,mock 等于没测
 

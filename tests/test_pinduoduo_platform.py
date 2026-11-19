@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -183,3 +185,38 @@ def test_pump_returns_on_halted_and_times_out_when_silent() -> None:
     assert _pump(_ScriptedSession(halted), _ctx(), "gate", timeout=1) == halted  # type: ignore[arg-type]
     with pytest.raises(ElementNotFound, match="无进展"):
         _pump(_ScriptedSession(), _ctx(), "gate", timeout=1)  # type: ignore[arg-type]
+
+
+def test_pre_publish_hands_absolute_file_paths_to_the_extension(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """配置里 data_dir 是相对路径(./data)时暂存路径也是相对的;Chrome 是另一个进程,
+    按相对路径找不到文件,拼多多提示「已过滤空文件」(2026-11-19 任务 58)。"""
+    from wxsp.platforms import pinduoduo
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("wxsp.apc.check_pass", lambda: True)
+    monkeypatch.setattr(pinduoduo, "stage_to_tmp", lambda *a, **k: Path("data/tmp/58/c.png"))
+    bundle = MagicMock(
+        product_ids_json='["1"]',
+        video_cover_path=Path("/nas/c.png"),
+        tags_json="[]",
+        description="d",
+        publish_at=datetime(2026, 12, 1, 10, 30),
+        declaration=None,
+        detail_float=None,
+        store_feed=None,
+        account_id="a",
+    )
+    ctx = MagicMock()
+    ctx.settings.accounts = {}
+    ctx.settings.publisher.upload_timeout_seconds = 600
+    ctx.step_pause = (0, 0)
+    session = MagicMock()
+    session.next_message.return_value = {"type": "gate"}
+
+    pinduoduo._pre_publish(session, bundle, Path("data/tmp/58/v.mp4"), ctx)
+
+    job = session.start_job.call_args[0][0]
+    assert job["video_path"] == str(tmp_path / "data/tmp/58/v.mp4")
+    assert job["cover_path"] == str(tmp_path / "data/tmp/58/c.png")

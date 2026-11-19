@@ -108,8 +108,10 @@ def _pre_publish(
             "platform": "pinduoduo",
             "step_pause": list(ctx.step_pause),
             "upload_timeout_s": upload_timeout,
-            "video_path": str(staged),
-            "cover_path": str(staged_cover) if staged_cover else None,
+            # 必须绝对路径:Chrome 是另一个进程,data_dir 配成 ./data 时相对路径它找不到,
+            # 页面收到空文件(拼多多提示「已过滤空文件」,2026-11-19 任务 58)
+            "video_path": str(staged.absolute()),
+            "cover_path": str(staged_cover.absolute()) if staged_cover else None,
             "description": bundle.description or "",
             "tags": _json.loads(bundle.tags_json or "[]"),
             "product_ids": product_ids,

@@ -37,6 +37,7 @@ from wxsp.browser import (
     _system_chrome_path,
     _wait_for_devtools_port,
 )
+from wxsp.errors import ChromeMissing
 
 EXTENSION_DIR = Path(__file__).resolve().parent / "extension"
 # 由 extension/manifest.json 的 key(公钥)派生,改 key 必须同步改这里。
@@ -136,8 +137,12 @@ def _browser_ws_url(port: int) -> str:
 def _launch(
     user_data_dir: Path, start_url: str, *, headless: bool = False
 ) -> tuple[subprocess.Popen[str], int]:
+    try:
+        chrome = _system_chrome_path()
+    except FileNotFoundError as exc:
+        raise ChromeMissing("电脑上没装 Google Chrome") from exc
     argv = [
-        str(_system_chrome_path()),
+        str(chrome),
         f"--user-data-dir={user_data_dir.resolve()}",
         "--remote-debugging-port=0",
         "--no-first-run",

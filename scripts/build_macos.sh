@@ -83,9 +83,9 @@ uv run pyinstaller \
   --collect-all jinja2 \
   --collect-all fastapi \
   --collect-all uvicorn \
-  --collect-all lark_oapi \
-  --collect-all patchright \
   --collect-all pyautogui \
+  --exclude-module patchright \
+  --exclude-module playwright \
   --noconfirm \
   build/launcher.py
 
@@ -106,30 +106,8 @@ PLIST="$APP_PATH/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string ${DISPLAY_NAME}" "$PLIST" 2>/dev/null \
   || /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${DISPLAY_NAME}" "$PLIST"
 
-echo "==> 内嵌 patchright chromium 到 _internal/chromium/"
-# patchright 跑 launch 时按 <PLAYWRIGHT_BROWSERS_PATH>/chromium-<版本>/chrome-mac-arm64/...
-# 查找,所以打包后我们要保留 chromium-<版本> 这一层目录(不是把它的内容铺平)。
-CHROMIUM_SRC="$(uv run python -c "
-import os, glob
-root = os.environ.get('PLAYWRIGHT_BROWSERS_PATH') or os.path.expanduser('~/Library/Caches/ms-playwright')
-candidates = sorted(glob.glob(os.path.join(root, 'chromium-*')))
-assert candidates, f'未在 {root} 找到 chromium-* 目录;先跑 uv run patchright install chromium'
-print(candidates[-1])
-")"
-echo "    chromium 源: $CHROMIUM_SRC"
-# PyInstaller .app 在 mac 下:bundle/Contents/Frameworks/ = _MEIPASS
-# 必须保留 chromium-<版本> 这一层(patchright 按这个路径找浏览器)。
-# BSD cp 的 `cp -R src dst/` 行为在 dst 已存在时会铺平内容 ——
-# 显式拼出含版本号的 DST,然后用 `src/.` 把内容拷进去。
-CHROMIUM_VERSION_DIR="$(basename "$CHROMIUM_SRC")"
-CHROMIUM_DST="$APP_PATH/Contents/Frameworks/chromium/$CHROMIUM_VERSION_DIR"
-mkdir -p "$CHROMIUM_DST"
-cp -R "$CHROMIUM_SRC/." "$CHROMIUM_DST/"
-
-echo "==> 修可执行位(Chrome for Testing / Chromium / chrome 都覆盖)"
-find "$CHROMIUM_DST" -name "Google Chrome for Testing" -exec chmod +x {} \; 2>/dev/null || true
-find "$CHROMIUM_DST" -name "Chromium" -exec chmod +x {} \; 2>/dev/null || true
-find "$CHROMIUM_DST" -name "chrome" -exec chmod +x {} \; 2>/dev/null || true
+# 不再内嵌 patchright / Chromium(2026-11-19):拼多多走系统 Chrome + 插件,其余旧平台锁定中,
+# 安装包只认系统 Chrome(体检会检查是否安装)。原先这里占安装包约 2/3 体积。
 
 echo "==> 用 create-dmg 打包"
 if ! command -v create-dmg >/dev/null 2>&1; then
@@ -144,6 +122,7 @@ create-dmg \
   --app-drop-link 450 200 \
   --icon "${DISPLAY_NAME}.app" 150 200 \
   --hide-extension "${DISPLAY_NAME}.app" \
+  --format ULMO \
   "dist/wxsp-${VERSION}.dmg" \
   "$APP_PATH"
 

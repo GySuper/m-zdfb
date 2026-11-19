@@ -14,6 +14,14 @@ from wxsp.db import get_engine, init_db
 from wxsp.models import Account
 
 
+@pytest.fixture(autouse=True)
+def _chrome_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """体检会查本机是否装了 Chrome;各用例不依赖测试机环境(缺 Chrome 的情形单独测)。"""
+    from wxsp.doctor import ChromeCheckRow
+
+    monkeypatch.setattr("wxsp.cli.check_chrome", lambda: ChromeCheckRow(True, "/Apps/Chrome"))
+
+
 @pytest.fixture
 def db_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     db_path = tmp_path / "db.sqlite"
@@ -448,3 +456,25 @@ def test_doctor_cookie_warn_does_not_fail_exit_code(
 
     assert result.exit_code == 0, result.output  # warn 不算失败
     assert "warn" in result.output
+
+
+def test_doctor_fails_and_points_to_download_when_chrome_missing(
+    db_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from wxsp.doctor import ChromeCheckRow
+
+    monkeypatch.setattr(
+        "wxsp.cli.check_chrome",
+        lambda: ChromeCheckRow(
+            False, "没找到 Google Chrome,请到 https://www.google.com/chrome/ 下载安装"
+        ),
+    )
+    from wxsp import cli as cli_module
+
+    (tmp_path / "v").mkdir()
+    (tmp_path / "c").mkdir()
+    settings = make_settings(tmp_path / "v", tmp_path / "c")
+    monkeypatch.setattr(cli_module, "load_settings", lambda platform=None: settings)
+    result = CliRunner().invoke(app, ["doctor"])
+    assert result.exit_code == 1
+    assert "google.com/chrome" in result.output

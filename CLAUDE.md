@@ -128,7 +128,8 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 | 数据库 | SQLite + **SQLModel** | 模型即 schema 即 Pydantic 校验;底层兼容 SQLAlchemy,后期可平滑升级 |
 | 日志 | loguru | 简单好用 |
 | 反检测 | **patchright 内建** + `wxsp/fingerprint.py` per-account 指纹注入 | 每个账号一套确定性指纹(种子 = MD5(account_id)),绕过视频号"同设备多账号"风控 |
-| 飞书 SDK | `lark-oapi`(官方 Python SDK) | 多维表格读写 |
+| 飞书接口 | 标准库 HTTP(`feishu.FeishuClient`) | 多维表格读写;不用 `lark-oapi` SDK(88MB、一次导入 50+ 服务,只用到其中几个接口) |
+| 打包 | PyInstaller + create-dmg(LZMA)/ Inno Setup | **不带浏览器**:插件版平台用电脑上装的 Google Chrome(体检检查);patchright 及其 Chromium 只在开发环境(`uv sync --extra legacy`)供锁定的旧平台参考 |
 | 任务调度 | APScheduler | **只用一个 cron job(每天 09:00)**,无 polling |
 | 包管理 | uv | 跨平台一致;比 pip 快 |
 | 代码质量 | ruff + mypy + pre-commit | 强制开启 |
@@ -203,7 +204,7 @@ wxsp/platforms/
    - `_post_publish(page, bundle, ctx)`:点发布 → 等成功 →(可选)抽 `remote_url` 写进 `ctx.result`;
    - `X_SPEC = PlatformSpec(platform_key="X", display_name="中文名", pre_publish=_pre_publish, post_publish=_post_publish)`;
    - `class XPublisher`:`publish_one` 转调 `run_publish(..., spec=X_SPEC)`;`login(account)` 开浏览器等扫码(**不接 Settings**)。
-3. **注册行为** `publisher._PUBLISHERS`:加 `"X": XPublisher()` 一行。
+3. **注册行为** `publisher._PUBLISHER_CLASSES`:加 `"X": ("wxsp.platforms.X", "XPublisher")` 一行(用到时才导入)。
 4. **注册元数据** `platform_meta.REGISTRY`:加一条 `PlatformMeta(key, label, title_min, login_meta, field_map_defaults, needs_fingerprint)`;平台有差异时再设 `has_title` / `title_max` / `tags_max` / `use_real_chrome`。
 5. **生成配置**:`wxsp setup` 选平台 → 写出 `config_X.yaml`(账号去 `/config` 加)。
 
@@ -252,7 +253,7 @@ wxsp/
 │   ├── platform_meta.py               # 平台静态元数据登记表 REGISTRY(新增平台单一信息源)
 │   ├── db.py                          # SQLModel engine + session + 状态转换辅助 + 幂等锁
 │   ├── models.py                      # SQLModel 表 (Account/Video/Task/Event),含 platform 字段
-│   ├── feishu.py                      # Bitable 读写(lark-oapi)+ 回写
+│   ├── feishu.py                      # Bitable 读写(标准库 HTTP,无 SDK)+ 回写
 │   ├── sync.py                        # sync_now():拉飞书 → 校验 → 写 DB → 回写(CLI/scheduler 共用)
 │   ├── validator.py                   # 入库校验(纯函数,按平台区分字段)
 │   ├── scheduler.py                   # 每平台独立 cron + 手动 fire (APScheduler 包装)
@@ -523,7 +524,7 @@ wxsp run --daemon
 ```
 
 `sync_now()` 做的事:
-1. `lark-oapi` 拉飞书"状态=待入库"的所有行(分页)
+1. `feishu.fetch_pending_rows` 拉飞书"状态=待入库"的所有行(分页)
 2. 每行 → `validator.validate()`(含 `nas.find_video/find_cover()`:裸文件名走 rglob,完整路径走 alias 翻译 + exists)
 3. 4 核心字段(执行日期 / 定时发布时间 / 标题 / 视频文件)任一为空 → **跳过且不回写**(`SyncResult.skipped_incomplete`)。视为"业务还没填完的草稿",留到下次拉
 4. 通过 → 写本地 `Video` + 创建 `Task(status=pending, execute_date, publish_at)`
@@ -810,6 +811,7 @@ tools/tailwindcss -c tailwind.config.js -i wxsp/static/app.src.css -o wxsp/stati
 | `feishu_api_error` | 飞书 API 错误 | 3 次重试(回写路径 `writeback_row` 已实现独立退避) |
 | `unknown` | 兜底 | 1 次重试 `*`,然后 failed |
 | `publish_unconfirmed` | 已点发布但限时内没确认成功(可能已发出) | **不重试**(会重复发布),告警让人先去平台后台核对;不触发 halt |
+| `chrome_missing` | 电脑上没装 Google Chrome(安装包不带浏览器) | 不重试,**全局 halt**,汇总提示去 google.com/chrome 安装 |
 
 > 飞书回写本身(`feishu.writeback_row`)有独立退避序列 `(1s/3s/10s,共 4 次)` —— 历史 `(1s/2s/3 次)` 在飞书抖动时被实测打穿,最后一条 task 跑完 status="已计划" 不更新。退避总时长 ~14s 远小于一次 publish 的 1-5min,不会拖慢主流程。
 

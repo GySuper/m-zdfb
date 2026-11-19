@@ -63,7 +63,9 @@ _ACCOUNT_HALT_ERRORS: frozenset[str] = frozenset({"risk_control"})
 # 触发"整轮停掉所有账号剩余 task"的错误类型。这些是全局问题(视频号改版 /
 # NAS 掉线),其他账号跑也会挂同样的错;abort 整个 run 是为了 ① 不浪费时间
 # ② 不让 publisher 把同一条告警推 N 次。
-_GLOBAL_HALT_ERRORS: frozenset[str] = frozenset({"element_not_found", "nas_unreachable"})
+_GLOBAL_HALT_ERRORS: frozenset[str] = frozenset(
+    {"element_not_found", "nas_unreachable", "chrome_missing"}
+)
 
 
 @dataclass

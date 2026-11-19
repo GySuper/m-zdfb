@@ -46,6 +46,7 @@ ERROR_TYPE_CN: dict[str, str] = {
     "topic_not_found": "话题未找到",
     "product_not_found": "商品未找到",
     "publish_unconfirmed": "发布未确认",
+    "chrome_missing": "没装 Chrome",
     "product_selection_failed": "商品选择失败",
     "login_required": "需重新登录",
     "run_summary": "发布完成汇总",

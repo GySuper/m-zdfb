@@ -17,7 +17,13 @@ from wxsp.archive import cleanup_old_files, install_file_sink
 from wxsp.browser import check_cookie
 from wxsp.config import ALL_PLATFORMS, Settings, load_settings, platform_label
 from wxsp.db import get_engine, init_db, session_scope
-from wxsp.doctor import check_feishu, check_nas, record_cookie_check, refresh_cookie_status
+from wxsp.doctor import (
+    check_chrome,
+    check_feishu,
+    check_nas,
+    record_cookie_check,
+    refresh_cookie_status,
+)
 from wxsp.feishu import FeishuApiError
 from wxsp.models import Account
 from wxsp.notify import NotifyEvent, notify
@@ -269,6 +275,12 @@ def doctor(
                 elif row.status != "ok":
                     cookie_failed = True
 
+    # 浏览器 section:安装包不带浏览器,插件版平台要用系统 Chrome
+    typer.echo("")
+    typer.echo("浏览器:")
+    chrome_row = check_chrome()
+    typer.echo(f"  {'✅' if chrome_row.ok else '❌'} {'Google Chrome':<20} {chrome_row.detail}")
+
     # NAS section
     typer.echo("")
     typer.echo("NAS:")
@@ -320,7 +332,7 @@ def doctor(
             typer.echo(f"  ❌ APC check 失败: {type(exc).__name__}: {exc}")
             typer.echo(f"     完整 repr: {exc!r}")
 
-    if cookie_failed or nas_failed or feishu_failed or apc_failed:
+    if cookie_failed or nas_failed or feishu_failed or apc_failed or not chrome_row.ok:
         raise typer.Exit(code=1)
 
 

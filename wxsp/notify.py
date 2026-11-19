@@ -70,6 +70,7 @@ _ERROR_TYPE_CN: dict[str, str] = {
     "topic_not_found": "话题未找到",
     "product_not_found": "商品未找到",
     "publish_unconfirmed": "发布未确认",
+    "chrome_missing": "没装 Chrome",
     "product_selection_failed": "商品选择失败",
     "unknown": "未知错误",
     "cookie_warning": "登录态即将过期",
@@ -127,6 +128,7 @@ _FAILURE_HINTS: dict[str, tuple[str, str]] = {
         "先去平台后台看有没有发出,没发出再到「任务」页点「重试」",
     ),
     "interrupted": ("任务被中断", "到「任务」页点「重试」"),
+    "chrome_missing": ("电脑上没装 Chrome", "到 google.com/chrome 下载安装 Google Chrome 后重试"),
     "unknown": ("未知问题", "稍后到「任务」页点「重试」,反复出现请联系技术同学"),
 }
 _STEP_PREFIX = re.compile(r"^step=(\w+):\s*")

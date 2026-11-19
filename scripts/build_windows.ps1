@@ -109,11 +109,11 @@ print("==> 凭据已注入 + 校验通过:", ",".join(changed))
     --collect-all jinja2 `
     --collect-all fastapi `
     --collect-all uvicorn `
-    --collect-all lark_oapi `
-    --collect-all patchright `
     --collect-all pyautogui `
     --collect-all pygetwindow `
     --collect-all win32com `
+    --exclude-module patchright `
+    --exclude-module playwright `
     --noconfirm `
     build/launcher.py
 
@@ -122,21 +122,7 @@ print("==> 凭据已注入 + 校验通过:", ",".join(changed))
     throw "PyInstaller 未生成 $DistDir"
   }
 
-  Write-Host "==> 内嵌 patchright chromium 到 _internal/chromium/"
-  # patchright 跑 launch 时按 <PLAYWRIGHT_BROWSERS_PATH>/chromium-<版本>/... 查找,
-  # 所以保留 chromium-<版本> 这一层目录。
-  $ChromiumSrc = uv run python -c "
-import os, glob
-root = os.environ.get('PLAYWRIGHT_BROWSERS_PATH') or os.path.expandvars(r'%LOCALAPPDATA%\ms-playwright')
-c = sorted(glob.glob(os.path.join(root, 'chromium-*')))
-assert c, f'no chromium-* in {root}'
-print(c[-1])
-"
-  Write-Host "    chromium 源: $ChromiumSrc"
-  $ChromiumDst = "$DistDir/_internal/chromium"
-  New-Item -ItemType Directory -Force -Path $ChromiumDst | Out-Null
-  # 注意:Copy-Item 用 $src 整个目录(不加 \*)让 chromium-XXXX 名字保留
-  Copy-Item -Recurse -Force $ChromiumSrc $ChromiumDst
+  # 不再内嵌 patchright / Chromium(2026-11-19):拼多多走系统 Chrome + 插件,其余旧平台锁定中。
 
   Write-Host "==> 运行 Inno Setup"
   $InnoPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"

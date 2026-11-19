@@ -61,6 +61,10 @@ async function verifyLogin(t) {
     // 登录过期时打开视频首页实测落到「请选择登录身份」页(没有表单),所以直接开带表单的 SSO 登录页
     await passwordLogin(t, t.job.login_url, async () => (await t.url()).includes(HOME_FRAG));
     t.emit("relogin");
+    // 登录后的跳转链可能还没走完就到了首页地址,接着还会重载一次(实测把刚上传的视频冲掉);
+    // 重新打开一次干净的发布页再往下走
+    await sleep(3000);
+    await t.goto(HOME_URL);
   }
   // 正向确认:上传框是隐藏的 file input,只判断存在
   const ok = await t.until(() => t.page((sel) => !!document.querySelector(sel), VIDEO_FILE_INPUT), 8_000);
@@ -120,9 +124,15 @@ export async function entryPopups(t) {
   throw new StepError("element_not_found", "拼多多入口弹窗持续出现,页面未在 10 秒内稳定");
 }
 
-async function upload(t) {
+// 上传完成 = 页面出现「文件名:<本次文件>」且有一行恰好是「视频上传成功」。
+// 不能只搜「视频上传成功」:空发布页底部「平台发布激励」卡片里就有「视频上传成功后,…」(实测误判)。
+export async function upload(t) {
+  const name = t.job.video_path.split(/[\\/]/).pop();
   await t.setFiles(VIDEO_FILE_INPUT, [t.job.video_path]);
-  const done = await t.until(() => t.hasText(UPLOAD_DONE_TEXT), t.job.upload_timeout_s * 1000, 1000);
+  const startMs = Math.min(20_000, t.job.upload_timeout_s * 1000);
+  const started = await t.until(() => t.hasText(`文件名：${name}`), startMs, 500);
+  if (!started) throw new StepError("upload_failed", "选择视频后页面没有进入上传状态");
+  const done = await t.until(async () => (await pageLines(t)).has(UPLOAD_DONE_TEXT), t.job.upload_timeout_s * 1000, 1000);
   if (!done) throw new StepError("upload_failed", "视频上传/处理超时");
   console.log("视频上传完成");
 }

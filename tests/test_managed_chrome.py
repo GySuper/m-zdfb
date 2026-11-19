@@ -307,3 +307,57 @@ def test_password_login_failure_is_cookie_expired_with_page_hint(tmp_path: Path)
     assert msg["kind"] == "cookie_expired"
     assert "账号或密码错误" in str(msg["message"])
     assert "wrong-secret" not in str(msg["message"])  # 密码绝不进报错
+
+
+# ---- 拼多多上传完成判定(插件 upload 跑在仿真发布页上)----
+
+UPLOAD_CARD = "<div>平台发布激励</div><div>视频上传成功后,选择并添加有流量奖励的商品</div>"
+UPLOAD_PAGES = {
+    # 2026-11-18 真机:页面没进入上传状态,但底部卡片有「视频上传成功后…」,不能判成上传完成
+    "stuck": f'<input type=file accept=".mp4,.mov">{UPLOAD_CARD}',
+    "ok": f"""<input type=file accept=".mp4,.mov">{UPLOAD_CARD}
+      <script>document.querySelector('input').onchange = (e) => {{
+        const n = e.target.files[0].name;
+        setTimeout(() => document.body.insertAdjacentHTML('beforeend', `<p>文件名\uff1a${{n}}</p>`), 300);
+        setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<div>视频上传成功</div>'), 1200);
+      }};</script>""",
+}
+
+
+def _run_upload(tmp_path: Path, name: str) -> dict[str, object]:
+    (tmp_path / "pub.html").write_text(
+        f"<!doctype html><meta charset=utf-8><body>{UPLOAD_PAGES[name]}</body>", encoding="utf-8"
+    )
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\0" * 1000)
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with extension_session(tmp_path / "profile", headless=True) as session:
+            session.start_job(
+                {
+                    "platform": "selftest_pdd_upload",
+                    "url": f"http://127.0.0.1:{server.server_address[1]}/pub.html",
+                    "video_path": str(video),
+                    "upload_timeout_s": 4,
+                    "step_pause": [0, 0],
+                }
+            )
+            while True:
+                msg = session.next_message(timeout=30)
+                if msg["type"] in ("gate", "error"):
+                    return msg
+    finally:
+        server.shutdown()
+
+
+def test_upload_not_fooled_by_bottom_card_text(tmp_path: Path) -> None:
+    msg = _run_upload(tmp_path, "stuck")
+    assert msg["type"] == "error"
+    assert msg["kind"] == "upload_failed"
+    assert "没有进入上传状态" in str(msg["message"])
+
+
+def test_upload_done_when_file_name_and_success_line_appear(tmp_path: Path) -> None:
+    assert _run_upload(tmp_path, "ok")["type"] == "gate"

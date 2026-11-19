@@ -6,9 +6,9 @@
 import { debugApi } from "./debug.js";
 import { StepError, Task } from "./lib.js";
 import { PINDUODUO } from "./pinduoduo.js";
-import { PDD_LOGIN, PDD_POPUPS, SELFTEST } from "./selftest.js";
+import { PDD_LOGIN, PDD_POPUPS, PDD_UPLOAD, SELFTEST } from "./selftest.js";
 
-const PLATFORMS = { pinduoduo: PINDUODUO, selftest: SELFTEST, selftest_pdd_popups: PDD_POPUPS, selftest_pdd_login: PDD_LOGIN };
+const PLATFORMS = { pinduoduo: PINDUODUO, selftest: SELFTEST, selftest_pdd_popups: PDD_POPUPS, selftest_pdd_login: PDD_LOGIN, selftest_pdd_upload: PDD_UPLOAD };
 let current = null;
 
 const emit = (type, data = {}) => globalThis.wxspEmit(JSON.stringify({ type, ...data }));

@@ -32,7 +32,7 @@
 
 ### 2.1 托管 Chrome(`wxsp/managed_chrome.py`,新文件)
 - 复用 `browser._system_chrome_path()` / `_reap_stale_profile_lock()`;启动参数对齐参考项目:
-  `--user-data-dir=<account.user_data_dir> --remote-debugging-port=0 --no-first-run --no-default-browser-check --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows`,起始页为握手页(见 2.3)。
+  `--user-data-dir=<account.user_data_dir> --remote-debugging-port=0 --no-first-run --no-default-browser-check --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows`。
 - 读 `<profile>/DevToolsActivePort` 拿端口 → `/json/version` 拿 browser WS → `Extensions.uninstall`(忽略未安装)→ `Extensions.loadUnpacked(path=wxsp/extension)`。注入失败整段重试,20s 超时。
 - 每条任务启动一次、结束关闭(与现有平台一致,不做常驻进程,先求简单)。
 - profile 沿用账号现有 `user_data_dir`。旧 profile 是 patchright 的 Chromium 格式,macOS 上 cookie 加密钥匙串不同 → **升级后拼多多每个账号需重新扫码一次**。
@@ -40,7 +40,8 @@
 ### 2.2 插件(`wxsp/extension/`,随 wxsp 包一起打包)
 - MV3,**纯 JS,无构建步骤**(wxsp 运行/打包都不依赖 Node)。
 - `manifest.key` 固定公钥 → 固定扩展 ID,服务端据此校验 WebSocket `Origin`。
-- 权限:`debugger`、`tabs`、`scripting`、`alarms`;host:`https://*.pinduoduo.com/*`、`http://127.0.0.1/*`。
+- 权限:`debugger`、`tabs`、`storage`;host:`https://*.pinduoduo.com/*`。
+- 每个标签页 attach 后先开 `Emulation.setFocusEmulationEnabled`,否则后台标签页里点击不生效(P0 实测)。
 - 从参考项目移植(改写为纯 JS,不整包搬):`rpa-input`(点击/滚轮/按键三段序列 + 随机停顿)、`rpa-target`(视口外滚入 / 两帧稳定 / `elementFromPoint` 命中校验)、`cursor.js`(虚拟光标)。
 - 文字输入:`Input.insertText` 分段 + 随机间隔(描述、话题、商品 ID)。
 - 文件上传:`DOM.setFileInputFiles` 传 wxsp 已 stage 好的本地路径(见 §5 风险 1)。
@@ -48,8 +49,8 @@
 - 选择器从 `pinduoduo_selectors.py` 搬到 `wxsp/extension/pdd/selectors.js`,Python 侧旧文件在切换完成前保留。
 
 ### 2.3 通信协议(本地 WebSocket,`ws://127.0.0.1:8765/ws/extension`)
-- **握手**:wxsp 启动 Chrome 时起始页为 `http://127.0.0.1:8765/ext/boot?run=<一次性 token>`;插件启动后找到该标签页读出 token,连 WS 发 `hello{run}`。服务端校验 `Origin == chrome-extension://<固定ID>` 且 token 属于正在等待的那次启动,否则断开。
-- 保活:插件每 20s 发 `ping`(MV3 SW 有 WS 活动即不休眠)。
+- **握手**:wxsp 注入插件后,经同一条 CDP 连接附着到插件 service worker,执行 `boot({port, run})`(`run` 为一次性 token);插件存进 `chrome.storage.session` 后连 WS 发 `hello{run}`。服务端校验 `Origin == chrome-extension://<固定ID>` 且 token 属于正在等待的那次启动,否则断开。(原计划从启动页 URL 读 token,P0 实测插件读到的 URL 为空,弃用。)
+- 保活:插件每 20s 发 `ping`(MV3 SW 有 WS 活动即不休眠);SW 被回收重启时从 `chrome.storage.session` 读回配置重连。
 - 消息(JSON):
 
 | 方向 | type | 内容 |
@@ -89,7 +90,7 @@
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **P0 验证** | 脚本:启动本机 Chrome → `loadUnpacked` 最小插件 → WS `hello` → 在本地测试页用 chrome.debugger 点击按钮、`DOM.setFileInputFiles` 上传文件、`captureScreenshot` | 脚本跑通打印 4 个 ok;任一失败就回来改方案,不往下做 |
+| **P0 验证 ✅** | 脚本:启动本机 Chrome → `loadUnpacked` 最小插件 → WS `hello` → 在本地测试页用 chrome.debugger 点击按钮、`DOM.setFileInputFiles` 上传文件、`captureScreenshot` | 脚本跑通打印 4 个 ok;任一失败就回来改方案,不往下做 |
 | **P1 骨架** | `managed_chrome.py`、`/ws/extension` + boot 页、`ExtensionSession`、runner `driver` 分支、插件框架(握手/保活/步骤上报/错误上报/截图)、拼多多 `open_publish`→`verify_login`→`entry_popups`→`gate`、新 login | 单测:WS 协议(Origin/token 校验、消息流、超时、error→异常映射);真机:`wxsp login` 扫码成功 → `wxsp run --task-id N --dry-run` 停在 gate 出截图 |
 | **P2 全步骤** | 上传、描述、话题、商品、封面、定时(日历切月同视频号修法,找不到日期就报错)、内容声明、风控探测、发布、成功判定 | 真机 dry-run 全流程截图核对;**经你同意后**真发 1 条;旧 patchright 路径仍可用开关切回 |
 | **P3 收尾** | 全平台步骤上报到工作台、平台间并行锁、CLAUDE.md(§2.5、平台架构、新增平台手册)更新、打包脚本确认 `wxsp/extension` 被带上 | 单测:锁语义(同平台串行/跨平台并行/小红书独占);工作台卡片显示步骤 |
@@ -101,15 +102,19 @@
 | 新增 | 修改 |
 |---|---|
 | `wxsp/managed_chrome.py` | `wxsp/platforms/base.py`(`PlatformSpec.driver`、`last_step` property) |
-| `wxsp/api/routes_extension.py`(`/ws/extension`、`/ext/boot`) | `wxsp/platforms/runner.py`(一处 driver 分支) |
+| `wxsp/api/routes_extension.py`(`/ws/extension`) | `wxsp/platforms/runner.py`(一处 driver 分支) |
 | `wxsp/extension/`(manifest、background.js、pdd/*.js、cursor.js) | `wxsp/platforms/pinduoduo.py`(新步骤走插件;旧实现留在开关后) |
 | `tests/test_extension_protocol.py`、`tests/test_managed_chrome.py` | `wxsp/publisher.py`(RUNNING_STEPS、P3 的锁) |
-| `scripts/spike_extension.py`(P0,验证后删) | `wxsp/api/app.py`(挂路由)、`routes_dashboard.py` + `dashboard.html`(步骤显示)、`config.py`(driver 开关)、`doctor.py`、`CLAUDE.md` |
+| | `wxsp/api/app.py`(挂路由)、`routes_dashboard.py` + `dashboard.html`(步骤显示)、`config.py`(driver 开关)、`doctor.py`、`CLAUDE.md` |
 
 ## 5. 风险与待验证
 
-1. **插件读本地文件**:`DOM.setFileInputFiles` 经 chrome.debugger 调用需要插件有本地文件访问权。Chromium 对 unpacked 插件默认放行;不放行时退路 A:启动加 `--disable-extensions-file-access-check`;退路 B:由 wxsp 自己经同一 CDP 端口做文件注入(插件发 `need_file`)。P0 验证。
+1. ~~插件读本地文件~~ **P0 已验证**:插件经 chrome.debugger 调 `DOM.setFileInputFiles` 传本地路径可用,页面收到 `isTrusted=true` 的 change 事件,无需额外启动参数。
 2. **调试提示条**:chrome.debugger 挂上后 Chrome 顶部会出现「xxx 已开始调试此浏览器」提示条。托管窗口只给自动化用,不影响运营;参考项目同样如此。
-3. **`Extensions.loadUnpacked` 的开关要求**:参考项目在 Chrome 152 上只用 `--remote-debugging-port=0` 已验证;新版本若要求 `--enable-unsafe-extension-debugging` 就加上。P0 验证。
+3. ~~`Extensions.loadUnpacked` 的开关要求~~ **P0 已验证**:Chrome 157(macOS)只用 `--remote-debugging-port=0` 即可注入。
 4. **Windows**:路径、进程回收沿用 `browser.py` 已有的 Windows 处理;P2 结束后需要一台 Windows 机器验证一次。
 5. **插件更新不生效**:Chrome 对 unpacked 插件有 staging 副本,已用「先 uninstall 再 loadUnpacked」规避;manifest version 仍随改动递增。
+
+## 6. P0 验证结论(2026-11-18,macOS · Chrome 157)
+
+后台标签页内:CDP 注入插件 ✓;WS 握手 Origin 为固定扩展 ID ✓;`Input.dispatchMouseEvent` 点击 `isTrusted=true` ✓(需焦点仿真);`Input.insertText` 中文输入 ✓;`DOM.setFileInputFiles` 本地文件 ✓;`Page.captureScreenshot` ✓。

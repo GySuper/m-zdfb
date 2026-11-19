@@ -3,7 +3,7 @@
 > 本文件给 Claude Code 阅读,用于指导项目从零开发。**请逐节通读后再开始编码**,
 > 特别留意 "核心约束"、"复用与参考"、"平台架构"。
 
-**当前支持平台**:视频号(tencent_channel)、淘宝光合(taobao_guanghe)、抖音(douyin)
+**当前支持平台**(6 个):视频号(tencent_channel)、淘宝光合(taobao_guanghe)、抖音(douyin)、快手(kuaishou)、小红书(xiaohongshu)、拼多多(pinduoduo)
 
 ---
 
@@ -152,7 +152,13 @@ wxsp/platforms/
 ├── taobao_guanghe.py        # 淘宝光合步骤函数 + TAOBAO_SPEC
 ├── taobao_selectors.py      # 淘宝光合选择器
 ├── douyin.py                # 抖音步骤函数 + DOUYIN_SPEC
-└── douyin_selectors.py      # 抖音选择器
+├── douyin_selectors.py      # 抖音选择器
+├── kuaishou.py              # 快手步骤函数 + KUAISHOU_SPEC
+├── kuaishou_selectors.py    # 快手选择器
+├── xiaohongshu.py           # 小红书步骤函数 + XIAOHONGSHU_SPEC
+├── xiaohongshu_selectors.py # 小红书选择器
+├── pinduoduo.py             # 拼多多步骤函数 + PINDUODUO_SPEC
+└── pinduoduo_selectors.py   # 拼多多选择器
 ```
 
 `publisher.py` 是薄路由层,根据 `task.platform` 调对应的 `PlatformPublisher.publish_one()`(内部转调 `runner.run_publish(..., spec=)`),并提供同款 `login(account)` 路由(`login` 不依赖 Settings,只开浏览器等扫码)。
@@ -168,6 +174,10 @@ wxsp/platforms/
 | `login_meta` 登录态检测 | `browser.login_meta_for` |
 | `field_map_defaults` 平台特有飞书字段 | `routes_setup._field_map_for` / `routes_config._field_map_keys` |
 | `needs_fingerprint` 反检测档位 | `browser.browser_context`(指纹 + AutomationControlled + cookie 持久化策略) |
+| `has_title` 是否有独立标题框(默认 True;快手/拼多多 False → 改判「描述」必填) | `validator._is_incomplete` / `validator._check_title` |
+| `title_max` 标题上限(默认 30;小红书 20) | `validator._check_title` |
+| `tags_max` 标签上限(默认 5;小红书 10) | `validator` 标签校验 |
+| `use_real_chrome` 走 CDP 连系统真实 Chrome(默认 False;小红书 True) | `browser.browser_context` |
 
 这些消费方一律 `get_meta(platform)` 读表,**不再各存一份 per-platform map**。`config.ALL_PLATFORMS = list(REGISTRY)` 也从这里派生。回归保障见 `tests/test_platform_meta_single_source.py`(注入假平台断言各消费方都从 `REGISTRY` 读)。
 
@@ -183,14 +193,15 @@ wxsp/platforms/
    - `X_SPEC = PlatformSpec(platform_key="X", display_name="中文名", pre_publish=_pre_publish, post_publish=_post_publish)`;
    - `class XPublisher`:`publish_one` 转调 `run_publish(..., spec=X_SPEC)`;`login(account)` 开浏览器等扫码(**不接 Settings**)。
 3. **注册行为** `publisher._PUBLISHERS`:加 `"X": XPublisher()` 一行。
-4. **注册元数据** `platform_meta.REGISTRY`:加一条 `PlatformMeta(key, label, title_min, login_meta, field_map_defaults, needs_fingerprint)`。
+4. **注册元数据** `platform_meta.REGISTRY`:加一条 `PlatformMeta(key, label, title_min, login_meta, field_map_defaults, needs_fingerprint)`;平台有差异时再设 `has_title` / `title_max` / `tags_max` / `use_real_chrome`。
 5. **生成配置**:`wxsp setup` 选平台 → 写出 `config_X.yaml`(账号去 `/config` 加)。
 
 > config / notify / browser / validator / setup / cli **都不用改**——全从 `REGISTRY` 读。
 
 **⚠️ 注意事项(踩过的坑)**
 
-- **`needs_fingerprint` 选对档**:`True` = 注入 per-account 指纹 + `AutomationControlled` + 靠 persistent context 存 cookie(视频号这种按设备指纹判多账号的强风控平台);`False` = 不注入指纹 + 用 `cookies.json` 显式持久化(淘宝)。选错会掉登录或被风控。
+- **`needs_fingerprint` 选对档**:`True` = 注入 per-account 指纹 + `AutomationControlled` + 靠 persistent context 存 cookie(视频号这种按设备指纹判多账号的强风控平台);`False` = 不注入指纹 + 用 `cookies.json` 显式持久化(淘宝/抖音/快手/小红书/拼多多)。选错会掉登录或被风控。
+- **`use_real_chrome`**:patchright 的 patched chromium 被平台识别时(小红书实测一天即风控)设 `True`,改走 CDP 连系统真实 Chrome;配合 `human_input.py`(pyautogui OS 级输入,`isTrusted=true`)。
 - **平台特有错误**:新错误类型加到 `errors.py`(继承 `PublisherError`)→ `errors._KIND_BY_TYPE` 映射 → `notify._ERROR_TYPE_CN` 中文名,三处缺一告警就显示"未知错误"(参考 taobao 的 `ProductNotFound`/`TopicNotFound`)。
 - **新 step 名**:`ctx.last_step` 用的字符串若是新的,加进 `notify._STEP_CN`,否则告警里步骤名会漏成英文。
 - **需要全新飞书字段时**:`TaskBundle` 是字段超集;复用现有字段(title/desc/topic/tags/cover/products/declaration/ai)无需动,但要读**全新**字段得顺着 `models.Video`(加列)→ `config.FeishuFieldMap` → `feishu`/`validator`(入库)→ `base.TaskBundle` → `runner.load_task_bundle` 整条链加,别只加一头。
@@ -213,7 +224,7 @@ wxsp/platforms/
 
 ### Web UI 平台切换
 
-Sidebar 左上角 "当前平台" 下拉动态列出所有平台,切换后所有 nav 链接带 `?platform=`,各页面数据完全隔离。
+页面顶部横幅右上角的平台按钮(`_topbar.html`)展开平台面板,动态列出所有平台(真实平台图标 + 今日进度 + 账号数,数据来自 `deps.platform_overview()`),切换后所有 nav 链接带 `?platform=`,各页面数据完全隔离。
 
 ---
 
@@ -228,7 +239,8 @@ wxsp/
 │   ├── platform_meta.py               # 平台静态元数据登记表 REGISTRY(新增平台单一信息源)
 │   ├── db.py                          # SQLModel engine + session + 状态转换辅助 + 幂等锁
 │   ├── models.py                      # SQLModel 表 (Account/Video/Task/Event),含 platform 字段
-│   ├── feishu.py                      # Bitable 拉取(sync_now) + 回写
+│   ├── feishu.py                      # Bitable 读写(lark-oapi)+ 回写
+│   ├── sync.py                        # sync_now():拉飞书 → 校验 → 写 DB → 回写(CLI/scheduler 共用)
 │   ├── validator.py                   # 入库校验(纯函数,按平台区分字段)
 │   ├── scheduler.py                   # 每平台独立 cron + 手动 fire (APScheduler 包装)
 │   ├── publisher.py                   # 薄路由层,根据 task.platform 路由到对应 platform
@@ -240,11 +252,17 @@ wxsp/
 │   │   ├── taobao_guanghe.py          #   淘宝光合步骤函数 + TAOBAO_SPEC
 │   │   ├── taobao_selectors.py        #   淘宝光合选择器
 │   │   ├── douyin.py                  #   抖音步骤函数 + DOUYIN_SPEC
-│   │   └── douyin_selectors.py        #   抖音选择器
+│   │   ├── douyin_selectors.py        #   抖音选择器
+│   │   ├── kuaishou.py / kuaishou_selectors.py        # 快手
+│   │   ├── xiaohongshu.py / xiaohongshu_selectors.py  # 小红书(真实 Chrome + 物理输入)
+│   │   └── pinduoduo.py / pinduoduo_selectors.py      # 拼多多
 │   ├── browser.py                     # patchright context 工厂 + per-account 指纹注入
 │   ├── fingerprint.py                 # per-account 设备指纹生成 + JSON 持久化 + JS init script
 │   ├── stealth_js.py                  # 上一代静态 init script(已被 fingerprint 取代,保留回滚)
-│   ├── errors.py                      # 错误类型 + 分类(含 taobao 特有:ProductNotFound/TopicNotFound)
+│   ├── human_input.py                 # pyautogui OS 级鼠标/键盘(isTrusted=true,小红书用)
+│   ├── archive.py                     # 日志/截图过期清理(M9)
+│   ├── apc.py / apc_config.py         # APC 授权粘合层(dev 模式放行;apc_config 打包时由 build 脚本替换)
+│   ├── errors.py                      # 错误类型 + 分类(含电商特有:ProductNotFound/ProductSelectionFailed/TopicNotFound)
 │   ├── notify.py                      # Notifier 协议 + WecomNotifier(platform 感知)
 │   ├── doctor.py                      # 健康检查
 │   ├── nas.py                         # find_video / find_cover / stage_to_tmp / cleanup_tmp
@@ -252,21 +270,31 @@ wxsp/
 │   ├── api/                           # FastAPI 路由层
 │   │   ├── app.py                     # FastAPI 入口 + platform_context 中间件
 │   │   ├── deps.py
+│   │   ├── i18n.py                    # 枚举中文化(仅渲染层)
+│   │   ├── log_stream.py              # loguru → SSE 桥
+│   │   ├── routes_setup.py            # 安装向导(M11)
 │   │   ├── routes_dashboard.py
 │   │   ├── routes_accounts.py
 │   │   ├── routes_tasks.py
 │   │   ├── routes_plans.py
 │   │   ├── routes_config.py
 │   │   └── routes_logs.py             # SSE
+│   ├── static/                        # 新版界面(Auto)静态资源
+│   │   ├── app.src.css                #   Tailwind 源样式(含 .legacy 兼容层)
+│   │   ├── app.css                    #   编译产物(提交到 git,运行/打包不需要 Node)
+│   │   ├── ui.js                      #   丝绸背景/数字滚动/倾斜/平台面板/opError 弹窗
+│   │   └── icons/{platform}.svg       #   平台图标
 │   └── templates/                     # Jinja2 模板
-│       ├── base.html                  #   含动态平台切换器
+│       ├── base_v2.html               #   新版布局:丝绸横幅 + 导航 + 平台面板 + opError 弹窗
+│       ├── _topbar.html               #   顶栏(品牌/导航/平台切换/日期)
 │       ├── dashboard.html
 │       ├── accounts.html
 │       ├── tasks.html
 │       ├── task_detail.html
 │       ├── plans.html
 │       ├── config.html
-│       └── logs.html
+│       ├── logs.html
+│       └── setup/                     #   向导各页
 ├── data/
 │   ├── db.sqlite
 │   ├── default_platform               # 全局默认平台设置
@@ -286,7 +314,9 @@ wxsp/
 ├── docs/
 │   └── superpowers/specs/             # 设计文档(brainstorm 产出)
 ├── tests/
-├── config.yaml                        # 用户配置(gitignore)
+├── apc_sdk/                           # APC 授权 SDK(独立 Python 包,editable 依赖)
+├── scripts/                           # macOS/Windows 打包脚本 + Inno Setup 配置
+├── config_{platform}.yaml             # 每平台用户配置(gitignore)
 ├── config.example.yaml                # 配置模板
 ├── pyproject.toml
 ├── .pre-commit-config.yaml
@@ -643,7 +673,7 @@ wxsp web [--port p]                  启动 Web UI(开浏览器),等价于 run -
 
 所有走 HTMX 同步执行的操作按钮(`/accounts/sync` / `/tasks/run-today` / etc.)遵守:
 
-- **失败弹全局 modal**:路由返 `200` + 失败 HTML 片段 + 响应头 `HX-Trigger: {"opError": {"title": "...", "detail": "..."}}`。`base.html` 注册 `document.body.addEventListener('opError', ...)` 监听器,把 detail 灌进 `<dialog id="op-modal">` 并 `showModal()`。不走 4xx/5xx —— 避免 htmx 默认的 `htmx:responseError` 路径漏 swap
+- **失败弹全局 modal**:路由返 `200` + 失败 HTML 片段 + 响应头 `HX-Trigger: {"opError": {"title": "...", "detail": "..."}}`。`wxsp/static/ui.js` 注册 `document.body.addEventListener('opError', ...)` 监听器,把 detail 灌进 `<dialog id="op-modal">` 并 `showModal()`。不走 4xx/5xx —— 避免 htmx 默认的 `htmx:responseError` 路径漏 swap
 - **inline 状态片段**:同时把 flash 片段 swap 到 `#op-status`(成功/失败都用同一容器,绿/红/黄三色 class)
 - **loading 指示**:按钮带 `hx-indicator="#xxx-spinner"`,htmx 飞行期间自动加 `htmx-request` class 显隐 spinner
 - **并发去重**:同步阻塞型路由(sync / run-today)用 `threading.Lock` 串行,抢不到锁就返"正在跑中,请等"
@@ -662,7 +692,15 @@ wxsp web                # 同时启动 FastAPI + 打开浏览器,默认 127.0.0.
 uvicorn wxsp.api.app:app --port 8765
 ```
 
-**单进程**:FastAPI 直接渲染 Jinja2 模板 + 静态文件,没有前后端分离。开发和生产部署完全一致(无 build 步骤)。HTMX 通过 CDN 引入(也可下到 `wxsp/templates/static/htmx.min.js` 自包含)。
+**单进程**:FastAPI 直接渲染 Jinja2 模板 + `/static` 静态文件,没有前后端分离,运行和打包都不需要 Node。
+
+**样式改动流程**:改 `wxsp/static/app.src.css` 或模板里的 Tailwind 类后,用开发机上的 Tailwind 独立二进制(放 `tools/`,gitignore)重新编译,并把 `app.css` 一起提交:
+
+```bash
+tools/tailwindcss -c tailwind.config.js -i wxsp/static/app.src.css -o wxsp/static/app.css --minify
+```
+
+注意:Tailwind 只识别模板里**写全的类名**,不要用 Jinja 变量拼类名(如 `bg-{{ c }}-50`);编译产物末尾要有换行,否则 pre-commit 的 end-of-file-fixer 会拦下提交。
 
 ---
 
@@ -790,7 +828,7 @@ class NotifyEvent:
 **第一版只实现 `WecomNotifier`**(企微机器人,Markdown 消息;飞书做协作平台,企微做告警,职责分工)。`FeishuNotifier` / `DingtalkNotifier` 留作接口预留,需要时几十行代码即可加上。
 
 **通知文案约定(全中文,无英文穿透)**:
-- 所有 markdown 标题前缀 `[视频号]`(后续多平台扩展时按 settings 取)
+- 所有 markdown 标题前缀平台中文名(如 `[视频号]` / `[小红书]`),由 `notify._platform_tag` 从 `REGISTRY` 取;未知平台回退 `[视频号]`
 - `level` 渲染为中文标签:`info → [信息]` / `warn → [警告]` / `error → [错误]`
 - `error_type` 通过 `error_type_cn()` 映射(如 `cookie_expired → 登录态失效`),未知 key 兜底"未知错误"
 - 发布步骤(`step`)通过 `step_cn()` 映射(如 `upload → 上传视频`)。`element_not_found` 的 title 会拼上 step,例如"元素未找到 · 设置封面 —— 视频号可能改版"

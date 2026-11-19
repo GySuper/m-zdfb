@@ -140,6 +140,9 @@ def _launch(user_data_dir: Path, start_url: str) -> tuple[subprocess.Popen[str],
         "--remote-debugging-port=0",
         "--no-first-run",
         "--no-default-browser-check",
+        # 带调试端口启动时 Chrome 会把 navigator.webdriver 置 true(实测 157),
+        # 平台据此直接上滑块/拒发验证码;小红书真实 Chrome 路线同样要压掉。
+        "--disable-blink-features=AutomationControlled",
         # 插件在后台标签页里干活,不让 Chrome 节流后台定时器/渲染
         "--disable-background-timer-throttling",
         "--disable-renderer-backgrounding",

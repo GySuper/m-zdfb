@@ -33,6 +33,7 @@ document.getElementById('btn').onclick = e => { log('click', e.isTrusted); docum
 document.getElementById('ed').oninput = e => log('typed', e.target.value);
 document.querySelector('input[type=file]').onchange = e => { const f = e.target.files[0];
   log('file', [f.name, f.size, e.isTrusted]); };
+log('webdriver', navigator.webdriver);
 document.querySelectorAll('button')[1].onclick = e => { window.published = true; log('published', e.isTrusted); };
 </script>"""
 
@@ -83,6 +84,7 @@ def test_selftest_job_runs_through_gate_and_publish(tmp_path: Path, page_url: st
 
         state = json.loads(session.content().split('<pre id="log">')[1].split("</pre>")[0])
     assert state == {
+        "webdriver": False,  # 带调试端口启动不能暴露自动化标记(平台会上滑块/拒发验证码)
         "click": True,
         "typed": "#你好 拼多多",
         "file": ["clip.mp4", 123_456, True],

@@ -130,6 +130,10 @@ POPUP_PAGES = {
       <svg data-testid="beast-core-icon-close" class="goods_popularize_pop_up_closeBtn__6KE37"
         width="24" height="24" onclick="this.parentNode.remove()"><rect width="24" height="24"/></svg>
       <button onclick="document.body.dataset.promoted = 1">去推广</button></div>""",
+    # 2026-11-18 真机:上传后表单里的内嵌提示条带关闭图标,不是弹窗,必须放过
+    "notice_bar": """<div data-testid="beast-core-noticeBar" style="margin-top:1600px">
+      该视频未匹配到有效商品<svg data-testid="beast-core-icon-close" width="16" height="16"
+        onclick="document.body.dataset.promoted = 1"><rect width="16" height="16"/></svg></div>""",
     # 真实商品推广浮层:无 dialog 容器,只有全局可见的 beast close 图标
     "promo": """<div style="width:300px;height:100px">推广</div>
       <svg data-testid="beast-core-icon-close" width="24" height="24"
@@ -173,6 +177,12 @@ def test_entry_popups_are_closed_safely(tmp_path: Path, name: str) -> None:
     assert msg["type"] == "gate", msg
     assert msg["dialogs_left"] == 0
     assert not msg["promoted"]  # 只点关闭,绝不点「去推广」等业务按钮
+
+
+def test_inline_notice_bar_is_left_alone(tmp_path: Path) -> None:
+    msg = _run_popups(tmp_path, "notice_bar")
+    assert msg["type"] == "gate", msg
+    assert not msg["promoted"]  # 提示条的关闭图标没被点
 
 
 def test_entry_popup_that_cannot_be_closed_fails_closed(tmp_path: Path) -> None:

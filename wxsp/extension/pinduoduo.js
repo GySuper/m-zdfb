@@ -22,7 +22,10 @@ const ENTRY_DIALOG_CLOSE = [
   '[class*="MDL_closeBtn_"]',
   '[class*="MDL_headerCloseIcon_"]',
   '[data-testid="beast-core-icon-close"]',
-].join(", ");
+]
+  // 页面内嵌提示条(如上传后「该视频未匹配到有效商品」)的关闭图标不是弹窗,不碰
+  .map((sel) => `${sel}:not([data-testid="beast-core-noticeBar"] *)`)
+  .join(", ");
 
 const PRODUCT_ID_INPUT = 'input[placeholder*="商品id"]';
 const COVER_FILE_INPUT = 'input[type="file"][accept*=".jpg"]';

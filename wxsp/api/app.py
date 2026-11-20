@@ -77,116 +77,128 @@ def _setup_required() -> bool:
     return not any(_gcp(p).exists() for p in ALL_PLATFORMS)
 
 
+def _start_daemon() -> BaseScheduler | None:
+    """有平台配置时的启动工作(建库 / 标僵尸 / 归档 / 积压检查)+ 起 BackgroundScheduler 注册每日 cron。"""
+    scheduler: BaseScheduler | None = None
+    # 发现已配置的平台,逐平台加载
+    from wxsp.config import load_settings as _load
+    from wxsp.config import scaffold_missing_configs as _scaffold
+    from wxsp.scheduler import _daily_cron
+
+    # 调度 / 全局 init 只认"真实已配置"的平台 —— 在补空壳之前快照,空壳不会进 cron。
+    active_platforms = [p for p in ALL_PLATFORMS if get_config_path(p).exists()]
+
+    # 再为已登记但缺配置的平台补空壳(更新新增平台后,平台页不再 500;凭证留空到 /config 填)。
+    newly_scaffolded = _scaffold()
+    if newly_scaffolded:
+        logger.info(
+            f"[api] 已为缺配置平台生成空壳: {newly_scaffolded}(到 /config 填飞书凭证后启用)"
+        )
+    if not active_platforms:
+        logger.warning("[api] 没有找到任何平台配置文件,跳过 scheduler")
+    else:
+        # 取第一个可用平台的 settings 做全局 init(DB / archive / backlog)
+        try:
+            first_cfg = _load(platform=active_platforms[0])
+        except Exception as exc:
+            logger.warning(f"[api] 加载平台 [{active_platforms[0]}] 配置失败: {exc},跳过 scheduler")
+            first_cfg = None
+
+        if first_cfg is not None:
+            engine = get_engine()
+            init_db(engine)
+            try:
+                with session_scope(engine) as session:
+                    touched = mark_stale_running_as_interrupted(session)
+                if touched:
+                    logger.warning(f"[api] 启动时标 interrupted: {touched} 条僵尸 running")
+            except Exception as exc:
+                logger.warning(f"[api] 启动 mark_stale 失败,忽略: {exc}")
+
+            try:
+                cleanup_old_files(
+                    logs_dir=first_cfg.app.logs_dir,
+                    log_retention_days=first_cfg.monitoring.log_retention_days,
+                    screenshot_retention_days=first_cfg.monitoring.screenshot_retention_days,
+                )
+            except Exception as exc:
+                logger.warning(f"[api] 启动归档失败,忽略: {exc}")
+
+            try:
+                with session_scope(engine) as session:
+                    backlog = maybe_warn_backlog(
+                        first_cfg, session=session, platform=active_platforms[0]
+                    )
+                logger.info(f"[api] 启动时历史积压: {backlog} 条")
+            except Exception as exc:
+                logger.warning(f"[api] 启动积压检查失败,忽略: {exc}")
+
+            try:
+                scheduler = make_scheduler(first_cfg, blocking=False)
+                for pkey in active_platforms:
+                    if not platform_meta.is_available(pkey):
+                        logger.info(
+                            f"[api] 平台 [{pkey}] 已锁定({platform_meta.LOCKED_HINT}),不注册 cron"
+                        )
+                        continue
+                    try:
+                        plat_cfg = (
+                            _load(platform=pkey) if pkey != active_platforms[0] else first_cfg
+                        )
+                        sched = plat_cfg.scheduler
+                        if not sched.enabled:
+                            logger.info(
+                                f"[api] 平台 [{pkey}] scheduler.enabled=false,跳过 cron 注册"
+                            )
+                            continue
+                        scheduler.add_job(
+                            lambda p=pkey: _daily_cron(p, _load(platform=p)),
+                            CronTrigger(
+                                hour=sched.daily_cron_hour,
+                                minute=sched.daily_cron_minute,
+                                timezone=plat_cfg.app.timezone,
+                            ),
+                            id=f"daily_{pkey}",
+                            name=f"[{pkey}] daily sync + run",
+                        )
+                        logger.info(
+                            f"[api] 平台 [{pkey}] cron:每日 "
+                            f"{sched.daily_cron_hour:02d}:{sched.daily_cron_minute:02d} "
+                            f"({plat_cfg.app.timezone}) sync + run_today_pending"
+                        )
+                    except Exception as exc:
+                        logger.warning(f"[api] 平台 [{pkey}] cron 注册失败: {exc}")
+                scheduler.start()
+            except Exception as exc:
+                logger.error(f"[api] scheduler 启动失败,定时任务将不会触发: {exc}")
+                scheduler = None
+    return scheduler
+
+
+def start_daemon_after_setup(app: FastAPI) -> None:
+    """向导写完配置后当场起定时任务:启动时是向导模式没起,不能等运营重启(否则次日 9 点不跑)。"""
+    if getattr(app.state, "scheduler", None) is None:
+        app.state.scheduler = _start_daemon()
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """启动时:跑 daemon 的副作用 + 起 BackgroundScheduler;关闭时 shutdown。
 
     `wxsp web`(以及打包后双击 .exe → launcher 默认追加 `web`)走这里,
     所以 09:00 cron 必须在这里注册,否则 Web UI 模式下定时任务永远不触发。
-    setup 模式(config.yaml 缺失)只 yield,不起 scheduler,等向导写完 config
-    用户重启进程后再起。
+    setup 模式(config.yaml 缺失)只 yield,不起 scheduler;向导完成时由
+    start_daemon_after_setup 当场补起。
     """
-    scheduler: BaseScheduler | None = None
+    app.state.scheduler = None
     if _setup_required():
         logger.info("[api] 无平台配置文件,跳过 scheduler 启动(走 setup 向导)")
     else:
-        # 发现已配置的平台,逐平台加载
-        from wxsp.config import load_settings as _load
-        from wxsp.config import scaffold_missing_configs as _scaffold
-        from wxsp.scheduler import _daily_cron
-
-        # 调度 / 全局 init 只认"真实已配置"的平台 —— 在补空壳之前快照,空壳不会进 cron。
-        active_platforms = [p for p in ALL_PLATFORMS if get_config_path(p).exists()]
-
-        # 再为已登记但缺配置的平台补空壳(更新新增平台后,平台页不再 500;凭证留空到 /config 填)。
-        newly_scaffolded = _scaffold()
-        if newly_scaffolded:
-            logger.info(
-                f"[api] 已为缺配置平台生成空壳: {newly_scaffolded}(到 /config 填飞书凭证后启用)"
-            )
-        if not active_platforms:
-            logger.warning("[api] 没有找到任何平台配置文件,跳过 scheduler")
-        else:
-            # 取第一个可用平台的 settings 做全局 init(DB / archive / backlog)
-            try:
-                first_cfg = _load(platform=active_platforms[0])
-            except Exception as exc:
-                logger.warning(
-                    f"[api] 加载平台 [{active_platforms[0]}] 配置失败: {exc},跳过 scheduler"
-                )
-                first_cfg = None
-
-            if first_cfg is not None:
-                engine = get_engine()
-                init_db(engine)
-                try:
-                    with session_scope(engine) as session:
-                        touched = mark_stale_running_as_interrupted(session)
-                    if touched:
-                        logger.warning(f"[api] 启动时标 interrupted: {touched} 条僵尸 running")
-                except Exception as exc:
-                    logger.warning(f"[api] 启动 mark_stale 失败,忽略: {exc}")
-
-                try:
-                    cleanup_old_files(
-                        logs_dir=first_cfg.app.logs_dir,
-                        log_retention_days=first_cfg.monitoring.log_retention_days,
-                        screenshot_retention_days=first_cfg.monitoring.screenshot_retention_days,
-                    )
-                except Exception as exc:
-                    logger.warning(f"[api] 启动归档失败,忽略: {exc}")
-
-                try:
-                    with session_scope(engine) as session:
-                        backlog = maybe_warn_backlog(
-                            first_cfg, session=session, platform=active_platforms[0]
-                        )
-                    logger.info(f"[api] 启动时历史积压: {backlog} 条")
-                except Exception as exc:
-                    logger.warning(f"[api] 启动积压检查失败,忽略: {exc}")
-
-                try:
-                    scheduler = make_scheduler(first_cfg, blocking=False)
-                    for pkey in active_platforms:
-                        if not platform_meta.is_available(pkey):
-                            logger.info(
-                                f"[api] 平台 [{pkey}] 已锁定({platform_meta.LOCKED_HINT}),不注册 cron"
-                            )
-                            continue
-                        try:
-                            plat_cfg = (
-                                _load(platform=pkey) if pkey != active_platforms[0] else first_cfg
-                            )
-                            sched = plat_cfg.scheduler
-                            if not sched.enabled:
-                                logger.info(
-                                    f"[api] 平台 [{pkey}] scheduler.enabled=false,跳过 cron 注册"
-                                )
-                                continue
-                            scheduler.add_job(
-                                lambda p=pkey: _daily_cron(p, _load(platform=p)),
-                                CronTrigger(
-                                    hour=sched.daily_cron_hour,
-                                    minute=sched.daily_cron_minute,
-                                    timezone=plat_cfg.app.timezone,
-                                ),
-                                id=f"daily_{pkey}",
-                                name=f"[{pkey}] daily sync + run",
-                            )
-                            logger.info(
-                                f"[api] 平台 [{pkey}] cron:每日 "
-                                f"{sched.daily_cron_hour:02d}:{sched.daily_cron_minute:02d} "
-                                f"({plat_cfg.app.timezone}) sync + run_today_pending"
-                            )
-                        except Exception as exc:
-                            logger.warning(f"[api] 平台 [{pkey}] cron 注册失败: {exc}")
-                    scheduler.start()
-                except Exception as exc:
-                    logger.error(f"[api] scheduler 启动失败,定时任务将不会触发: {exc}")
-                    scheduler = None
+        app.state.scheduler = _start_daemon()
     try:
         yield
     finally:
+        scheduler = app.state.scheduler
         if scheduler is not None:
             try:
                 scheduler.shutdown(wait=False)

@@ -1,7 +1,7 @@
 {% extends "setup/base.html" %}
 {% block content %}
 <h1>告警渠道(可选)</h1>
-<p>失败、风控、cookie 失效会推送到企微群。留空则不启用告警。</p>
+<p>每轮发布结束推送一条汇总到企微群(失败原因和处理办法都在里面)。留空则不启用告警。</p>
 
 <form method="post" action="/setup/step/4" id="notify-form">
   <div class="form-row">

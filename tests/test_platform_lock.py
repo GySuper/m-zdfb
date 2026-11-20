@@ -131,3 +131,19 @@ def test_topbar_marks_locked_platforms(client: TestClient) -> None:
     assert r.status_code == 200
     assert 'data-locked="抖音"' in r.text  # 锁定平台不是链接,点击弹「没权限」
     assert 'href="/tasks?platform=douyin"' not in r.text
+
+
+def test_setup_wizard_only_offers_available_platforms(
+    locked: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """向导第 1 步默认选中第一项;锁定的视频号排第一时,运营一路下一步就把飞书配进了锁定平台。"""
+    from wxsp.api.app import create_app
+
+    monkeypatch.setattr("wxsp.config.get_config_path", lambda *_a, **_k: tmp_path / "none.yaml")
+    monkeypatch.setattr("wxsp.config.get_user_data_dir", lambda: tmp_path)
+    c = TestClient(create_app(), follow_redirects=False)
+    page = c.get("/setup/step/1").text
+    assert '<option value="pinduoduo">' in page
+    assert 'value="tencent_channel"' not in page
+    r = c.post("/setup/step/1", data={"platform": "tencent_channel"})
+    assert r.headers["location"] == "/setup/step/1"

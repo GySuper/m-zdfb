@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def fresh_app(monkeypatch, tmp_path):
     """干净环境:config.yaml 不存在,user_data_dir 在 tmp_path。"""
+    import wxsp.api.app as app_module  # 先导入再打补丁:否则模块导入时就绑定了假函数,测完不还原
+
     config_path = tmp_path / "config.yaml"
     user_data = tmp_path / "data"
     user_data.mkdir()
@@ -17,12 +19,11 @@ def fresh_app(monkeypatch, tmp_path):
     monkeypatch.setattr("wxsp.config.get_config_path", lambda *_a, **_k: config_path)
     monkeypatch.setattr("wxsp.config.get_user_data_dir", lambda: user_data)
     monkeypatch.setattr("wxsp.config.get_user_logs_dir", lambda: tmp_path / "logs")
-    import importlib
-
-    import wxsp.api.app as app_module
-
-    importlib.reload(app_module)
-    return app_module.app, config_path
+    # 不 reload app 模块:reload 会把上面的假 get_config_path 绑死在模块里,测完不还原,污染后续测试
+    monkeypatch.setattr(app_module, "get_config_path", lambda *_a, **_k: config_path)
+    # 完成向导会当场起定时任务(建库 / 起线程);这里只测写配置,不起
+    monkeypatch.setattr(app_module, "start_daemon_after_setup", lambda app: None)
+    return app_module.create_app(), config_path
 
 
 def test_step1_platform_select_renders(fresh_app):
@@ -173,3 +174,25 @@ def test_test_wecom_rejects_empty(fresh_app):
     resp = client.post("/setup/test-wecom", data={"webhook": "   "})
     assert resp.status_code == 200
     assert "✗" in resp.text
+
+
+def test_complete_starts_daily_cron_without_restart(tmp_path, monkeypatch):
+    """首次启动没配置 → 不起定时任务;向导完成后要当场补上,不能等运营重启(否则第二天 9 点不跑)。"""
+    from wxsp.api.app import create_app
+
+    monkeypatch.chdir(tmp_path)  # 开发模式下配置 / 数据都在 cwd,整套落 tmp_path
+    monkeypatch.setenv("WXSP_DB_PATH", str(tmp_path / "db.sqlite"))
+    (tmp_path / "nas").mkdir()
+    app = create_app()
+    with TestClient(app, follow_redirects=False) as client:  # with = 跑 lifespan(向导模式)
+        assert app.state.scheduler is None
+        client.post("/setup/step/1", data={"platform": "pinduoduo"})
+        client.post(
+            "/setup/step/2",
+            data={"app_id": "cli_x", "app_secret": "s", "app_token": "a", "table_id": "t"},
+        )
+        client.post("/setup/step/3", data={"nas_root": "nas"})
+        client.post("/setup/step/4", data={"webhook": ""})
+        client.post("/setup/complete")
+        assert [j.id for j in app.state.scheduler.get_jobs()] == ["daily_pinduoduo"]
+        assert app.state.scheduler.running

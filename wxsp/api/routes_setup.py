@@ -80,11 +80,14 @@ def render_step(step: int, request: Request) -> HTMLResponse:
     }
     if step == 1:
         from wxsp.config import ALL_PLATFORMS, platform_label
+        from wxsp.platform_meta import is_available
 
         ctx["data_dir"] = str(wxsp_config.get_user_data_dir())
         ctx["logs_dir"] = str(wxsp_config.get_user_logs_dir())
         ctx["self_check"] = _run_self_check()
-        ctx["platforms"] = [{"key": p, "label": platform_label(p)} for p in ALL_PLATFORMS]
+        ctx["platforms"] = [
+            {"key": p, "label": platform_label(p)} for p in ALL_PLATFORMS if is_available(p)
+        ]
     if step == 5:
         ctx["summary"] = _build_summary(data)
     return templates.TemplateResponse(request, template_name, ctx)
@@ -102,15 +105,10 @@ def _run_self_check() -> list[dict[str, Any]]:
     except Exception as exc:
         checks.append({"name": "用户数据目录可写", "ok": False, "detail": str(exc)})
 
-    from wxsp.browser import _chromium_root
+    from wxsp.doctor import check_chrome
 
-    chromium = _chromium_root()
-    if chromium is None:
-        checks.append({"name": "Chromium", "ok": True, "detail": "开发模式由 patchright 自动管理"})
-    elif chromium.exists():
-        checks.append({"name": "Chromium", "ok": True, "detail": str(chromium)})
-    else:
-        checks.append({"name": "Chromium", "ok": False, "detail": f"未找到: {chromium}"})
+    chrome = check_chrome()  # 安装包不带浏览器,插件版平台用电脑上的 Google Chrome
+    checks.append({"name": "Google Chrome", "ok": chrome.ok, "detail": chrome.detail})
     return checks
 
 
@@ -155,6 +153,10 @@ def _build_summary(data: dict[str, Any]) -> dict[str, Any]:
 
 @router.post("/step/1", response_model=None)
 def submit_platform(request: Request, platform: str = Form(...)) -> StarletteResponse:
+    from wxsp.platform_meta import is_available
+
+    if not is_available(platform.strip()):  # 锁定平台不让配(下拉里本来就不列)
+        return RedirectResponse(url="/setup/step/1", status_code=302)
     _get_wizard_data(request)["platform"] = platform.strip()
     return RedirectResponse(url="/setup/step/2", status_code=302)
 
@@ -233,6 +235,11 @@ def complete(request: Request) -> RedirectResponse:
     config_path.write_text(
         yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
+
+    # 启动时是向导模式没起定时任务,这里当场补起(须在补空壳之前:空壳不进 cron)。
+    import wxsp.api.app as app_module
+
+    app_module.start_daemon_after_setup(request.app)
 
     # 首次向导只配一个平台;其余已登记平台补空壳,免得切过去 500(凭证留空到 /config 填)。
     wxsp_config.scaffold_missing_configs()

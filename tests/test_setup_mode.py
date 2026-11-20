@@ -10,13 +10,12 @@ from fastapi.testclient import TestClient
 def app_in_setup_mode(monkeypatch, tmp_path):
     """构造 config.yaml 不存在的环境,加载 fastapi app。"""
     # get_config_path(platform) 现在按平台取,需接收平台参数(返回同一个不存在的路径即可)
-    monkeypatch.setattr("wxsp.config.get_config_path", lambda *_a, **_k: tmp_path / "config.yaml")
-    import importlib
+    import wxsp.api.app as app_module  # 先导入再打补丁;不 reload(reload 会把假函数绑死在模块里)
 
-    import wxsp.api.app as app_module
-
-    importlib.reload(app_module)
-    return app_module.app
+    fake = lambda *_a, **_k: tmp_path / "config.yaml"  # noqa: E731
+    monkeypatch.setattr("wxsp.config.get_config_path", fake)
+    monkeypatch.setattr(app_module, "get_config_path", fake)
+    return app_module.create_app()
 
 
 def test_root_redirects_to_setup_when_no_config(app_in_setup_mode):

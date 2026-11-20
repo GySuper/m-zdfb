@@ -166,6 +166,26 @@ def _launch(
     return proc, port
 
 
+def _maximize_window(cdp: CdpClient) -> None:
+    """窗口一律最大化:小窗会把发布页右半边挤出视口,插件判「不在可见区域」失败
+    (2026-11-20 Windows 实跑:首次启动的窗口很小,拼多多描述框够不着)。"""
+    deadline = time.monotonic() + 3  # 刚启动时首个标签页可能还没登记
+    try:
+        while time.monotonic() < deadline:
+            infos = cdp.send("Target.getTargets")["targetInfos"]
+            tid = next((t["targetId"] for t in infos if t["type"] == "page"), None)
+            if tid:
+                wid = cdp.send("Browser.getWindowForTarget", {"targetId": tid})["windowId"]
+                cdp.send(
+                    "Browser.setWindowBounds",
+                    {"windowId": wid, "bounds": {"windowState": "maximized"}},
+                )
+                return
+            time.sleep(0.1)
+    except CdpError as exc:
+        logger.warning(f"[managed_chrome] 窗口最大化失败,按原尺寸继续: {exc}")
+
+
 @contextmanager
 def managed_chrome(
     user_data_dir: Path, *, start_url: str = "about:blank", headless: bool = False
@@ -177,6 +197,7 @@ def managed_chrome(
         cdp: CdpClient | None = None
         try:
             cdp = CdpClient(_browser_ws_url(port))
+            _maximize_window(cdp)
             yield ManagedChrome(proc, cdp)
         finally:
             if cdp is not None:

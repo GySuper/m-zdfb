@@ -465,3 +465,22 @@ def test_new_job_aborts_the_previous_one_silently(tmp_path: Path, page_url: str)
         assert msg == {"type": "halted", "step": "open"}
         with pytest.raises(TimeoutError):  # 旧一轮被中止:之后不能再冒出任何消息
             session.next_message(timeout=12)
+
+
+def test_window_is_maximized_on_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-11-20 Windows 实跑:首次启动窗口很小,发布页右半边被挤出视口 →「描述输入框不在可见区域」。"""
+    import subprocess
+
+    real_popen = subprocess.Popen
+
+    def small_window(argv: list[str], **kw: object) -> subprocess.Popen[str]:
+        extra = ["--window-size=600,500", "--screen-info={0,0 1600x1000}"]
+        return real_popen([argv[0], *extra, *argv[1:]], **kw)  # type: ignore[call-overload,no-any-return]
+
+    monkeypatch.setattr(managed_chrome.subprocess, "Popen", small_window)
+    with managed_chrome.managed_chrome(tmp_path / "p", headless=True) as chrome:
+        targets = chrome.cdp.send("Target.getTargets")["targetInfos"]
+        tid = next(t["targetId"] for t in targets if t["type"] == "page")
+        bounds = chrome.cdp.send("Browser.getWindowForTarget", {"targetId": tid})["bounds"]
+    assert bounds["windowState"] == "maximized"
+    assert bounds["width"] == 1600

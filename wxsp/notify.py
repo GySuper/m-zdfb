@@ -229,11 +229,7 @@ def lark_sign(timestamp: str, secret: str) -> str:
 
 @dataclass
 class LarkNotifier:
-    """飞书自定义机器人 webhook(纯文本消息)。
-
-    飞书文本不渲染 markdown,所以这里用 `_format_plain`(无 `#`/`*`/`>` 符号),
-    避免企微那套 markdown 符号在飞书里裸露。secret 非空时附带「签名校验」。
-    """
+    """飞书自定义机器人 webhook(消息卡片,见 `_lark_card`)。secret 非空时附带「签名校验」。"""
 
     webhook: str
     secret: str = ""
@@ -241,10 +237,7 @@ class LarkNotifier:
     timeout_seconds: int = 5
 
     def send(self, event: NotifyEvent) -> bool:
-        body: dict[str, Any] = {
-            "msg_type": "text",
-            "content": {"text": _format_plain(event)},
-        }
+        body: dict[str, Any] = {"msg_type": "interactive", "card": _lark_card(event)}
         if self.secret:
             ts = str(int(time.time()))
             body["timestamp"] = ts
@@ -299,27 +292,88 @@ def _format_markdown(event: NotifyEvent) -> str:
     head = f"**{_platform_tag(event.platform)} · {event.title}**"
     if event.status:
         head += f' <font color="{_STATUS_COLOR.get(event.level, "comment")}">{event.status}</font>'
-    lines = [head]
-    if event.content:
-        lines.append(event.content)
+    lines = [head, *_body_lines(event)]
+    lines.append(f'<font color="comment">{_footer(event)}</font>')
+    return "\n".join(lines)
+
+
+def _body_lines(event: NotifyEvent) -> list[str]:
+    """正文 + 引用行字段(账号优先 display_name,其余来自 context);企微 / 飞书共用。"""
+    lines = [event.content] if event.content else []
     fields: dict[str, Any] = {}
     if event.account_id is not None:
         fields["账号"] = event.account_display_name or event.account_id
     fields.update(event.context)
-    lines += [f"> {k}{_FIELD_GAP}{v}" for k, v in fields.items()]
+    return lines + [f"> {k}{_FIELD_GAP}{v}" for k, v in fields.items()]
+
+
+def _footer(event: NotifyEvent) -> str:
     foot = [f"任务 #{event.task_id}"] if event.task_id is not None else []
     foot.append(f"{datetime.now():%m-%d %H:%M}")
-    lines.append(f'<font color="comment">{" · ".join(foot)}</font>')
-    return "\n".join(lines)
+    return " · ".join(foot)
 
 
-_MARKUP = re.compile(r"</?font[^>]*>|\*\*")
+_LARK_TEMPLATE = {"info": "green", "warn": "orange", "error": "red"}  # 标题栏 / 状态标签颜色
+_LARK_FONT = {"info": "green", "warning": "orange", "comment": "grey"}  # 企微颜色名 → 飞书
+_WECOM_FONT = re.compile(r'<font color="(\w+)">')
+_FIELD_LABEL = re.compile(rf"^(\S{{2}}){_FIELD_GAP}")  # 「原因　xxx」里的字段名
 
 
-def _format_plain(event: NotifyEvent) -> str:
-    """纯文本(飞书文本消息不解析 markdown):同一份内容去掉颜色 / 加粗 / 引用符号。"""
-    text = _MARKUP.sub("", _format_markdown(event))
-    return "\n".join(line[2:] if line.startswith("> ") else line for line in text.splitlines())
+def _lark_markdown(text: str) -> str:
+    """企微 markdown → 飞书卡片 markdown:颜色名换成飞书的;引用行去掉 `> `、字段名置灰;
+    行内换行用 <br>(卡片里单个换行是软换行,可能被合并成一行),空行分段。"""
+    paras: list[str] = []
+    cur: list[str] = []
+    for line in text.splitlines():
+        if not line.strip():
+            if cur:
+                paras.append("<br>".join(cur))
+                cur = []
+            continue
+        line = _WECOM_FONT.sub(lambda m: f"<font color='{_LARK_FONT.get(m[1], 'grey')}'>", line)
+        if line.startswith("> "):
+            line = _FIELD_LABEL.sub(
+                lambda m: f"<font color='grey'>{m[1]}</font>{_FIELD_GAP}", line[2:]
+            )
+        cur.append(line)
+    if cur:
+        paras.append("<br>".join(cur))
+    return "\n\n".join(paras)
+
+
+def _lark_card(event: NotifyEvent) -> dict[str, Any]:
+    """飞书消息卡片(JSON 2.0):彩色标题栏「平台 · 标题」+ 状态标签 / 正文 / 灰色小字页脚。
+
+    内容与企微同一份(`_body_lines`),只换成飞书卡片的 markdown 写法。
+    """
+    color = _LARK_TEMPLATE.get(event.level, "blue")
+    header: dict[str, Any] = {
+        "title": {
+            "tag": "plain_text",
+            "content": f"{_platform_tag(event.platform)} · {event.title}",
+        },
+        "template": color,
+    }
+    if event.status:
+        header["text_tag_list"] = [
+            {
+                "tag": "text_tag",
+                "text": {"tag": "plain_text", "content": event.status},
+                "color": color,
+            }
+        ]
+    elements: list[dict[str, Any]] = []
+    body = _lark_markdown("\n".join(_body_lines(event)))
+    if body:
+        elements.append({"tag": "markdown", "content": body})
+    elements.append(
+        {
+            "tag": "markdown",
+            "content": f"<font color='grey'>{_footer(event)}</font>",
+            "text_size": "notation",
+        }
+    )
+    return {"schema": "2.0", "header": header, "body": {"elements": elements}}
 
 
 def build_notifiers_from_settings(

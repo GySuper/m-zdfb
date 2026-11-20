@@ -20,7 +20,7 @@ from wxsp.notify import (
     NotifyEvent,
     WecomNotifier,
     _format_markdown,
-    _format_plain,
+    _lark_card,
     build_notifiers_from_settings,
     describe_failure,
     lark_sign,
@@ -197,24 +197,45 @@ def test_lark_sign_matches_feishu_algorithm() -> None:
     assert lark_sign("1609459200", "abc") == "wpTIl7bp+SN2odG93IcRqege1WiZoyogn3R1QomxBrs="
 
 
-def test_format_plain_has_no_markdown_symbols() -> None:
-    """飞书文本消息不渲染 markdown:同一份内容去掉颜色 / 加粗 / 引用符号。"""
+def test_lark_card_lays_out_run_summary() -> None:
+    """飞书发消息卡片:彩色标题栏 + 状态标签;字段名置灰;行内换行用 <br>(卡片里单个换行可能被合并)。
+
+    2026-11-20 运营反馈:之前发的是纯文本,整条挤在一起没有排版。
+    """
     event = NotifyEvent(
         type="run_summary",
-        level="warn",
-        title="本轮发布完成",
-        status="1 条需要处理",
-        content='成功 <font color="info">1</font> · 失败 1\n> **1. 早餐豆浆**',
-        task_id=7,
-        account_id="acc_x",
-        account_display_name="美食号",
+        level="error",
+        title="本轮发布中止",
+        status="需要处理",
+        content=(
+            '成功 <font color="info">0</font> · 失败 1 · 跳过 0\n\n'
+            f"> 原因{G}发布页可能改版\n> 处理{G}请联系技术同学\n\n"
+            f"**需要处理**\n> **1. 早餐豆浆**\n> 账号{G}美食号 · 任务 #1"
+        ),
+        platform="pinduoduo",
     )
-    text = _format_plain(event)
-    assert "**" not in text and "<font" not in text and "\n> " not in text
-    assert text.splitlines()[0] == "视频号 · 本轮发布完成 1 条需要处理"
-    assert "成功 1 · 失败 1" in text
-    assert "1. 早餐豆浆" in text
-    assert f"账号{G}美食号" in text
+    card = _lark_card(event)
+    assert card["schema"] == "2.0"
+    header = card["header"]
+    assert header["title"] == {"tag": "plain_text", "content": "拼多多 · 本轮发布中止"}
+    assert header["template"] == "red"
+    assert header["text_tag_list"][0]["text"]["content"] == "需要处理"
+    body, foot = card["body"]["elements"]
+    md = body["content"]
+    assert md.split("\n\n") == [
+        "成功 <font color='green'>0</font> · 失败 1 · 跳过 0",
+        f"<font color='grey'>原因</font>{G}发布页可能改版<br><font color='grey'>处理</font>{G}请联系技术同学",
+        f"**需要处理**<br>**1. 早餐豆浆**<br><font color='grey'>账号</font>{G}美食号 · 任务 #1",
+    ]
+    assert 'color="' not in md
+    assert foot["text_size"] == "notation" and "<font color='grey'>" in foot["content"]
+
+
+def test_lark_card_without_status_or_content() -> None:
+    card = _lark_card(NotifyEvent(type="x", level="info", title="通知测试", content=""))
+    assert "text_tag_list" not in card["header"]
+    assert card["header"]["template"] == "green"
+    assert len(card["body"]["elements"]) == 1  # 只有页脚
 
 
 # ============== describe_failure:原因 / 处理办法,不让代码穿透 ==============
@@ -265,8 +286,8 @@ def test_lark_notifier_send_success_text_no_sign() -> None:
         assert notifier.send(event) is True
 
     body = json.loads(captured["data"])  # type: ignore[arg-type]
-    assert body["msg_type"] == "text"
-    assert "任务失败" in body["content"]["text"]
+    assert body["msg_type"] == "interactive"
+    assert "任务失败" in body["card"]["header"]["title"]["content"]
     assert "sign" not in body and "timestamp" not in body  # 无 secret → 不签名
     assert captured["method"] == "POST"
     assert captured["timeout"] == 5

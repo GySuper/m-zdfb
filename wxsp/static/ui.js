@@ -28,7 +28,8 @@
       }
       g.globalCompositeOperation = 'source-over';
     };
-    const loop = (t) => { if (visible) draw(t); if (!reduce) requestAnimationFrame(loop); };
+    // 始终流动,不跟随系统「减少动画」:办公电脑多为省性能关掉系统动画,静止的横幅不好看(用户 2026-11-20 定)
+    const loop = (t) => { if (visible) draw(t); requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   });
 

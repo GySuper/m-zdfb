@@ -183,6 +183,8 @@ def sync_now(
                     declaration=v_result.declaration,
                     ai_optimize=v_result.ai_optimize,
                     product_ids_json=json.dumps(v_result.product_ids, ensure_ascii=False),
+                    detail_float=v_result.detail_float,
+                    store_feed=v_result.store_feed,
                     ingested_at=now,
                 )
                 task = Task(
@@ -306,6 +308,8 @@ def _apply_overwrite(
     video.declaration = v_result.declaration
     video.ai_optimize = v_result.ai_optimize
     video.product_ids_json = json.dumps(v_result.product_ids, ensure_ascii=False)
+    video.detail_float = v_result.detail_float
+    video.store_feed = v_result.store_feed
     video.ingested_at = now
 
     task.account_id = v_result.account_id or ""

@@ -64,16 +64,18 @@ def get_default_platform() -> str:
     """Read the global default platform from the shared file.
     Falls back to the first configured platform, then to tencent_channel.
     """
+    from wxsp.platform_meta import is_available  # 局部导入:运行时读锁定开关
+
     path = _default_platform_path()
     if path.exists():
         val = path.read_text(encoding="utf-8").strip()
-        if val in REGISTRY:
+        if is_available(val):
             return val
-    # Fallback: first platform with a config file
+    # Fallback: first available platform with a config file, then first available at all
     for p in ALL_PLATFORMS:
-        if get_config_path(p).exists():
+        if is_available(p) and get_config_path(p).exists():
             return p
-    return "tencent_channel"
+    return next((p for p in ALL_PLATFORMS if is_available(p)), "tencent_channel")
 
 
 def set_default_platform(platform: str) -> None:
@@ -203,6 +205,11 @@ class AccountConfig(BaseModel):
     user_data_dir: Path
     video_search_root: Path
     cover_search_root: Path
+    # 账密登录(仅 PlatformMeta.supports_password_login 的平台,目前拼多多):登录过期时
+    # 插件用账号密码自动登录。密码明文存在本平台配置文件里(用户 2026-11-18 选择),界面掩码。
+    password_login: bool = False
+    login_username: str = ""
+    login_password: str = ""
 
     @model_validator(mode="after")
     def _resolve_relative_paths(self) -> AccountConfig:
@@ -257,6 +264,9 @@ class FeishuFieldMap(BaseModel):
     declaration: str = "创作者声明"
     ai_optimize: str = "AI优化"
     product_ids: str = "商品ID"
+    # pinduoduo-specific
+    detail_float: str = "商详悬浮窗"
+    store_feed: str = "同步店铺动态"
 
 
 class FeishuBitableConfig(BaseModel):

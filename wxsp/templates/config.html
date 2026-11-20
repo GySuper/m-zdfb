@@ -59,7 +59,7 @@
                       <td class="muted">{{ a.daily_limit }}</td>
                       <td class="text-xs muted" style="max-width: 240px; overflow: hidden; text-overflow: ellipsis;"><code>{{ a.video_search_root }}</code></td>
                       <td class="nowrap">
-                        <button type="button" class="btn-sm" onclick='openAccountModal({{ {"id": aid, "display_name": a.display_name, "enabled": a.enabled, "daily_limit": a.daily_limit, "video_search_root": a.video_search_root, "cover_search_root": a.cover_search_root} | tojson }})'>编辑</button>
+                        <button type="button" class="btn-sm" onclick='openAccountModal({{ {"id": aid, "display_name": a.display_name, "enabled": a.enabled, "daily_limit": a.daily_limit, "video_search_root": a.video_search_root, "cover_search_root": a.cover_search_root, "password_login": a.password_login or false, "login_username": a.login_username or "", "has_password": (a.login_password or "") | length > 0} | tojson }})'>编辑</button>
                         <form method="post" action="/config/accounts/{{ aid }}/delete?platform={{ platform }}" style="display:inline;"
                               onsubmit="return confirm('确认删除账号 {{ aid }}?(配置中的条目会被移除,Chrome profile 目录不会自动删除)');">
                           <button class="btn-sm danger" type="submit">删除</button>
@@ -468,7 +468,7 @@
                 <label>默认平台</label>
                 <div class="cfg-control">
                   <select name="default_platform" onchange="saveDefaultPlatform(this.value)">
-                    {% for p in all_platforms %}
+                    {% for p in all_platforms if platform_available(p) %}
                     <option value="{{ p }}" {% if vm.webui_default_platform == p %}selected{% endif %}>{{ platform_cn(p) }}</option>
                     {% endfor %}
                   </select>
@@ -566,6 +566,29 @@
           </div>
           <span class="cfg-hint">同上,但用于封面文件</span>
         </div>
+        {% if password_login_supported %}
+        <div class="cfg-row">
+          <label>账密登录</label>
+          <div class="cfg-control">
+            <label class="switch"><input type="checkbox" name="password_login" onchange="togglePasswordLogin()"><span class="slider"></span></label>
+          </div>
+          <span class="cfg-hint">登录过期时自动用账号密码登录;遇到滑块或短信验证仍按登录失效处理,需人工扫码</span>
+        </div>
+        <div class="cfg-row" data-pw-row>
+          <label>登录账号</label>
+          <div class="cfg-control">
+            <input type="text" name="login_username" autocomplete="off" placeholder="商家后台登录账号 / 手机号">
+          </div>
+          <span class="cfg-hint">拼多多商家后台的登录账号</span>
+        </div>
+        <div class="cfg-row" data-pw-row>
+          <label>登录密码</label>
+          <div class="cfg-control">
+            <input type="password" name="login_password" autocomplete="new-password" placeholder="请输入密码">
+          </div>
+          <span class="cfg-hint">保存在本机的平台配置文件里,页面不回显</span>
+        </div>
+        {% endif %}
       </div>
       <div class="modal-foot">
         <button type="button" class="btn" onclick="closeAccountModal()">取消</button>
@@ -821,13 +844,24 @@
         modalForm.elements['daily_limit'].value = data.daily_limit ?? 20;
         modalForm.elements['video_search_root'].value = data.video_search_root || '';
         modalForm.elements['cover_search_root'].value = data.cover_search_root || '';
+        if (modalForm.elements['password_login']) {
+          modalForm.elements['password_login'].checked = !!data.password_login;
+          modalForm.elements['login_username'].value = data.login_username || '';
+          modalForm.elements['login_password'].placeholder = data.has_password ? '已设置,留空则不修改' : '请输入密码';
+        }
         submitBtn.textContent = '保存修改';
       } else {
         modalTitle.textContent = '添加账号';
         modalForm.action = '/config/accounts/add?platform=' + encodeURIComponent(platformParam);
         submitBtn.textContent = '添加账号';
       }
+      togglePasswordLogin();
       modal.showModal();
+    }
+    function togglePasswordLogin() {
+      const sw = modalForm.elements['password_login'];
+      const on = !!(sw && sw.checked);
+      document.querySelectorAll('[data-pw-row]').forEach((r) => { r.style.display = on ? '' : 'none'; });
     }
     function closeAccountModal() { modal.close(); }
     function submitAccountForm(e) {

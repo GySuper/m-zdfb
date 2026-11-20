@@ -9,15 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from wxsp.config import Settings
 from wxsp.models import Account
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from patchright.sync_api import Page
 
 
 class AlreadyClaimed(Exception):
@@ -36,6 +34,7 @@ class PublishResult:
     error_type: str | None = None
     error_msg: str | None = None
     screenshots: list[str] = field(default_factory=list)
+    relogged_in: bool = False  # 本次用账密自动登录成功过(runner 收尾把账号登录态写回 ok)
 
 
 @dataclass
@@ -62,6 +61,13 @@ class TaskBundle:
     product_ids_json: str
     declaration: str | None
     ai_optimize: bool
+    detail_float: str | None = None  # 拼多多:商详悬浮窗(None = 保持页面默认)
+    store_feed: str | None = None  # 拼多多:同步店铺动态(None = 保持页面默认)
+
+
+RUNNING_STEPS: dict[int, str] = {}
+"""进程内:运行中 task_id → 当前步骤。PublishContext.last_step 一赋值就同步,工作台据此显示
+「当前步骤」;runner 跑完清掉。独立 CLI 进程里跑的任务不在这里(工作台只显示「发布中」)。"""
 
 
 @dataclass
@@ -77,6 +83,11 @@ class PublishContext:
     settings: Settings
     last_step: str = "init"
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        super().__setattr__(name, value)
+        if name == "last_step":
+            RUNNING_STEPS[self.task_id] = value
+
 
 @dataclass
 class PlatformSpec:
@@ -85,12 +96,14 @@ class PlatformSpec:
     pre_publish:打开页 → 填表 → 风控探测(止于 dry-run gate 之前)。
     post_publish:点发布 → 等成功 →(可选)抽取 remote_url(写入 ctx.result)。
     display_name:中文平台名,用于"元素未找到"告警标题(如 "视频号" / "淘宝光合")。
+    回调第一个参数:patchright Page,或 managed_chrome.ExtensionSession
+    (平台 meta 的 driver="extension" 时)。
     """
 
     platform_key: str
     display_name: str
-    pre_publish: Callable[[Page, TaskBundle, Path, PublishContext], None]
-    post_publish: Callable[[Page, TaskBundle, PublishContext], None]
+    pre_publish: Callable[[Any, TaskBundle, Path, PublishContext], None]
+    post_publish: Callable[[Any, TaskBundle, PublishContext], None]
 
 
 class PlatformPublisher(Protocol):

@@ -18,6 +18,7 @@ from sqlalchemy.exc import OperationalError
 from sqlmodel import Session
 
 from wxsp import __version__ as wxsp_version
+from wxsp import platform_meta as _platform_meta
 from wxsp.api.i18n import cookie_cn, enabled_cn, error_type_cn, level_cn, platform_cn, status_cn
 from wxsp.config import Settings, load_settings
 from wxsp.db import get_engine, init_db, session_scope
@@ -104,6 +105,8 @@ templates.env.globals.update(
     error_type_cn=error_type_cn,
     platform_cn=platform_cn,
     wxsp_version=wxsp_version,
+    platform_available=lambda p: _platform_meta.is_available(p),
+    locked_hint=_platform_meta.LOCKED_HINT,
 )
 
 _db_initialized = False

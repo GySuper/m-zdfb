@@ -5,6 +5,8 @@
 
 **当前支持平台**(6 个):视频号(tencent_channel)、淘宝光合(taobao_guanghe)、抖音(douyin)、快手(kuaishou)、小红书(xiaohongshu)、拼多多(pinduoduo)
 
+> **插件化改造进行中(2026-11 起)**:拼多多已改为「wxsp 托管系统 Chrome + 自动注入的 MV3 插件」发布(`driver="extension"`,见 [设计文档](docs/superpowers/specs/2026-11-18-pinduoduo-extension-publish-design.md))。其余 5 个平台**逐个按同样方式重构,重构前锁定**:界面切换显示没权限,定时 / 手动 / 命令行都不发布(见「平台锁定」)。
+
 ---
 
 ## 编码行为准则(每次写代码前必读)
@@ -118,6 +120,7 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 |------|------|------|
 | 后端语言 | Python 3.10+ | 可参考 social-auto-upload 代码 |
 | 浏览器自动化 | **patchright** (Playwright fork) | 比原版深度修补 CDP 指纹泄漏,API 完全兼容;视频号风控敏感时表现更好 |
+| 插件发布(拼多多起) | 系统 Chrome + **MV3 插件**(`wxsp/extension/`,纯 JS 无构建)+ `websockets`(CDP) | 品牌版 Chrome、无自动化注入;chrome.debugger 可信输入;后台标签页 |
 | CLI | Typer | 类型友好 |
 | Web 框架 | FastAPI | async,自动 OpenAPI,SSE 友好 |
 | 前端 | **Jinja2 + HTMX** | 单进程、纯 Python、SSE/局部刷新天然支持;运维控制台不需要 SaaS 级前端 |
@@ -125,7 +128,8 @@ git clone https://github.com/jackwener/OpenCLI            ../_ref/OpenCLI
 | 数据库 | SQLite + **SQLModel** | 模型即 schema 即 Pydantic 校验;底层兼容 SQLAlchemy,后期可平滑升级 |
 | 日志 | loguru | 简单好用 |
 | 反检测 | **patchright 内建** + `wxsp/fingerprint.py` per-account 指纹注入 | 每个账号一套确定性指纹(种子 = MD5(account_id)),绕过视频号"同设备多账号"风控 |
-| 飞书 SDK | `lark-oapi`(官方 Python SDK) | 多维表格读写 |
+| 飞书接口 | 标准库 HTTP(`feishu.FeishuClient`) | 多维表格读写;不用 `lark-oapi` SDK(88MB、一次导入 50+ 服务,只用到其中几个接口) |
+| 打包 | PyInstaller + create-dmg(LZMA)/ Inno Setup | **不带浏览器**:插件版平台用电脑上装的 Google Chrome(体检检查);patchright 及其 Chromium 只在开发环境(`uv sync --extra legacy`)供锁定的旧平台参考 |
 | 任务调度 | APScheduler | **只用一个 cron job(每天 09:00)**,无 polling |
 | 包管理 | uv | 跨平台一致;比 pip 快 |
 | 代码质量 | ruff + mypy + pre-commit | 强制开启 |
@@ -178,10 +182,18 @@ wxsp/platforms/
 | `title_max` 标题上限(默认 30;小红书 20) | `validator._check_title` |
 | `tags_max` 标签上限(默认 5;小红书 10) | `validator` 标签校验 |
 | `use_real_chrome` 走 CDP 连系统真实 Chrome(默认 False;小红书 True) | `browser.browser_context` |
+| `driver` 发布方式:`patchright`(默认)/ `extension`(托管 Chrome + 插件;拼多多) | `runner.run_publish` / `browser.check_cookie` / `platform_meta.is_available` |
+| `supports_password_login` 账号可开「账密登录」(拼多多 True):登录过期时插件用账号密码自动登录,遇滑块 / 短信验证 / 密码错误按 `cookie_expired` 处理;开了的账号 run_today 预检不因登录失效跳过,自动登录成功后 cookie_status 回 ok | `routes_config` 账号弹窗 / `scheduler.run_today_pending` / `extension/pinduoduo.js::passwordLogin` |
 
 这些消费方一律 `get_meta(platform)` 读表,**不再各存一份 per-platform map**。`config.ALL_PLATFORMS = list(REGISTRY)` 也从这里派生。回归保障见 `tests/test_platform_meta_single_source.py`(注入假平台断言各消费方都从 `REGISTRY` 读)。
 
+### 平台锁定(插件化改造期间)
+
+`platform_meta.is_available(platform)`:`LOCK_UNMIGRATED=True` 时只有 `driver="extension"` 的平台可用。锁定平台:顶栏面板灰显「暂未开放」、点击弹「没权限」,直接访问返回 403 没权限页,写请求 403;不注册每日 cron、`run_today_pending` 直接返回(不同步飞书)、`publisher.publish` 拒绝。某平台改成 `driver="extension"` 即自动解锁。测试里 conftest 默认解锁,锁定行为在 `tests/test_platform_lock.py`。
+
 ### 新增一个平台(操作手册)
+
+> 新平台 / 重构平台一律走**插件驱动**(参考拼多多):`PlatformMeta.driver="extension"`,页面步骤写在 `wxsp/extension/<平台>.js`(选择器也在那里),Python 侧只把任务数据交给插件、把插件消息翻成 `ctx.last_step` / errors 异常(见 `platforms/pinduoduo.py`)。下面 5 步里「选择器 / 步骤实现」对插件平台指 JS 文件。
 
 以平台 key `X` 为例,**按顺序**做完这 5 步,然后 `pytest` + `wxsp run --task-id <N> --dry-run` 验证:
 
@@ -192,7 +204,7 @@ wxsp/platforms/
    - `_post_publish(page, bundle, ctx)`:点发布 → 等成功 →(可选)抽 `remote_url` 写进 `ctx.result`;
    - `X_SPEC = PlatformSpec(platform_key="X", display_name="中文名", pre_publish=_pre_publish, post_publish=_post_publish)`;
    - `class XPublisher`:`publish_one` 转调 `run_publish(..., spec=X_SPEC)`;`login(account)` 开浏览器等扫码(**不接 Settings**)。
-3. **注册行为** `publisher._PUBLISHERS`:加 `"X": XPublisher()` 一行。
+3. **注册行为** `publisher._PUBLISHER_CLASSES`:加 `"X": ("wxsp.platforms.X", "XPublisher")` 一行(用到时才导入)。
 4. **注册元数据** `platform_meta.REGISTRY`:加一条 `PlatformMeta(key, label, title_min, login_meta, field_map_defaults, needs_fingerprint)`;平台有差异时再设 `has_title` / `title_max` / `tags_max` / `use_real_chrome`。
 5. **生成配置**:`wxsp setup` 选平台 → 写出 `config_X.yaml`(账号去 `/config` 加)。
 
@@ -207,6 +219,8 @@ wxsp/platforms/
 - **需要全新飞书字段时**:`TaskBundle` 是字段超集;复用现有字段(title/desc/topic/tags/cover/products/declaration/ai)无需动,但要读**全新**字段得顺着 `models.Video`(加列)→ `config.FeishuFieldMap` → `feishu`/`validator`(入库)→ `base.TaskBundle` → `runner.load_task_bundle` 整条链加,别只加一头。
 - **dry-run 红线**:`pre_publish` 之后是 dry-run gate,`--dry-run` 在这里截断;点发布只能写在 `post_publish`,否则 dry-run 会真发出去。
 - **风控约束照旧**:视频号系平台 headless 禁用、最小发布间隔、步骤间随机停顿等仍受"核心约束"管;风控文案配进 selectors 的 `RISK_CONTROL_KEYWORDS`,命中即 `RiskControl`(账号暂停 24h)。
+- **插件平台的坑(拼多多实测)**:托管 Chrome 带调试端口启动会让 `navigator.webdriver=true`,必须 `--disable-blink-features=AutomationControlled`;profile 里会留着旧插件 Service Worker 的脚本缓存,注入前要清(`managed_chrome._clear_stale_worker`);后台标签页点击要开 `Emulation.setFocusEmulationEnabled`;被 `overflow:hidden`(悬停才可滚)容器裁掉的元素要在容器上滚动。
+- **插件平台排查改版**:用调试通道 `wxsp.debug.*`(窗口不关、单步执行发布前步骤 / 只读 DOM / 点击,禁止发布阶段与「发布」类按钮),逐步对照后统一修,不要一轮轮整跑 dry-run。
 
 ### 配置文件:每平台独立
 
@@ -239,7 +253,7 @@ wxsp/
 │   ├── platform_meta.py               # 平台静态元数据登记表 REGISTRY(新增平台单一信息源)
 │   ├── db.py                          # SQLModel engine + session + 状态转换辅助 + 幂等锁
 │   ├── models.py                      # SQLModel 表 (Account/Video/Task/Event),含 platform 字段
-│   ├── feishu.py                      # Bitable 读写(lark-oapi)+ 回写
+│   ├── feishu.py                      # Bitable 读写(标准库 HTTP,无 SDK)+ 回写
 │   ├── sync.py                        # sync_now():拉飞书 → 校验 → 写 DB → 回写(CLI/scheduler 共用)
 │   ├── validator.py                   # 入库校验(纯函数,按平台区分字段)
 │   ├── scheduler.py                   # 每平台独立 cron + 手动 fire (APScheduler 包装)
@@ -257,6 +271,8 @@ wxsp/
 │   │   ├── xiaohongshu.py / xiaohongshu_selectors.py  # 小红书(真实 Chrome + 物理输入)
 │   │   └── pinduoduo.py / pinduoduo_selectors.py      # 拼多多
 │   ├── browser.py                     # patchright context 工厂 + per-account 指纹注入
+│   ├── managed_chrome.py              # 托管系统 Chrome + CDP 注入插件 + ExtensionSession(插件驱动平台)
+│   ├── extension/                     # MV3 发布插件(纯 JS):background / lib(可信输入)/ debug / 各平台步骤 / selftest
 │   ├── fingerprint.py                 # per-account 设备指纹生成 + JSON 持久化 + JS init script
 │   ├── stealth_js.py                  # 上一代静态 init script(已被 fingerprint 取代,保留回滚)
 │   ├── human_input.py                 # pyautogui OS 级鼠标/键盘(isTrusted=true,小红书用)
@@ -487,6 +503,8 @@ SQLite 是唯一的运行时事实来源,所有任务从飞书拉取。Web UI **
 | 状态 | 单选 | 否 | **写** | 工具回写:待入库 / 已计划 / 发布中 / 已发布 / 失败 |
 | 已发布链接 | URL | 否 | **写** | 工具回写 |
 | 错误信息 | 多行文本 | 否 | **写** | 工具回写(校验失败的具体原因 / 发布失败的错误类型) |
+| 商详悬浮窗 | 单选 | 否 | 读 | **拼多多**:展示 / 不展示(选项 = 页面原文;留空保持页面默认) |
+| 同步店铺动态 | 单选 | 否 | 读 | **拼多多**:开启同步 / 取消同步(留空保持页面默认) |
 
 **约束**:`执行日期 ≤ date(定时发布时间)`(可以前一天跑、第二天发,反之不行)
 
@@ -506,7 +524,7 @@ wxsp run --daemon
 ```
 
 `sync_now()` 做的事:
-1. `lark-oapi` 拉飞书"状态=待入库"的所有行(分页)
+1. `feishu.fetch_pending_rows` 拉飞书"状态=待入库"的所有行(分页)
 2. 每行 → `validator.validate()`(含 `nas.find_video/find_cover()`:裸文件名走 rglob,完整路径走 alias 翻译 + exists)
 3. 4 核心字段(执行日期 / 定时发布时间 / 标题 / 视频文件)任一为空 → **跳过且不回写**(`SyncResult.skipped_incomplete`)。视为"业务还没填完的草稿",留到下次拉
 4. 通过 → 写本地 `Video` + 创建 `Task(status=pending, execute_date, publish_at)`
@@ -778,6 +796,8 @@ tools/tailwindcss -c tailwind.config.js -i wxsp/static/app.src.css -o wxsp/stati
 ## 错误分类与重试策略
 
 > ⚠️ **现状**:`retry.py` 的 `retry_on` 装饰器已实现但**尚未接线到发布步骤**。下表 transient 错误(`network` / `upload_failed` / `nas_unreachable` / `element_not_found`)的"自动重试次数"为**目标设计,待实现**;当前这些错误跑一次失败即按下表的 halt 语义处理(不自动重试)。**已生效**的是 `cookie_expired` / `risk_control` 的"不重试 + 账号级 halt"与 `element_not_found` / `nas_unreachable` 的"全局 halt"。
+>
+> **插件平台(拼多多)已实现**:点发布之前(gate 前)的 `network` 3 / `upload_failed` 2 / `element_not_found` 1 / `unknown` 1 次自动重跑整轮(插件中止旧一轮、新标签页从头来,总共最多 3 轮,每轮失败留 `retry<N>_<step>` 截图,见 `platforms/pinduoduo.py::_RERUN_BUDGET`);用尽后才按下表 halt。元素级:点击等元素出现 / 遮挡消失最多 10s,输入后核对值、没生效重输一次;每步开始前检查掉登录与带容器的干扰弹窗(`extension/pinduoduo.js::guard`)。**点发布之后绝不自动重试。**
 
 | 类型 | 含义 | 重试策略(`*` = 规划中,尚未接线) |
 |------|------|----------|
@@ -790,6 +810,8 @@ tools/tailwindcss -c tailwind.config.js -i wxsp/static/app.src.css -o wxsp/stati
 | `nas_unreachable` | NAS 不可达 | 5 次指数退避 `*`(NAS 可能短暂掉线)(**全局 halt** 已生效) |
 | `feishu_api_error` | 飞书 API 错误 | 3 次重试(回写路径 `writeback_row` 已实现独立退避) |
 | `unknown` | 兜底 | 1 次重试 `*`,然后 failed |
+| `publish_unconfirmed` | 已点发布但限时内没确认成功(可能已发出) | **不重试**(会重复发布),告警让人先去平台后台核对;不触发 halt |
+| `chrome_missing` | 电脑上没装 Google Chrome(安装包不带浏览器) | 不重试,**全局 halt**,汇总提示去 google.com/chrome 安装 |
 
 > 飞书回写本身(`feishu.writeback_row`)有独立退避序列 `(1s/3s/10s,共 4 次)` —— 历史 `(1s/2s/3 次)` 在飞书抖动时被实测打穿,最后一条 task 跑完 status="已计划" 不更新。退避总时长 ~14s 远小于一次 publish 的 1-5min,不会拖慢主流程。
 
@@ -827,22 +849,19 @@ class NotifyEvent:
 
 **第一版只实现 `WecomNotifier`**(企微机器人,Markdown 消息;飞书做协作平台,企微做告警,职责分工)。`FeishuNotifier` / `DingtalkNotifier` 留作接口预留,需要时几十行代码即可加上。
 
-**通知文案约定(全中文,无英文穿透)**:
-- 所有 markdown 标题前缀平台中文名(如 `[视频号]` / `[小红书]`),由 `notify._platform_tag` 从 `REGISTRY` 取;未知平台回退 `[视频号]`
-- `level` 渲染为中文标签:`info → [信息]` / `warn → [警告]` / `error → [错误]`
-- `error_type` 通过 `error_type_cn()` 映射(如 `cookie_expired → 登录态失效`),未知 key 兜底"未知错误"
-- 发布步骤(`step`)通过 `step_cn()` 映射(如 `upload → 上传视频`)。`element_not_found` 的 title 会拼上 step,例如"元素未找到 · 设置封面 —— 视频号可能改版"
-- 账号优先显示 `display_name`,没有时回退到 `account_id`
+**通知排版约定(运营友好:全中文、不出现代码、不啰嗦;2026-11-19 运营确认)**:
+- 统一由 `notify._format_markdown` 渲染:**`平台 · 标题`** + 带色状态词(`NotifyEvent.status`,如「需要处理」「全部成功」,颜色随 level)/ 正文 / 引用行字段(`> 账号　xx`,账号优先 `display_name`,其余来自 `context`)/ 灰色页脚(任务号 + 时间)。不再有 `[错误]` 这类方括号标签
+- 飞书(纯文本)用同一份内容去掉颜色 / 加粗 / 引用符号(`_format_plain`)
+- 发布失败的原因 + 处理办法统一走 `notify.describe_failure(error_type, error_msg)`(`_FAILURE_HINTS` 表):去掉 `step=xxx:` 前缀,改版类拼上「卡在「步骤」」,夹带英文异常原文时只留中文类别
+- 插件 / 发布器的报错文案只写「发生了什么」的中文细节,类别和处理办法由上面统一补,不要在报错里写「需重新扫码」这类处理话术
 
 ### 通知规则
 
-- ✅ 任务**失败**(重试用完后) → 企微告警(同账号同类失败已被 halt 机制去重,见上节)
-- ✅ **风控** → 高优告警 + 账号自动暂停 24h
-- ✅ **登录失效** → 提醒扫码;`cookie_warning`(距上次 active 超阈值但本次还能登)也推一条
-- ✅ **元素找不到**(可能改版) → 告警(标题拼步骤名,运营一眼看到改版位置)
-- ✅ **历史积压超阈值**(`backlog_high`) → 告警;**24h 冷却**(进程级 `threading.Lock` + Lock 内 commit 保证查写原子化,防 daemon 反复重启 / cron 多次触发刷屏)
-- ✅ **日汇总**(`run_summary`) → 每轮 `run_today_pending` 跑完推一条:成功 N / 失败 M / 暂停跳过 K,按账号 breakdown + 失败明细。整轮 halt 时头部高亮原因。失败 > 0 时 level=warn,否则 info
-- ⚠️ 单条任务**成功** → 默认**不发**(80 条/天会刷屏);汇总在 run_summary 里出
+- **发布失败不单独推送**(避免多个失败刷屏):runner 只写 Event(`notify(..., dispatch=False)`,工作台「最近事件」用),每轮 `run_today_pending` 结束推**一条** `run_summary`
+- **`run_summary`**:数字一行 → 整轮中止说明(原因 / 影响条数 / 处理)→「需要处理」逐条(视频 · 账号 · 定时 · 任务号 · 原因 · 处理;被跳过的账号合并一块)→「跳过」(人为暂停 / 停用,只说明)→「各账号」(多账号时)。全部成功只发标题 + 一行数字;0 任务不发
+- 单条「重试」也走 `run_today_pending(task_ids=[id])`,跑完同样推汇总
+- 风控 / 登录失效 / 改版不再即时推送,随本轮汇总一起到(期间风控账号已自动暂停、登录失效账号本轮跳过)
+- 仍单独推送的提醒:`backlog_high`(24h 冷却,进程级 `threading.Lock` + Lock 内 commit 防刷屏)、`cookie_warning`、通知测试
 - ❌ 不做"每日日报"(被 run_summary 覆盖,YAGNI)
 
 ### 路由
@@ -867,6 +886,7 @@ class NotifyEvent:
 - 单元测试覆盖纯函数(validator / nas.find_video / errors.classify),pre-commit 跑
 - 集成测试(DB):幂等锁、状态机
 - 集成测试(浏览器):用真 patchright + 真页面 + `--dry-run`,标记 `@pytest.mark.integration`,CI 跳过
+- 插件通路集成测试:`WXSP_CHROME_IT=1 pytest tests/test_managed_chrome.py`,真 Chrome **无窗口**(`--headless=new`)跑本地夹具页;真实平台登录 / dry-run 才开窗,且先征得用户同意
 - 冒烟测试:测试号 + 预制视频跑 dry-run 全流程,发版前手动跑
 - **绝不 mock 浏览器**:选择器超时是最常见问题,mock 等于没测
 
@@ -875,7 +895,7 @@ class NotifyEvent:
 ## 安全 / 不允许做的事
 
 - ❌ 不要绕过平台风控强行高频操作
-- ❌ 不要存储账号密码,只存 Cookie
+- ❌ 不要存储账号密码,只存 Cookie —— **唯一例外**:`supports_password_login` 平台(拼多多)的账号可在配置页开「账密登录」(用户 2026-11-18 决定):登录账号 / 密码明文存在本机 `config_{platform}.yaml`(gitignore),页面从不回显(只显示「已设置」,留空保持原值),密码只用于插件输入,不进日志 / 报错 / 告警
 - ❌ 不要把视频或 Cookie 上传到任何第三方
 - ❌ 不要在生产用 headless 跑视频号
 - ❌ 不要静默忽略 risk_control 类错误

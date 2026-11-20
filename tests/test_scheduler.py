@@ -349,7 +349,7 @@ def test_run_today_pending_skips_disabled_account(
     assert publish_calls == []
     assert summary.attempted == 0
     assert summary.skipped_paused == 1
-    assert summary.per_account["a"].halt_reason == "账号已禁用或配置已删除"
+    assert summary.per_account["a"].halt_reason == "账号已停用或已从配置删除"
 
 
 def test_run_today_pending_skips_tasks_when_account_paused(
@@ -404,8 +404,8 @@ def test_run_today_pending_skips_tasks_when_account_paused(
 @pytest.mark.parametrize(
     "cookie_status,expected_reason_keyword",
     [
-        ("unknown", "未完成扫码登录"),
-        ("expired", "登录态已失效"),
+        ("unknown", "还没扫码登录"),
+        ("expired", "账号登录失效"),
     ],
 )
 def test_run_today_pending_skips_tasks_when_account_cookie_not_ok(
@@ -544,22 +544,18 @@ def test_run_today_pending_emits_run_summary_with_failure_breakdown(
     run_summary_events = [e for e in captured if e.type == "run_summary"]
     assert len(run_summary_events) == 1
     ev = run_summary_events[0]
-    assert ev.level == "warn"  # 失败明细用中文 error_type(风控触发),不再是英文 risk_control
-    assert "风控触发" in ev.content
+    assert ev.level == "warn"
+    assert ev.title == "本轮发布完成"
+    assert ev.status == "1 条需要处理"
+    # 数字一行 + 「需要处理」逐条:视频 / 账号 + 定时 / 原因 / 处理;全中文,不出错误码
+    assert '成功 <font color="info">1</font> · 失败 1 · 跳过 0' in ev.content
+    assert "**需要处理**" in ev.content
+    assert "> **1. " in ev.content
+    assert "触发平台风控" in ev.content
+    assert "已自动暂停 24 小时" in ev.content
     assert "risk_control" not in ev.content
-    # 各账号明细 section + 简化文案("新增 X,成功 Y,失败 Z" + 缩进失败原因)
-    assert "各账号明细:" in ev.content
-    assert "[a] 新增 2,成功 1,失败 1" in ev.content
-    assert "失败原因:风控触发" in ev.content
-    # title 也按新模板,失败 > 0 用 ⚠
-    assert ev.title.startswith("⚠")
-    # context 也中文化
-    assert ev.context == {
-        "尝试": 2,
-        "成功": 1,
-        "失败": 1,
-        "暂停跳过": 0,
-    }
+    assert "**各账号**" not in ev.content  # 只有一个账号时不重复列
+    assert ev.context == {}
 
 
 def test_run_today_pending_silent_run_summary_when_nothing_attempted(
@@ -652,15 +648,17 @@ def test_run_today_pending_halts_account_after_cookie_expired(
     stat = summary.per_account["a"]
     assert stat.failed == 0
     assert stat.skipped == 3
-    assert stat.halt_reason == "登录态失效"
+    assert stat.halt_reason is not None and stat.halt_reason.startswith("账号登录失效")
 
-    # run_summary 文案里要展示原因 + ⚠ 标题(全跳过虽 failed=0 但需要运营干预)
+    # 全跳过虽 failed=0,但需要运营扫码:汇总标「需要处理」,按账号合并说明原因 + 处理
     run_summary_events = [e for e in captured if e.type == "run_summary"]
     assert len(run_summary_events) == 1
     ev = run_summary_events[0]
-    assert ev.title.startswith("⚠")
-    assert "[a] 新增 0,成功 0,失败 0,跳过 3" in ev.content
-    assert "跳过原因:登录态失效" in ev.content
+    assert ev.level == "warn"
+    assert ev.status == "3 条需要处理"
+    assert "> **1. a:3 条没跑**" in ev.content
+    assert "账号登录失效" in ev.content
+    assert "扫码登录" in ev.content
 
 
 def test_run_today_pending_continues_after_a_publish_failure(
@@ -850,7 +848,8 @@ def test_maybe_warn_backlog_pushes_notification_when_over_threshold(
     assert len(captured) == 1
     assert captured[0].type == "backlog_high"
     assert captured[0].level == "warn"
-    assert captured[0].context["积压条数"] == 3
+    assert captured[0].title == "有 3 条任务积压"
+    assert "历史积压" in captured[0].context["处理"]
 
 
 def test_maybe_warn_backlog_silent_when_at_or_under_threshold(

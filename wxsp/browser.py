@@ -30,13 +30,15 @@ import time as _time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from patchright.sync_api import Page, sync_playwright
 
 from wxsp.config import get_user_data_dir, is_packaged
 from wxsp.platform_meta import get_meta
+
+if TYPE_CHECKING:  # patchright 只在开发环境(旧平台)有,安装包里不带
+    from patchright.sync_api import Page
 
 
 @contextmanager
@@ -476,6 +478,8 @@ def _browser_context_impl(
     # 不处理 fp_init_script;cookie 走 cookies.json 显式持久化(同 launch 分支)。
     if use_real_chrome:
         chrome_proc, chrome_port = _launch_real_chrome(user_data_dir, headless=headless)
+        from patchright.sync_api import sync_playwright
+
         with sync_playwright() as p:
             try:
                 browser = p.chromium.connect_over_cdp(
@@ -564,6 +568,8 @@ def _browser_context_impl(
                         pass
         return
 
+    from patchright.sync_api import sync_playwright
+
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(**launch_kwargs)
         try:
@@ -642,6 +648,10 @@ def browser_context(
     _skip_cleanup: bool = False,
 ) -> Iterator[Page]:
     """打开账号浏览器并持有 profile 级会话锁。"""
+    if get_meta(platform).driver == "extension":
+        # 插件版平台的 profile 属于系统 Chrome:patchright 的旧版 Chromium 解不开它的 cookie
+        # (显示未登录),还会写入 Chrome 读不了的 cookie,把真实登录态弄坏(2026-11-19 实测)
+        raise RuntimeError(f"{platform} 的账号 profile 属于系统 Chrome,不能用 patchright 打开")
     with _profile_session(user_data_dir):
         with _browser_context_impl(
             user_data_dir,
@@ -728,6 +738,18 @@ def check_cookie(
 
     `account_id` 传入时,本次启动会带上该账号的指纹(必须跟登录时的指纹一致,否则
     平台会把它当 "异常设备登录" 直接踢);省略时退化到无指纹模式。
+
+    driver="extension" 的平台(拼多多)profile 属于系统真实 Chrome,不能用 patchright 打开。
     """
+    if get_meta(platform).driver == "extension":
+        from wxsp.managed_chrome import wait_logged_in_url  # 局部导入:managed_chrome 依赖本模块
+
+        meta = login_meta_for(platform)
+        return wait_logged_in_url(
+            user_data_dir,
+            start_url=meta["home_url"],
+            fragment=meta["logged_in_fragment"],
+            timeout_s=timeout_ms / 1000,
+        )
     with browser_context(user_data_dir, account_id=account_id, platform=platform) as page:
         return wait_for_logged_in(page, timeout_ms=timeout_ms, platform=platform)

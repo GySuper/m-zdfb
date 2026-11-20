@@ -45,6 +45,11 @@ class PlatformMeta:
     绕过 patchright patched chromium 的风控指纹);False=走 patchright launch_persistent_context(默认)。
     小红书 True(实测 patchright patched chromium 一天即触发风控,真实 Chrome 是 RPA 验证过的路线)。
     其余平台 False(未被封,不动)。"""
+    driver: str = "patchright"
+    supports_password_login: bool = False
+    """账号可开「账密登录」:登录过期时插件用账号密码自动登录(配置页账号弹窗出现开关)。拼多多 True。"""
+    """发布/登录/登录态检查用哪种浏览器:"patchright"(browser.browser_context)或
+    "extension"(managed_chrome:wxsp 托管系统 Chrome + 自动注入发布插件)。拼多多 extension。"""
 
 
 REGISTRY: dict[str, PlatformMeta] = {
@@ -160,13 +165,30 @@ REGISTRY: dict[str, PlatformMeta] = {
             "cover": "封面文件",
             "declaration": "内容声明",  # 拼多多特有(同淘宝)
             "product_ids": "商品ID",  # 拼多多特有(同淘宝)
+            "detail_float": "商详悬浮窗",  # 拼多多特有:展示 / 不展示(留空=页面默认)
+            "store_feed": "同步店铺动态",  # 拼多多特有:开启同步 / 取消同步(留空=页面默认)
         },
         needs_fingerprint=False,  # 跟抖音/快手/淘宝一致(用户确认)
         has_title=False,  # 无独立标题框(同快手)
+        driver="extension",  # 托管 Chrome + 插件发布(2026-11 改造)
+        supports_password_login=True,
     ),
 }
 
 ALL_PLATFORMS: list[str] = list(REGISTRY)
+
+# 插件化改造(拼多多起)完成前,其余平台锁定:界面切换显示没权限,定时 / 手动 / 命令行发布
+# 都不执行(2026-11-18 决定)。某平台改成 driver="extension" 即自动解锁,无需另维护名单。
+# 测试里由 conftest 关掉,让各平台的通用逻辑照常被测。
+LOCK_UNMIGRATED = True
+LOCKED_HINT = "正在改造为插件发布,完成前暂不开放"
+
+
+def is_available(platform: str) -> bool:
+    """该平台当前能否使用(界面可切换、会被调度、允许发布)。"""
+    meta = REGISTRY.get(platform)
+    return meta is not None and (not LOCK_UNMIGRATED or meta.driver == "extension")
+
 
 _FALLBACK = "tencent_channel"
 

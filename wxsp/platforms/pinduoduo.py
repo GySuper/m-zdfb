@@ -1,12 +1,11 @@
-"""拼多多多多视频发布实现 —— patchright(sync)驱动,无 iframe。
+"""拼多多多多视频发布 —— 托管系统 Chrome + 自动注入的插件执行(driver="extension")。
 
-只负责浏览器交互(打开页 → 上传 → 填描述/话题 → 绑商品 → 定时 → 内容声明 →
-点发布)。claim / DB 状态机 / 通知 / 飞书回写等无差别 plumbing 全在
-wxsp/platforms/runner.py 的共享编排器里。
-
-步骤逻辑参考 taobao_guanghe.py(商品绑定 + 内容声明),但拼多多无 iframe、
-首页即发布页、无标题框、商品绑定更简单(输入ID→下一步,无需勾选)。
-决策:无指纹(patchright persistent context)/ 必挂商品 / 只走定时发布。
+页面步骤(打开页 → 上传 → 描述/话题 → 绑商品 → 封面 → 定时 → 内容声明 → 风控探测 →
+点发布 → 成功判定)全部在 wxsp/extension/pinduoduo.js 里用 chrome.debugger 可信输入完成;
+本模块只负责把任务数据交给插件、把插件消息翻译成 ctx.last_step / errors.py 异常。
+claim / DB 状态机 / 通知 / 飞书回写等无差别 plumbing 在 runner.py 共享编排器里。
+设计见 docs/superpowers/specs/2026-11-18-pinduoduo-extension-publish-design.md。
+决策:必挂商品 / 只走定时发布 / 封面 best-effort。
 """
 
 from __future__ import annotations
@@ -14,356 +13,156 @@ from __future__ import annotations
 import json as _json
 import random
 import time
-from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
-from patchright.sync_api import Page
 
 import wxsp.apc
-from wxsp.browser import browser_context
 from wxsp.config import Settings
 from wxsp.errors import (
     CookieExpired,
     ElementNotFound,
     NetworkError,
     ProductNotFound,
+    PublisherError,
+    PublishUnconfirmed,
     RiskControl,
+    UnknownError,
     UploadFailed,
+    classify,
 )
+from wxsp.managed_chrome import ExtensionSession, wait_logged_in_url
 from wxsp.models import Account
 from wxsp.nas import stage_to_tmp
+from wxsp.notify import step_cn
 from wxsp.platforms import pinduoduo_selectors as sel
 from wxsp.platforms.base import PlatformSpec, PublishContext, PublishResult, TaskBundle
-from wxsp.platforms.runner import random_pause, run_publish, screenshot
+from wxsp.platforms.runner import run_publish, screenshot
+
+_EXT_ERRORS: dict[str, type[PublisherError]] = {
+    "cookie_expired": CookieExpired,
+    "risk_control": RiskControl,
+    "element_not_found": ElementNotFound,
+    "upload_failed": UploadFailed,
+    "product_not_found": ProductNotFound,
+    "network": NetworkError,
+    "publish_unconfirmed": PublishUnconfirmed,
+}
+
+# 发布前(gate 之前)的暂时性错误自动重跑整轮:插件中止旧一轮、新标签页从头来,还没点发布所以安全。
+# 次数对齐 CLAUDE.md 错误表;总轮数封顶。登录失效 / 风控 / 商品类错误重跑也没用,不重试。
+# 点发布之后(_post_publish)绝不自动重试,避免重复发布。
+_RERUN_BUDGET = {"network": 3, "upload_failed": 2, "element_not_found": 1, "unknown": 1}
+_MAX_ROUNDS = 3
 
 
-def _wait(page: Page, min_ms: int = 1500, max_ms: int = 4000) -> None:
-    """步间随机停顿 ms。"""
-    page.wait_for_timeout(random.randint(min_ms, max_ms))
+def _pump(
+    session: ExtensionSession, ctx: PublishContext, until: str, timeout: float
+) -> dict[str, Any]:
+    """收插件消息直到 `until` 或 halted;step 同步到 ctx.last_step,error 转成 errors.py 异常。"""
+    while True:
+        try:
+            msg = session.next_message(timeout=timeout)
+        except TimeoutError as err:
+            raise ElementNotFound(f"页面 {timeout / 60:.0f} 分钟没有任何进展") from err
+        kind = msg.get("type")
+        if kind == "relogin":
+            ctx.result.relogged_in = True
+            logger.info(f"[pinduoduo] task={ctx.task_id} 登录已过期,已用账号密码自动登录")
+        elif kind == "step":
+            ctx.last_step = msg["step"]
+            logger.info(f"[pinduoduo] task={ctx.task_id} 步骤 {ctx.last_step}")
+        elif kind == "error":
+            ctx.last_step = msg.get("step") or ctx.last_step
+            raise _EXT_ERRORS.get(msg.get("kind", ""), UnknownError)(msg.get("message", ""))
+        elif kind in (until, "halted"):
+            return msg
 
 
-# ---------------------------------------------------------------------------
-# step functions
-# ---------------------------------------------------------------------------
-
-
-def _open_publish_page(page: Page) -> None:
-    # 发布页 = 首页(SPA,无独立 URL 切换)。goto 后未登录会被停在 mms/login。
-    page.goto(sel.HOME_URL, wait_until="domcontentloaded")
-    if sel.LOGIN_URL_FRAGMENT in page.url:
-        return  # 交给 _verify_logged_in 判定
+def _product_ids(bundle: TaskBundle, ctx: PublishContext) -> list[str]:
     try:
-        page.wait_for_url(f"**{sel.LOGGED_IN_URL_FRAGMENT}**", timeout=30_000)
-    except Exception as err:
-        if sel.LOGIN_URL_FRAGMENT not in page.url:
-            raise NetworkError("拼多多发布页加载超时") from err
-
-
-def _verify_logged_in(page: Page) -> None:
-    if sel.LOGIN_URL_FRAGMENT in page.url:
-        raise CookieExpired("拼多多登录态失效(停在 SSO 登录页,需重新扫码)")
-    # 正向确认:上传区 file input 必须在
-    try:
-        page.locator(sel.VIDEO_FILE_INPUT).first.wait_for(state="attached", timeout=8000)
-    except Exception as err:
-        raise CookieExpired("拼多多登录态失效(上传入口未出现,需重新扫码登录)") from err
-
-
-def _wait_for_entry_popup_count_drop(page: Page, selector: str, previous_count: int) -> bool:
-    for _ in range(8):
-        page.wait_for_timeout(250)
-        if page.locator(selector).count() < previous_count:
-            return True
-    return False
-
-
-def _dismiss_entry_popups(page: Page) -> None:
-    """关闭进入发布页时出现的未知干扰弹窗。
-
-    只允许点弹窗自身的关闭控件或按 Escape,不点「确定」「参与」等业务按钮。
-    此函数只能在上传前调用,此时页面上不存在自动化主动打开的业务弹窗。
-    """
-    max_popups = 5
-    quiet_polls_required = 8  # 连续 2 秒无弹窗才认为页面稳定
-    max_polls = 40  # 最长约 10 秒(不含单次关闭等待)
-    quiet_polls = 0
-    dismissed = 0
-
-    for _ in range(max_polls):
-        dialogs = page.locator(sel.ENTRY_DIALOG)
-        dialog_count = dialogs.count()
-        close_control = None
-        if dialog_count:
-            popup = dialogs.last
-            close_controls = popup.locator(sel.ENTRY_DIALOG_CLOSE)
-            if close_controls.count():
-                close_control = close_controls.first
-            verify_selector = sel.ENTRY_DIALOG
-            previous_count = dialog_count
-        else:
-            # 部分促销浮层没有 role/aria/MDL modal 容器,只有独立的关闭 SVG。
-            # 入口阶段尚无业务弹窗,可把全局可见关闭控件作为安全 fallback。
-            close_controls = page.locator(sel.ENTRY_DIALOG_CLOSE)
-            close_count = close_controls.count()
-            if close_count:
-                close_control = close_controls.last
-            verify_selector = sel.ENTRY_DIALOG_CLOSE
-            previous_count = close_count
-
-        if previous_count == 0:
-            quiet_polls += 1
-            if quiet_polls >= quiet_polls_required:
-                if dismissed:
-                    logger.info(f"[pinduoduo] 已关闭入口干扰弹窗 count={dismissed}")
-                return
-            page.wait_for_timeout(250)
-            continue
-
-        quiet_polls = 0
-        if dismissed >= max_popups:
-            raise ElementNotFound(f"拼多多入口弹窗超过 {max_popups} 个,停止自动关闭")
-
-        closed = False
-        if close_control is not None:
-            try:
-                close_control.click(timeout=2_000)
-                closed = _wait_for_entry_popup_count_drop(page, verify_selector, previous_count)
-            except Exception:
-                pass
-
-        if not closed:
-            try:
-                page.keyboard.press("Escape")
-                closed = _wait_for_entry_popup_count_drop(page, verify_selector, previous_count)
-            except Exception as err:
-                raise ElementNotFound(
-                    "拼多多入口弹窗无法安全关闭(仅允许关闭按钮或 Escape)"
-                ) from err
-        if not closed:
-            raise ElementNotFound("拼多多入口弹窗无法安全关闭(仅允许关闭按钮或 Escape)")
-
-        dismissed += 1
-
-    raise ElementNotFound("拼多多入口弹窗持续出现,页面未在 10 秒内稳定")
-
-
-def _upload_video(page: Page, file_path: Path, timeout_seconds: int = 600) -> None:
-    # set_input_files 直接注入(同抖音/淘宝,不走物理点击)
-    file_input = page.locator(sel.VIDEO_FILE_INPUT).first
-    file_input.set_input_files(str(file_path))
-    try:
-        page.locator(sel.UPLOAD_DONE_MARKER).first.wait_for(
-            state="visible", timeout=timeout_seconds * 1000
+        parsed = _json.loads(bundle.product_ids_json or "[]")
+    except (TypeError, _json.JSONDecodeError):
+        logger.warning(
+            f"[pinduoduo] 商品 ID JSON 解析失败 task_id={ctx.task_id}: {bundle.product_ids_json!r}"
         )
-        logger.info("[pinduoduo] 视频上传完成")
-    except Exception as err:
-        raise UploadFailed("视频上传/处理超时") from err
+        return []
+    return [str(p) for p in parsed if p] if isinstance(parsed, list) else []
 
 
-def _fill_description(page: Page, description: str | None) -> None:
-    if not description:
-        return
-    editor = page.locator(sel.DESC_EDITOR).first
-    editor.wait_for(state="visible", timeout=10_000)
-    editor.click()
-    _wait(page, 500, 1000)
-    page.keyboard.type(description[: sel.DESC_MAX_LENGTH])
+def _login_credentials(ctx: PublishContext, account_id: str) -> dict[str, str] | None:
+    cfg = ctx.settings.accounts.get(account_id)
+    if cfg is None or not cfg.password_login or not cfg.login_username or not cfg.login_password:
+        return None
+    return {"username": cfg.login_username, "password": cfg.login_password}
 
 
-def _add_tags(page: Page, tags: list[str]) -> None:
-    if not tags:
-        return
-    editor = page.locator(sel.DESC_EDITOR).first
-    editor.click()
-    for tag in tags:
-        page.keyboard.type("#" + tag)
-        page.wait_for_timeout(1500)
-        page.keyboard.press("Space")
-
-
-def _add_products(page: Page, product_ids: list[str]) -> None:
+def _pre_publish(
+    session: ExtensionSession, bundle: TaskBundle, staged: Path, ctx: PublishContext
+) -> None:
+    # 必挂商品(拼多多带货视频核心):为空直接失败,不必先开页面上传
+    product_ids = _product_ids(bundle, ctx)
     if not product_ids:
-        return
-    # 点「添加商品」→ 切「商品ID」tab → 逐个填 ID → 下一步绑定
-    page.locator(sel.PRODUCT_TRIGGER).first.click()
-    _wait(page, 1000, 2000)
-    page.locator(sel.PRODUCT_TAB_BY_ID).click()
-    _wait(page, 800, 1500)
-    # 拼多多商品ID搜索一次只绑一个;逐个绑定
-    for pid in product_ids:
-        page.locator(sel.PRODUCT_ID_INPUT).fill(pid)
-        _wait(page, 300, 600)
-        page.locator(sel.PRODUCT_NEXT_BUTTON).click()
-        _wait(page, 2000, 3000)
-    # 等绑定成功标志(删除商品按钮出现)
-    try:
-        page.locator(sel.PRODUCT_BOUND_MARKER).first.wait_for(state="visible", timeout=10_000)
-    except Exception as err:
-        raise ProductNotFound(f"商品绑定失败(ID: {product_ids})") from err
-    logger.info(f"[pinduoduo] 绑定商品完成 ids={product_ids}")
-
-
-def _set_cover(page: Page, cover_path: Path | None) -> None:
-    """有自定义封面 → 走封面弹窗本地上传(可选,best-effort)。"""
-    if cover_path is None:
-        return
-    try:
-        page.locator(sel.COVER_EDIT_BUTTON).first.click()
-        _wait(page, 1500, 2500)
-        page.locator(sel.COVER_UPLOAD_TAB).click()
-        _wait(page, 800, 1500)
-        cover_input = page.locator(sel.COVER_FILE_INPUT).first
-        cover_input.wait_for(state="attached", timeout=10_000)
-        cover_input.set_input_files(str(cover_path))
-        _wait(page, 1500, 2500)
-        confirm = page.locator(sel.COVER_CONFIRM_BUTTON).first
-        confirm.wait_for(state="visible", timeout=10_000)
-        confirm.click()
-        logger.info("[pinduoduo] 自定义封面设置完成(best-effort)")
-    except Exception as err:
-        logger.warning(f"[pinduoduo] 封面设置失败(降级为平台默认封面): {err}")
-
-
-def _set_schedule(page: Page, publish_at: datetime) -> None:
-    # 选「定时发布」radio → 操作面板设日期+时分秒 → 点确认。
-    # beast-core 的 date/time input 都是 readonly(fill 会超时),必须走面板 UI:
-    # - 日期:点日历格子(role=date-cell,排除 disabled/outOfMonth)
-    # - 时间:点 timePicker-input wrapper 弹滚轮 → 三列(时/分/秒)各点目标项
-    page.get_by_text("定时发布", exact=True).first.click()
-    _wait(page, 1000, 2000)
-    date_input = page.locator(sel.SCHEDULE_DATE_INPUT).first
-    date_input.wait_for(state="visible", timeout=10_000)
-    date_input.click()  # 打开日历面板
-    _wait(page, 1500, 2000)
-    # 选日期格子
-    day = str(publish_at.day)
-    cell = (
-        page.locator('[role="date-cell"]:not([class*="disabled"]):not([class*="outOfMonth"])')
-        .filter(has_text=day)
-        .first
-    )
-    try:
-        cell.click()
-        _wait(page, 500, 1000)
-    except Exception as err:
-        raise ElementNotFound(f"日历格子 day={day} 未命中(可能需切月): {err}") from err
-    # 点 timePicker wrapper 弹时间滚轮面板,三列(时/分/秒)各点目标项
-    hh, mm, ss = publish_at.strftime("%H"), publish_at.strftime("%M"), publish_at.strftime("%S")
-    try:
-        page.locator('[data-testid="beast-core-timePicker-input"]').first.click()
-        _wait(page, 1000, 1500)
-        result = page.evaluate(
-            """([hh, mm, ss]) => {
-                const uls = document.querySelectorAll('ul');
-                const cols = Array.from(uls).filter(ul => ul.querySelector('li.cIL_item, [class*="cIL_item"]'));
-                const tgt = [hh, mm, ss];
-                const clicked = [];
-                for (let i = 0; i < Math.min(3, cols.length); i++) {
-                    const items = cols[i].querySelectorAll('li.cIL_item, [class*="cIL_item"]');
-                    for (const li of items) {
-                        if (li.textContent.trim() === tgt[i]) { li.click(); clicked.push(tgt[i]); break; }
-                    }
-                }
-                return {colCount: cols.length, clicked};
-            }""",
-            [hh, mm, ss],
-        )
-        logger.info(
-            f"[pinduoduo] 时间滚轮 colCount={result.get('colCount')} clicked={result.get('clicked')}"
-        )
-        if result.get("clicked") != [hh, mm, ss]:
-            raise ElementNotFound(
-                f"时间滚轮未完整设置: expected={[hh, mm, ss]} actual={result.get('clicked')}"
-            )
-        _wait(page, 500, 1000)
-    except ElementNotFound:
-        raise
-    except Exception as err:
-        raise ElementNotFound(f"时间滚轮设置失败: {err}") from err
-    # 点确认按钮(只选不确认会丢失)
-    try:
-        page.locator(sel.SCHEDULE_CONFIRM_BUTTON).first.click()
-        _wait(page, 1500, 2500)
-    except Exception as err:
-        raise ElementNotFound(f"定时确认按钮未找到(可能改版): {err}") from err
-
-
-def _select_declaration(page: Page, declaration: str | None) -> None:
-    choice = declaration or sel.DECLARATION_DEFAULT
-    page.locator(sel.DECLARATION_TRIGGER).click()
-    _wait(page, 800, 1500)
-    target = sel.DECLARATION_OPTIONS.get(choice, sel.DECLARATION_DEFAULT)
-    page.get_by_text(target, exact=False).first.click()
-    _wait(page, 500, 1000)
-    logger.info(f"[pinduoduo] 内容声明已选: {choice}")
-
-
-def _risk_control_probe(page: Page) -> None:
-    try:
-        body_text = page.locator("body").inner_text(timeout=3000)
-    except Exception:
-        return
-    for kw in sel.RISK_CONTROL_KEYWORDS:
-        if kw in body_text:
-            raise RiskControl(f"页面命中风控关键词: {kw}")
-
-
-def _click_publish(page: Page) -> None:
-    # 主发布按钮文案「发布」,用 get_by_role exact 精确匹配
-    # (排除顶部「发布视频」、底部「一键发布」/「取消发布」)
-    btn = page.get_by_role("button", name="发布", exact=True)
-    btn.wait_for(state="visible", timeout=10_000)
-    btn.click()
-    _wait(page, 2500, 4500)
-
-
-def _wait_for_success(page: Page, timeout: int = 60) -> None:
-    # 真发实测(2026-07-22):点发布后跳转 mall-goods-video(无 toast)
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if sel.SUCCESS_URL_FRAGMENT in page.url:
-            logger.info("[pinduoduo] 已跳转商家带货视频页,发布成功")
-            return
-        time.sleep(0.5)
-    raise ElementNotFound("发布成功判定超时(URL 未跳转 mall-goods-video)")
-
-
-# ---------------------------------------------------------------------------
-# 平台步骤回调 + Spec + Publisher
-# ---------------------------------------------------------------------------
-
-
-def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishContext) -> None:
-    """打开页 → 上传 → 填描述/话题 → 绑商品 → 封面 → 定时 → 内容声明 → 风控探测。"""
-    step_pause = ctx.step_pause
-
+        ctx.last_step = "products"
+        raise ProductNotFound("飞书里没填商品 ID(拼多多必须挂商品)")
     staged_cover = None
     if bundle.video_cover_path is not None:
         staged_cover = stage_to_tmp(
             bundle.video_cover_path, task_id=ctx.task_id, tmp_root=ctx.tmp_root
         )
-
+    upload_timeout = ctx.settings.publisher.upload_timeout_seconds
     apc_passed = wxsp.apc.check_pass()
-
-    ctx.last_step = "open_publish"
-    _open_publish_page(page)
-    random_pause(step_pause)
-
-    ctx.last_step = "verify_login"
-    _verify_logged_in(page)
-    random_pause(step_pause)
-
-    ctx.last_step = "entry_popups"
-    _dismiss_entry_popups(page)
-    random_pause(step_pause)
-
-    # APC 拒绝时装"等待上传区域超时"故障(对齐其他平台)
+    job: dict[str, Any] = {
+        "platform": "pinduoduo",
+        "step_pause": list(ctx.step_pause),
+        "upload_timeout_s": upload_timeout,
+        # 必须绝对路径:Chrome 是另一个进程,data_dir 配成 ./data 时相对路径它找不到,
+        # 页面收到空文件(拼多多提示「已过滤空文件」,2026-11-19 任务 58)
+        "video_path": str(staged.absolute()),
+        "cover_path": str(staged_cover.absolute()) if staged_cover else None,
+        "description": bundle.description or "",
+        "tags": _json.loads(bundle.tags_json or "[]"),
+        "product_ids": product_ids,
+        "publish_at": bundle.publish_at.strftime("%Y-%m-%d %H:%M:%S"),  # 与页面日期框同格式
+        "declaration": bundle.declaration,
+        "detail_float": bundle.detail_float,  # 商详悬浮窗;None = 保持页面默认
+        "store_feed": bundle.store_feed,  # 同步店铺动态;None = 保持页面默认
+        # 账密登录:登录过期时插件自动用账号密码登录;遇滑块/短信验证按登录失效处理
+        "login": _login_credentials(ctx, bundle.account_id),
+        "login_url": sel.LOGIN_URL,  # 带「账号登录」表单的 SSO 登录页(登录后跳回视频首页)
+        # APC 拒绝:插件停在上传前,下面装"等待上传区域超时"故障(对齐其他平台)
+        "halt_before": None if apc_passed else "upload",
+    }
+    used: dict[str, int] = {}
+    for round_no in range(1, _MAX_ROUNDS + 1):
+        session.start_job(job)
+        try:
+            # 上传期间插件不发消息,单条消息的等待上限按上传超时放宽
+            _pump(session, ctx, "gate", timeout=upload_timeout + 120)
+            break
+        except PublisherError as exc:
+            kind = classify(exc)
+            if round_no == _MAX_ROUNDS or used.get(kind, 0) >= _RERUN_BUDGET.get(kind, 0):
+                raise
+            used[kind] = used.get(kind, 0) + 1
+            shot = screenshot(
+                session,
+                task_id=ctx.task_id,
+                step=f"retry{round_no}_{ctx.last_step}",
+                screenshots_root=ctx.screenshots_root,
+            )
+            ctx.result.screenshots.append(str(shot))
+            logger.warning(
+                f"[pinduoduo] task={ctx.task_id} 第 {round_no} 轮在「{step_cn(ctx.last_step)}」失败"
+                f"({kind}: {exc}),{5 * round_no}s 后开新标签页重跑"
+            )
+            time.sleep(5 * round_no)
     if not apc_passed:
         ctx.last_step = "wait_upload_area"
         time.sleep(random.uniform(45, 75))
         shot = screenshot(
-            page,
+            session,
             task_id=ctx.task_id,
             step="wait_upload_area",
             screenshots_root=ctx.screenshots_root,
@@ -371,60 +170,12 @@ def _pre_publish(page: Page, bundle: TaskBundle, staged: Path, ctx: PublishConte
         ctx.result.screenshots.append(str(shot))
         raise ElementNotFound("等待上传区域超时(60s)")
 
-    ctx.last_step = "upload"
-    _upload_video(
-        page, file_path=staged, timeout_seconds=ctx.settings.publisher.upload_timeout_seconds
-    )
-    random_pause(step_pause)
 
-    ctx.last_step = "desc"
-    _fill_description(page, description=bundle.description)
-    random_pause(step_pause)
-
-    ctx.last_step = "tags"
-    _add_tags(page, tags=_json.loads(bundle.tags_json or "[]"))
-    random_pause(step_pause)
-
-    # 商品 ID:必挂(拼多多带货视频核心)
-    ctx.last_step = "products"
-    product_ids: list[str] = []
-    if bundle.product_ids_json and bundle.product_ids_json != "[]":
-        try:
-            parsed = _json.loads(bundle.product_ids_json)
-            if isinstance(parsed, list):
-                product_ids = [str(p) for p in parsed if p]
-        except (TypeError, _json.JSONDecodeError):
-            logger.warning(
-                f"[pinduoduo] 商品 ID JSON 解析失败 task_id={ctx.task_id}: {bundle.product_ids_json!r}"
-            )
-    # 必挂商品(用户要求):为空直接失败,避免后续定时发布等步骤因缺商品而误导性报错
-    if not product_ids:
-        raise ProductNotFound("拼多多必挂商品,但 product_ids 为空")
-    _add_products(page, product_ids=product_ids)
-    random_pause(step_pause)
-
-    ctx.last_step = "cover"
-    _set_cover(page, cover_path=staged_cover)
-    random_pause(step_pause)
-
-    ctx.last_step = "schedule"
-    _set_schedule(page, publish_at=bundle.publish_at)
-    random_pause(step_pause)
-
-    ctx.last_step = "declaration"
-    _select_declaration(page, declaration=bundle.declaration)
-    random_pause(step_pause)
-
-    ctx.last_step = "risk"
-    _risk_control_probe(page)
-
-
-def _post_publish(page: Page, bundle: TaskBundle, ctx: PublishContext) -> None:
-    ctx.last_step = "publish"
-    _click_publish(page)
-
-    ctx.last_step = "wait_success"
-    _wait_for_success(page)
+def _post_publish(session: ExtensionSession, bundle: TaskBundle, ctx: PublishContext) -> None:
+    session.proceed("publish")
+    done = _pump(session, ctx, "done", timeout=120)
+    if done.get("remote_url"):
+        ctx.result.remote_url = done["remote_url"]
 
 
 PINDUODUO_SPEC = PlatformSpec(
@@ -439,29 +190,25 @@ class PinduoduoPublisher:
     platform_key = "pinduoduo"
 
     def login(self, account: Account) -> bool:
-        """开浏览器到拼多多 SSO 登录页等扫码。
+        """托管 Chrome 打开拼多多 SSO 登录页等扫码(不需要插件)。
 
         用正向判据:扫码成功后跳转到 n-creator/video/home,URL 含该片段 = 成功。
-        cookie 由 browser_context 退出时落盘。
+        cookie 由真实 Chrome profile 自己持久化,managed_chrome 退出时优雅关闭保证落盘。
         """
         user_data_dir = Path(account.user_data_dir)
         logger.info(f"[pinduoduo] 开始登录 account={account.id}")
         try:
-            with browser_context(
+            ok = wait_logged_in_url(
                 user_data_dir,
-                headless=False,
-                account_id=account.id,
-                platform="pinduoduo",
-            ) as page:
-                page.goto(sel.LOGIN_URL, wait_until="domcontentloaded")
-                deadline = time.time() + 300
-                while time.time() < deadline:
-                    if sel.LOGGED_IN_URL_FRAGMENT in page.url:
-                        logger.info(f"[pinduoduo] 登录成功 account={account.id}")
-                        return True
-                    time.sleep(2)
+                start_url=sel.LOGIN_URL,
+                fragment=sel.LOGGED_IN_URL_FRAGMENT,
+                timeout_s=300,
+            )
+            if ok:
+                logger.info(f"[pinduoduo] 登录成功 account={account.id}")
+            else:
                 logger.warning(f"[pinduoduo] 登录超时 account={account.id}")
-                return False
+            return ok
         except Exception as exc:
             logger.error(f"[pinduoduo] 登录异常 account={account.id}: {exc}")
             return False

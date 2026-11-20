@@ -576,10 +576,9 @@ def test_publish_failure_writes_event_with_mapped_notify_type(
         assert ev.type == expected_notify_type
         assert ev.task_id == task_id
         assert ev.account_id == "a"
-        # 错误类型 + 最近步骤 进 context_json(中文 key)
-        ctx_json = ev.context_json
-        assert "错误类型" in ctx_json
-        assert "最近步骤" in ctx_json
+        # 只记事件(工作台用)不推送;内容是大白话原因 + 处理办法,不带错误码
+        assert ev.message.startswith("发布失败")
+        assert "处理" in ev.context_json
 
 
 def test_publish_success_does_not_write_notify_event(

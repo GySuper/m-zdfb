@@ -68,6 +68,15 @@
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') set(false); });
   }
 
+  // 锁定平台(未完成插件化改造):点击只提示没权限,不跳转
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-locked]');
+    if (!b) return;
+    document.body.dispatchEvent(new CustomEvent('opError', {
+      detail: { title: '没权限', detail: `${b.dataset.locked}${b.dataset.hint},请先用已开放的平台。` },
+    }));
+  });
+
   // 操作失败弹窗:后端 HX-Trigger: {"opError": {"title","detail"}}
   document.body.addEventListener('opError', (e) => {
     const d = e.detail || {};

@@ -125,7 +125,7 @@
         </div>
       </div>
       <div class="mt-5 p-4 rounded-2xl bg-white shadow-sm">
-        <div class="flex items-baseline justify-between"><div class="font-bold">发布进行中</div><div class="text-xs text-gray-400">已用时 <b class="text-gray-900 tabular-nums" data-elapsed="{{ running.started_at.isoformat() if running.started_at else '' }}">—</b></div></div>
+        <div class="flex items-baseline justify-between"><div class="font-bold" data-running-step="{{ running.id }}">{% if running_step %}当前步骤：{{ running_step }}{% else %}发布进行中{% endif %}</div><div class="text-xs text-gray-400">已用时 <b class="text-gray-900 tabular-nums" data-elapsed="{{ running.started_at.isoformat() if running.started_at else '' }}">—</b></div></div>
         <div class="mt-3 h-2 rounded-full bg-indigo-50 overflow-hidden"><div class="h-full w-full rounded-full shimmer"></div></div>
       </div>
       {% else %}
@@ -249,6 +249,20 @@
 
 {% block scripts %}
 <script>
+  // 正在发布:每 2 秒刷新当前步骤;任务结束(库里不再 running)就整页刷新回到空闲
+  (function () {
+    const el = document.querySelector('[data-running-step]');
+    if (!el) return;
+    const url = `/api/running-step?platform={{ request.state.current_platform }}&task_id=${el.dataset.runningStep}`;
+    const timer = setInterval(async () => {
+      try {
+        const r = await (await fetch(url)).json();
+        if (!r.running) { clearInterval(timer); location.reload(); return; }
+        el.textContent = r.step ? `当前步骤：${r.step}` : '发布进行中';
+      } catch (_) { /* 服务重启中,下一轮再试 */ }
+    }, 2000);
+  })();
+
   // 正在发布:已用时
   document.querySelectorAll('[data-elapsed]').forEach((el) => {
     if (!el.dataset.elapsed) return;

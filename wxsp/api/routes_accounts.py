@@ -528,6 +528,17 @@ def _run_open_browser(
     from wxsp.platform_meta import get_meta
 
     home_url = login_meta_for(platform).get("home_url", "about:blank")
+    if get_meta(platform).driver == "extension":
+        # 插件版平台(拼多多)的登录态在系统 Chrome profile 里,只能用系统 Chrome 打开
+        from wxsp import managed_chrome
+
+        try:
+            managed_chrome.open_for_manual_use(
+                user_data_dir, start_url=home_url, max_seconds=_OPEN_BROWSER_MAX_SECONDS
+            )
+        except Exception as exc:
+            logger.exception(f"[web/open-browser] {account_id} 浏览器异常: {exc}")
+        return
     cookie_file = user_data_dir / "cookies.json"
     use_explicit_cookies = not get_meta(platform).needs_fingerprint
     try:

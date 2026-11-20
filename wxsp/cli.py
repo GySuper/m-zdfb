@@ -17,7 +17,13 @@ from wxsp.archive import cleanup_old_files, install_file_sink
 from wxsp.browser import check_cookie
 from wxsp.config import ALL_PLATFORMS, Settings, load_settings, platform_label
 from wxsp.db import get_engine, init_db, session_scope
-from wxsp.doctor import check_feishu, check_nas, record_cookie_check, refresh_cookie_status
+from wxsp.doctor import (
+    check_chrome,
+    check_feishu,
+    check_nas,
+    record_cookie_check,
+    refresh_cookie_status,
+)
 from wxsp.feishu import FeishuApiError
 from wxsp.models import Account
 from wxsp.notify import NotifyEvent, notify
@@ -251,12 +257,14 @@ def doctor(
                         NotifyEvent(
                             type="cookie_warning",
                             level="warn",
-                            title=f"登录态即将过期:{display_name}",
-                            content=(
-                                f"账号「{display_name}」距上次成功活跃已超过 "
-                                f"{settings.monitoring.cookie_warn_days} 天,"
-                                f"登录态可能不稳定,建议到管理后台账号页扫码续命。"
-                            ),
+                            title="账号登录快到期",
+                            status="提醒",
+                            content="",
+                            context={
+                                "说明": f"已经 {settings.monitoring.cookie_warn_days} 天"
+                                "没成功用过,登录可能快失效了",
+                                "处理": "有空去「账号」页点「扫码续期」,避免下次发布时掉线",
+                            },
                             account_id=row.account_id,
                             account_display_name=display_name,
                         ),
@@ -266,6 +274,12 @@ def doctor(
                     )
                 elif row.status != "ok":
                     cookie_failed = True
+
+    # 浏览器 section:安装包不带浏览器,插件版平台要用系统 Chrome
+    typer.echo("")
+    typer.echo("浏览器:")
+    chrome_row = check_chrome()
+    typer.echo(f"  {'✅' if chrome_row.ok else '❌'} {'Google Chrome':<20} {chrome_row.detail}")
 
     # NAS section
     typer.echo("")
@@ -318,7 +332,7 @@ def doctor(
             typer.echo(f"  ❌ APC check 失败: {type(exc).__name__}: {exc}")
             typer.echo(f"     完整 repr: {exc!r}")
 
-    if cookie_failed or nas_failed or feishu_failed or apc_failed:
+    if cookie_failed or nas_failed or feishu_failed or apc_failed or not chrome_row.ok:
         raise typer.Exit(code=1)
 
 

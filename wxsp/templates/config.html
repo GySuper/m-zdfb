@@ -1,19 +1,16 @@
-{% extends "base.html" %}
+{% extends "base_v2.html" %}
 {% block page_title %}配置{% endblock %}
+{% block heading %}配置{% endblock %}
+{% block subheading %}
+<div class="flex flex-wrap items-center gap-2 mt-1 text-sm text-white/80">
+  <span>每个分区单独保存，保存前自动备份成 .bak</span>
+  <span class="px-2 py-0.5 rounded-lg bg-white/15 font-mono text-xs">{{ abs_path }}</span>
+  {% if not exists %}<span class="chip bg-rose-500/90 text-white">文件未找到</span>{% endif %}
+</div>
+{% endblock %}
+{% block op_status %}{% if flash %}<div class="flash ok" id="flash-banner">{{ flash }}</div>{% endif %}{% endblock %}
 {% block content %}
-
-  <div class="page-header">
-    <div>
-      <div class="page-title">{{ platform_cn(request.state.current_platform) }}·配置</div>
-      <div class="page-subtitle">
-        文件 <code>{{ abs_path }}</code>
-        {% if not exists %} <span class="badge error">未找到</span>{% endif %}
-        · 每分区单独保存 · 保存前自动备份到 <code>.bak</code>
-      </div>
-    </div>
-  </div>
-
-  {% if flash %}<div class="flash ok" id="flash-banner">{{ flash }}</div>{% endif %}
+<div class="legacy">
 
   <div class="cfg-layout">
     {# ============ 左侧锚点导航 ============ #}
@@ -62,7 +59,7 @@
                       <td class="muted">{{ a.daily_limit }}</td>
                       <td class="text-xs muted" style="max-width: 240px; overflow: hidden; text-overflow: ellipsis;"><code>{{ a.video_search_root }}</code></td>
                       <td class="nowrap">
-                        <button type="button" class="btn-sm" onclick='openAccountModal({{ {"id": aid, "display_name": a.display_name, "enabled": a.enabled, "daily_limit": a.daily_limit, "video_search_root": a.video_search_root, "cover_search_root": a.cover_search_root} | tojson }})'>编辑</button>
+                        <button type="button" class="btn-sm" onclick='openAccountModal({{ {"id": aid, "display_name": a.display_name, "enabled": a.enabled, "daily_limit": a.daily_limit, "video_search_root": a.video_search_root, "cover_search_root": a.cover_search_root, "password_login": a.password_login or false, "login_username": a.login_username or "", "has_password": (a.login_password or "") | length > 0} | tojson }})'>编辑</button>
                         <form method="post" action="/config/accounts/{{ aid }}/delete?platform={{ platform }}" style="display:inline;"
                               onsubmit="return confirm('确认删除账号 {{ aid }}?(配置中的条目会被移除,Chrome profile 目录不会自动删除)');">
                           <button class="btn-sm danger" type="submit">删除</button>
@@ -471,7 +468,7 @@
                 <label>默认平台</label>
                 <div class="cfg-control">
                   <select name="default_platform" onchange="saveDefaultPlatform(this.value)">
-                    {% for p in all_platforms %}
+                    {% for p in all_platforms if platform_available(p) %}
                     <option value="{{ p }}" {% if vm.webui_default_platform == p %}selected{% endif %}>{{ platform_cn(p) }}</option>
                     {% endfor %}
                   </select>
@@ -569,6 +566,29 @@
           </div>
           <span class="cfg-hint">同上,但用于封面文件</span>
         </div>
+        {% if password_login_supported %}
+        <div class="cfg-row">
+          <label>账密登录</label>
+          <div class="cfg-control">
+            <label class="switch"><input type="checkbox" name="password_login" onchange="togglePasswordLogin()"><span class="slider"></span></label>
+          </div>
+          <span class="cfg-hint">登录过期时自动用账号密码登录;遇到滑块或短信验证仍按登录失效处理,需人工扫码</span>
+        </div>
+        <div class="cfg-row" data-pw-row>
+          <label>登录账号</label>
+          <div class="cfg-control">
+            <input type="text" name="login_username" autocomplete="off" placeholder="商家后台登录账号 / 手机号">
+          </div>
+          <span class="cfg-hint">拼多多商家后台的登录账号</span>
+        </div>
+        <div class="cfg-row" data-pw-row>
+          <label>登录密码</label>
+          <div class="cfg-control">
+            <input type="password" name="login_password" autocomplete="new-password" placeholder="请输入密码">
+          </div>
+          <span class="cfg-hint">保存在本机的平台配置文件里,页面不回显</span>
+        </div>
+        {% endif %}
       </div>
       <div class="modal-foot">
         <button type="button" class="btn" onclick="closeAccountModal()">取消</button>
@@ -579,26 +599,27 @@
 
   <style>
     /* ============ Config layout ============ */
-    .cfg-layout { display: grid; grid-template-columns: 180px 1fr; gap: var(--space-5); }
+    .cfg-layout { display: grid; grid-template-columns: 200px 1fr; gap: var(--space-5); }
     @media (max-width: 900px) { .cfg-layout { grid-template-columns: 1fr; } .cfg-nav { display: none; } }
     .cfg-nav {
       position: sticky; top: var(--space-5); align-self: start;
       max-height: calc(100vh - var(--space-8)); overflow-y: auto;
+      background: #fff; border-radius: 24px; padding: 16px 10px;
+      box-shadow: 0 1px 2px rgba(16,16,40,.04), 0 12px 40px -12px rgba(16,16,40,.12);
     }
-    .cfg-nav-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-text-faint); margin-bottom: 6px; padding: 0 8px; }
+    .cfg-nav-title { font-size: 12px; color: var(--color-text-faint); margin-bottom: 6px; padding: 0 10px; }
     .cfg-nav a {
-      display: block; padding: 6px 10px; font-size: 13px;
-      color: var(--color-text-mute); border-radius: var(--radius-sm);
-      border-left: 2px solid transparent; margin-bottom: 1px;
+      display: block; padding: 8px 12px; font-size: 14px;
+      color: var(--color-text-mute); border-radius: var(--radius-sm); margin-bottom: 2px;
     }
-    .cfg-nav a:hover { background: var(--color-primary-soft); color: var(--color-primary); border-left-color: var(--color-primary); }
+    .cfg-nav a:hover { background: var(--color-primary-soft); color: var(--color-primary); }
     .cfg-nav-divider { height: 1px; background: var(--color-border-soft); margin: var(--space-3) 0; }
 
     .cfg-main { min-width: 0; }
 
     .cfg-section { margin-bottom: var(--space-6); scroll-margin-top: var(--space-4); }
-    .cfg-section-head { margin-bottom: var(--space-3); }
-    .cfg-section-head h2 { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: var(--space-2); }
+    .cfg-section-head { margin-bottom: var(--space-3); padding: 0 8px; }
+    .cfg-section-head h2 { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: var(--space-2); }
     .cfg-section-desc { color: var(--color-text-mute); font-size: 13px; margin-top: 4px; }
 
     /* ============ Cfg row (label / control / hint) ============ */
@@ -648,7 +669,7 @@
       position: absolute;
       cursor: pointer;
       inset: 0;
-      background: var(--color-border);
+      background: #d1d5db;
       transition: 0.2s;
       border-radius: 10px;
     }
@@ -699,6 +720,7 @@
       border-top: 1px solid var(--color-border-soft);
       background: var(--color-surface-alt);
       border-radius: 0 0 var(--radius-md) var(--radius-md);
+      padding: var(--space-4) 28px;
     }
     .cfg-foot-status {
       flex: 1;
@@ -789,7 +811,7 @@
       border-top: 1px solid var(--color-border-soft);
       background: var(--color-surface-alt);
     }
-    /* 提交账号时的 loading 态(服务端推飞书单选项有几秒延迟);复用 base.html 的 op-spin */
+    /* 提交账号时的 loading 态(服务端推飞书单选项有几秒延迟);复用 app.css 的 op-spin */
     .modal-foot .primary.is-submitting { pointer-events: none; opacity: 0.75; }
     .modal-foot .primary.is-submitting::before {
       content: "";
@@ -822,13 +844,24 @@
         modalForm.elements['daily_limit'].value = data.daily_limit ?? 20;
         modalForm.elements['video_search_root'].value = data.video_search_root || '';
         modalForm.elements['cover_search_root'].value = data.cover_search_root || '';
+        if (modalForm.elements['password_login']) {
+          modalForm.elements['password_login'].checked = !!data.password_login;
+          modalForm.elements['login_username'].value = data.login_username || '';
+          modalForm.elements['login_password'].placeholder = data.has_password ? '已设置,留空则不修改' : '请输入密码';
+        }
         submitBtn.textContent = '保存修改';
       } else {
         modalTitle.textContent = '添加账号';
         modalForm.action = '/config/accounts/add?platform=' + encodeURIComponent(platformParam);
         submitBtn.textContent = '添加账号';
       }
+      togglePasswordLogin();
       modal.showModal();
+    }
+    function togglePasswordLogin() {
+      const sw = modalForm.elements['password_login'];
+      const on = !!(sw && sw.checked);
+      document.querySelectorAll('[data-pw-row]').forEach((r) => { r.style.display = on ? '' : 'none'; });
     }
     function closeAccountModal() { modal.close(); }
     function submitAccountForm(e) {
@@ -930,4 +963,5 @@ function saveDefaultPlatform(val) {
   });
 }
 </script>
+</div>
 {% endblock %}

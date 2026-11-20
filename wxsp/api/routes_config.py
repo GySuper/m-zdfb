@@ -40,6 +40,7 @@ from wxsp.config import (
 )
 from wxsp.config import platform_label as _platform_label
 from wxsp.models import Account
+from wxsp.platform_meta import get_meta
 
 router = APIRouter()
 _config_lock = threading.Lock()
@@ -283,6 +284,9 @@ def _render_config(
             "vm": _view_model(data, platform=platform),
             "notify_on_options": NOTIFY_ON_OPTIONS,
             "field_map_keys": _field_map_keys(platform or "tencent_channel"),
+            "password_login_supported": get_meta(
+                platform or "tencent_channel"
+            ).supports_password_login,
             "edit_account_id": edit_account_id,
             "platform": platform or "tencent_channel",
             "platform_label": p_label,
@@ -475,8 +479,9 @@ def _build_account_entry(
     cover_search_root: str,
     user_data_dir: str,
     platform: str = "tencent_channel",
+    login: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    entry = {
         "display_name": display_name,
         "enabled": enabled,
         "daily_limit": daily_limit,
@@ -485,6 +490,37 @@ def _build_account_entry(
         "cover_search_root": cover_search_root,
         "platform": platform,
     }
+    if login is not None:  # 只有支持账密登录的平台才写这三项
+        entry.update(login)
+    return entry
+
+
+def _login_fields(
+    platform: str,
+    *,
+    password_login: bool,
+    login_username: str,
+    login_password: str,
+    old: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """账密登录三项:(要写入的字段, 错误文案)。平台不支持 → (None, None)。
+
+    密码留空 = 保持原密码(界面从不回显密码)。开关打开时账号、密码都必须有。
+    """
+    from wxsp.platform_meta import get_meta
+
+    if not get_meta(platform).supports_password_login:
+        return None, None
+    old = old or {}
+    username = login_username.strip()
+    password = login_password or old.get("login_password", "")
+    if password_login and (not username or not password):
+        return None, "开启账密登录需要填写登录账号和密码"
+    return {
+        "password_login": password_login,
+        "login_username": username,
+        "login_password": password,
+    }, None
 
 
 @router.post("/config/accounts/add")
@@ -494,6 +530,9 @@ def add_account(
     video_search_root: str = Form(...),
     cover_search_root: str = Form(...),
     enabled: bool = Form(False),
+    password_login: bool = Form(False),
+    login_username: str = Form(""),
+    login_password: str = Form(""),
     platform: str = Query("tencent_channel"),
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
@@ -521,6 +560,16 @@ def add_account(
             )
         aid = _generate_account_id(accounts)
         user_data_dir = _profile_dir_for(aid)
+        login, login_err = _login_fields(
+            platform,
+            password_login=password_login,
+            login_username=login_username,
+            login_password=login_password,
+        )
+        if login_err:
+            return RedirectResponse(
+                f"/config?flash=新增失败:{login_err}&platform={platform}", status_code=303
+            )
         accounts[aid] = _build_account_entry(
             display_name=display_name,
             enabled=enabled,
@@ -529,6 +578,7 @@ def add_account(
             cover_search_root=cover_search_root,
             user_data_dir=user_data_dir,
             platform=platform,
+            login=login,
         )
         data["accounts"] = accounts
         errors = _validate_dict(data)
@@ -622,6 +672,9 @@ def update_account(
     video_search_root: str = Form(...),
     cover_search_root: str = Form(...),
     enabled: bool = Form(False),
+    password_login: bool = Form(False),
+    login_username: str = Form(""),
+    login_password: str = Form(""),
     platform: str = Query("tencent_channel"),
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
@@ -648,6 +701,18 @@ def update_account(
                 status_code=303,
             )
         old_entry = accounts[account_id]
+        login, login_err = _login_fields(
+            platform,
+            password_login=password_login,
+            login_username=login_username,
+            login_password=login_password,
+            old=old_entry,
+        )
+        if login_err:
+            return RedirectResponse(
+                f"/config?flash=保存失败:{login_err}&edit={account_id}&platform={platform}",
+                status_code=303,
+            )
         entry = _build_account_entry(
             display_name=display_name,
             enabled=enabled,
@@ -656,6 +721,7 @@ def update_account(
             cover_search_root=cover_search_root,
             user_data_dir=old_entry.get("user_data_dir") or _profile_dir_for(account_id),
             platform=platform,
+            login=login,
         )
         accounts[account_id] = entry
         data["accounts"] = accounts
@@ -918,6 +984,8 @@ def save_fieldmap(
     feishu_fm_declaration: str = Form(""),
     feishu_fm_ai_optimize: str = Form(""),
     feishu_fm_product_ids: str = Form(""),
+    feishu_fm_detail_float: str = Form(""),
+    feishu_fm_store_feed: str = Form(""),
     feishu_fm_account: str = Form(...),
     feishu_fm_execute_date: str = Form(...),
     feishu_fm_publish_at: str = Form(...),
@@ -939,6 +1007,8 @@ def save_fieldmap(
             "declaration": feishu_fm_declaration,
             "ai_optimize": feishu_fm_ai_optimize,
             "product_ids": feishu_fm_product_ids,
+            "detail_float": feishu_fm_detail_float,
+            "store_feed": feishu_fm_store_feed,
             "account": feishu_fm_account,
             "execute_date": feishu_fm_execute_date,
             "publish_at": feishu_fm_publish_at,
@@ -988,8 +1058,9 @@ def test_wecom(
             NotifyEvent(
                 type="config_test",
                 level="info",
-                title="自动发布平台 · 测试推送",
-                content="如果你看到这条消息,说明机器人地址配置正确。",
+                title="通知测试",
+                status="正常",
+                content="能看到这条,说明企业微信机器人配置正确",
             )
         )
     except Exception as exc:
@@ -1033,8 +1104,9 @@ def test_lark(
             NotifyEvent(
                 type="config_test",
                 level="info",
-                title="自动发布平台 · 测试推送",
-                content="如果你看到这条消息,说明飞书机器人配置正确。",
+                title="通知测试",
+                status="正常",
+                content="能看到这条,说明飞书机器人配置正确",
             )
         )
     except Exception as exc:

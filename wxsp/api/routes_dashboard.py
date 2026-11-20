@@ -11,7 +11,9 @@ from sqlmodel import Session, col, select
 
 from wxsp.api.deps import get_session, get_settings, templates
 from wxsp.config import Settings
-from wxsp.models import TASK_STATUS_INTERRUPTED, TASK_STATUS_PENDING, Account, Event, Task
+from wxsp.models import TASK_STATUS_INTERRUPTED, TASK_STATUS_PENDING, Account, Event, Task, Video
+from wxsp.notify import step_cn
+from wxsp.platforms.base import RUNNING_STEPS
 
 router = APIRouter()
 
@@ -90,6 +92,33 @@ def dashboard(
             }
         )
 
+    # 当日时间轴 / 正在发布 / 接下来:按定时发布时间排序
+    video_ids = [t.video_id for t in today_tasks]
+    titles = (
+        {
+            v.id: v.title
+            for v in session.exec(select(Video).where(col(Video.id).in_(video_ids))).all()
+        }
+        if video_ids
+        else {}
+    )
+    names = {aid: cfg.display_name for aid, cfg in settings.accounts.items()}
+    timeline: list[dict[str, Any]] = [
+        {
+            "id": t.id,
+            "title": titles.get(t.video_id, ""),
+            "account": names.get(t.account_id, t.account_id),
+            "publish_at": t.publish_at,
+            "status": t.status,
+            "started_at": t.started_at,
+            "error_type": t.last_error_type,
+        }
+        for t in sorted(today_tasks, key=lambda t: t.publish_at)
+    ]
+    running = next((x for x in timeline if x["status"] == "running"), None)
+    running_step = RUNNING_STEPS.get(running["id"]) if running else None
+    upcoming = [x for x in timeline if x["status"] == "pending"][:3]
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -101,5 +130,20 @@ def dashboard(
             "counts": counts,
             "backlog": backlog,
             "recent_events": recent_events,
+            "timeline": timeline,
+            "running": running,
+            "running_step": step_cn(running_step) if running_step else None,
+            "upcoming": upcoming,
         },
     )
+
+
+@router.get("/api/running-step")
+def running_step(task_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """工作台「正在发布」卡片轮询:running 以库里状态为准(别的进程跑的也算),步骤取本进程记录。"""
+    task = session.get(Task, task_id)
+    step = RUNNING_STEPS.get(task_id)
+    return {
+        "running": task is not None and task.status == "running",
+        "step": step_cn(step) if step else None,
+    }

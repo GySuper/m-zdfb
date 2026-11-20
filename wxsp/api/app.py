@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from apscheduler.schedulers.base import BaseScheduler  # type: ignore[import-untyped]
 from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-untyped]
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from wxsp import platform_meta
 from wxsp.api.log_stream import log_stream
 from wxsp.api.routes_accounts import router as accounts_router
 from wxsp.api.routes_config import router as config_router
@@ -37,6 +40,7 @@ from wxsp.scheduler import (
 
 _SETUP_PREFIX = "/setup"
 _STATIC_PREFIX = "/static"
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -144,6 +148,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 try:
                     scheduler = make_scheduler(first_cfg, blocking=False)
                     for pkey in active_platforms:
+                        if not platform_meta.is_available(pkey):
+                            logger.info(
+                                f"[api] 平台 [{pkey}] 已锁定({platform_meta.LOCKED_HINT}),不注册 cron"
+                            )
+                            continue
                         try:
                             plat_cfg = (
                                 _load(platform=pkey) if pkey != active_platforms[0] else first_cfg
@@ -217,10 +226,29 @@ def create_app() -> FastAPI:
                     "key": pkey,
                     "label": platform_label(pkey),
                     "configured": configured,
+                    "locked": not platform_meta.is_available(pkey),
                 }
             # Resolve current platform
             default_p = get_default_platform()
             current = request.query_params.get("platform")
+            if current and current in platforms and platforms[current]["locked"]:
+                # 未完成插件化改造的平台:页面显示没权限,写操作直接拒绝
+                if request.method != "GET":
+                    return Response("Forbidden: platform locked", status_code=403)
+                from wxsp.api.deps import templates
+
+                request.state.platforms = platforms
+                request.state.current_platform = default_p
+                request.state.has_multiple_platforms = len(platforms) > 1
+                return templates.TemplateResponse(
+                    request,
+                    "locked.html",
+                    {
+                        "locked_label": platforms[current]["label"],
+                        "locked_hint": platform_meta.LOCKED_HINT,
+                    },
+                    status_code=403,
+                )
             if current and current in platforms:
                 pass  # explicit ?platform= in URL
             elif request.method == "GET":
@@ -266,6 +294,7 @@ def create_app() -> FastAPI:
         allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
     )
 
+    app.mount(_STATIC_PREFIX, StaticFiles(directory=str(_STATIC_DIR)), name="static")
     app.include_router(setup_router)
     app.include_router(dashboard_router)
     app.include_router(accounts_router)

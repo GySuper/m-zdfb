@@ -1,265 +1,274 @@
-{% extends "base.html" %}
-{% block page_title %}总览{% endblock %}
-{% block content %}
+{% extends "base_v2.html" %}
+{% block page_title %}工作台{% endblock %}
 
-{# ============ 计算异常项 ============ #}
+{% set cur = request.state.current_platform %}
+{% set pf_label = platform_cn(cur) %}
 {% set warn_accounts = account_cards | selectattr("cookie_status", "equalto", "warn") | list %}
 {% set expired_accounts = account_cards | selectattr("cookie_status", "equalto", "expired") | list %}
 {% set total_today = counts.pending + counts.running + counts.success + counts.failed + counts.skipped + counts.interrupted %}
+{% set left_today = counts.pending + counts.running %}
 {% set issue_count = (warn_accounts|length) + (expired_accounts|length) + (1 if counts.failed > 0 else 0) + (1 if counts.interrupted > 0 else 0) + (1 if backlog > 0 else 0) %}
 
-  <div class="page-header">
-    <div>
-      <div class="page-title">{{ platform_cn(request.state.current_platform) }}·总览</div>
-      <div class="page-subtitle">{{ today }} · <span id="dashClock"></span></div>
-    </div>
-    <div class="page-actions">
-      <span class="op-spinner" id="dash-run-today-spinner">同步飞书中…</span>
-      <button class="primary" type="button"
-              hx-post="/tasks/run-today?platform={{ request.state.current_platform }}"
-              hx-target="#op-status"
-              hx-swap="innerHTML"
-              hx-indicator="#dash-run-today-spinner">立即跑今天</button>
-      <span class="op-spinner" id="dash-sync-spinner">同步中…</span>
-      <button type="button"
-              hx-post="/accounts/sync?platform={{ request.state.current_platform }}"
-              hx-target="#op-status"
-              hx-swap="innerHTML"
-              hx-indicator="#dash-sync-spinner">同步飞书</button>
-    </div>
+{% block hero %}
+<section class="relative rounded-[36px] h-[300px] mb-5 pop" style="z-index:20">
+  <div class="absolute inset-0 overflow-hidden rounded-[36px]">
+    <canvas data-silk class="absolute inset-0 w-full h-full" aria-hidden="true"></canvas>
+    <div class="absolute inset-0 bg-gradient-to-r from-black/35 via-black/5 to-transparent"></div>
   </div>
-  <div id="op-status"></div>
-
-  {# ============ 健康状态条 ============ #}
-  {% if issue_count == 0 %}
-    <div class="health-bar ok">
-      <div class="health-icon">✓</div>
-      <div class="health-body">
-        <div class="health-title">一切正常</div>
-        <div class="text-sm text-mute mt-2">
-          {% if total_today == 0 %}
-            今日还没有任务,等飞书同步或手动同步后会出现在这里。
-          {% else %}
-            今日 {{ total_today }} 条任务全部按计划进行中。
-          {% endif %}
+  <div class="relative z-10 h-full flex flex-col p-8 text-white">
+    {% include "_topbar.html" %}
+    <div class="mt-auto flex items-end justify-between gap-6">
+      <div>
+        <div class="text-white/75 mb-1">{% if now.hour < 12 %}早上好{% elif now.hour < 18 %}下午好{% else %}晚上好{% endif %}，运营同学</div>
+        <h1 class="text-6xl font-black tracking-tight leading-none"><span data-count="{{ counts.success }}">{{ counts.success }}</span><span class="text-white/50 text-4xl font-bold"> / {{ total_today }}</span></h1>
+        <div class="text-white/80 mt-2">
+          {% if total_today == 0 %}{{ pf_label }}今天还没有任务，同步飞书后会出现在这里
+          {% else %}{{ pf_label }}今天已发布 {{ counts.success }} 条{% if left_today %}，还有 {{ left_today }} 条在路上{% endif %}{% if upcoming %}，下一条 {{ upcoming[0].publish_at.strftime('%H:%M') }} 发出{% endif %}{% endif %}
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <button type="button" class="btn btn-glass px-6 py-4 text-base"
+                hx-post="/accounts/sync?platform={{ cur }}" hx-target="#op-status" hx-swap="innerHTML">
+          <svg class="spin animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>↻ 同步飞书</button>
+        <div data-magnet class="p-4 -m-4">
+          <button type="button" class="mag btn btn-white px-7 py-4 text-base"
+                  hx-post="/tasks/run-today?platform={{ cur }}" hx-target="#op-status" hx-swap="innerHTML">
+            <svg class="spin animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>▶ 开始任务</button>
         </div>
       </div>
     </div>
-  {% else %}
-    <div class="health-bar warn">
-      <div class="health-icon">⚠</div>
-      <div class="health-body">
-        <div class="health-title">{{ issue_count }} 项需要处理</div>
-        <div class="health-list">
+  </div>
+</section>
+{% endblock %}
 
-          {% for a in expired_accounts %}
-            <div class="health-item">
-              <div class="health-item-text">
-                <strong>{{ a.display_name }}</strong> 登录已过期,需要重新扫码
-              </div>
-              <a class="btn btn-sm" href="/accounts?platform={{ request.state.current_platform }}">前往扫码 →</a>
-            </div>
-          {% endfor %}
+{% block content %}
+{# 今日进度:6 种状态 #}
+<h2 class="sr-only">今日进度</h2>
+<section class="grid grid-cols-3 lg:grid-cols-6 gap-5 mb-5" aria-label="今日进度">
+  {% for label, n, color in [('待发布', counts.pending, '#9ca3af'), ('发布中', counts.running, '#6366f1'), ('已发布', counts.success, '#10b981'), ('失败', counts.failed, '#f43f5e'), ('跳过', counts.skipped, '#f59e0b'), ('中断', counts.interrupted, '#f97316')] %}
+  <a href="/tasks?platform={{ cur }}" class="card tilt p-5 pop block" style="animation-delay:{{ 0.05 + loop.index0 * 0.04 }}s">
+    <div class="flex items-center justify-between"><span class="text-sm text-gray-500">{{ label }}</span><span class="w-2 h-2 rounded-full" style="background:{{ color }}"></span></div>
+    <div class="text-4xl font-black mt-2 {% if n == 0 %}text-gray-300{% endif %}" data-count="{{ n }}">{{ n }}</div>
+  </a>
+  {% endfor %}
+</section>
 
-          {% for a in warn_accounts %}
-            <div class="health-item">
-              <div class="health-item-text">
-                <strong>{{ a.display_name }}</strong> Cookie 即将过期,建议尽快续期
-              </div>
-              <a class="btn btn-sm" href="/accounts?platform={{ request.state.current_platform }}">扫码续期 →</a>
-            </div>
-          {% endfor %}
+<div class="grid grid-cols-12 gap-5">
+  {# 需要你处理 #}
+  <section class="card col-span-12 lg:col-span-8 p-7 pop" style="animation-delay:.1s">
+    <div class="flex items-center justify-between mb-5">
+      <div><h2 class="text-xl font-bold">需要你处理</h2><div class="text-sm text-gray-500">处理完这些，今天的队列才能顺畅跑完</div></div>
+      {% if issue_count %}<span class="chip bg-rose-50 text-rose-600 text-sm px-3">{{ issue_count }} 件</span>{% endif %}
+    </div>
+    {% if issue_count == 0 %}
+      <div class="flex items-center gap-4 p-5 rounded-2xl bg-emerald-50">
+        <span class="w-10 h-10 rounded-xl grid place-items-center bg-white text-emerald-600 font-bold">✓</span>
+        <div><div class="font-semibold text-emerald-800">一切正常</div><div class="text-sm text-emerald-700/80">{% if total_today == 0 %}今天还没有任务，等飞书同步后会出现在这里{% else %}今天 {{ total_today }} 条任务都在按计划进行{% endif %}</div></div>
+      </div>
+    {% else %}
+    <div class="space-y-3">
+      {% for a in expired_accounts %}
+      <div class="note-in flex items-center gap-4 p-4 rounded-2xl bg-gray-50 hover:bg-gray-100/70 transition">
+        <span class="w-10 h-10 shrink-0 rounded-xl grid place-items-center font-bold bg-rose-50 text-rose-600">!</span>
+        <div class="min-w-0 flex-1"><div class="font-semibold"><strong>{{ a.display_name }}</strong> 登录态失效</div><div class="text-sm text-gray-500 truncate">这个账号今天的任务会被跳过，扫码后自动补跑</div></div>
+        <a class="btn btn-dark" href="/accounts?platform={{ cur }}">去扫码</a>
+      </div>
+      {% endfor %}
+      {% for a in warn_accounts %}
+      <div class="note-in flex items-center gap-4 p-4 rounded-2xl bg-gray-50 hover:bg-gray-100/70 transition">
+        <span class="w-10 h-10 shrink-0 rounded-xl grid place-items-center font-bold bg-amber-50 text-amber-600">⏱</span>
+        <div class="min-w-0 flex-1"><div class="font-semibold"><strong>{{ a.display_name }}</strong> Cookie 即将过期</div><div class="text-sm text-gray-500 truncate">还能登录，建议现在扫码续期</div></div>
+        <a class="btn btn-soft" href="/accounts?platform={{ cur }}">扫码续期</a>
+      </div>
+      {% endfor %}
+      {% if counts.failed > 0 %}
+      <div class="note-in flex items-center gap-4 p-4 rounded-2xl bg-gray-50 hover:bg-gray-100/70 transition">
+        <span class="w-10 h-10 shrink-0 rounded-xl grid place-items-center font-bold bg-rose-50 text-rose-600">×</span>
+        <div class="min-w-0 flex-1"><div class="font-semibold">今天 <strong>{{ counts.failed }}</strong> 条任务失败</div><div class="text-sm text-gray-500 truncate">看一下失败原因，可以一键重试</div></div>
+        <a class="btn btn-soft" href="/tasks?status=failed&platform={{ cur }}">查看并重试</a>
+      </div>
+      {% endif %}
+      {% if counts.interrupted > 0 %}
+      <div class="note-in flex items-center gap-4 p-4 rounded-2xl bg-gray-50 hover:bg-gray-100/70 transition">
+        <span class="w-10 h-10 shrink-0 rounded-xl grid place-items-center font-bold bg-orange-50 text-orange-600">⏸</span>
+        <div class="min-w-0 flex-1"><div class="font-semibold">今天 <strong>{{ counts.interrupted }}</strong> 条任务被中断</div><div class="text-sm text-gray-500 truncate">程序异常退出或被手动停止，需要决定是否重跑</div></div>
+        <a class="btn btn-soft" href="/tasks?status=interrupted&platform={{ cur }}">处理中断</a>
+      </div>
+      {% endif %}
+      {% if backlog > 0 %}
+      <div class="note-in flex items-center gap-4 p-4 rounded-2xl bg-gray-50 hover:bg-gray-100/70 transition">
+        <span class="w-10 h-10 shrink-0 rounded-xl grid place-items-center font-bold bg-indigo-50 text-indigo-600">↺</span>
+        <div class="min-w-0 flex-1"><div class="font-semibold">历史积压 <strong>{{ backlog }}</strong> 条</div><div class="text-sm text-gray-500 truncate">执行日期早于今天、还没发出去的任务</div></div>
+        <a class="btn btn-soft" href="/tasks?backlog=1&platform={{ cur }}">处理积压</a>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </section>
 
-          {% if counts.failed > 0 %}
-            <div class="health-item">
-              <div class="health-item-text">
-                今日有 <strong>{{ counts.failed }}</strong> 条任务失败,需要查看原因并重试
-              </div>
-              <a class="btn btn-sm" href="/tasks?status=failed&platform={{ request.state.current_platform }}">查看失败 →</a>
-            </div>
-          {% endif %}
-
-          {% if counts.interrupted > 0 %}
-            <div class="health-item">
-              <div class="health-item-text">
-                今日有 <strong>{{ counts.interrupted }}</strong> 条任务被中断(可能是 Ctrl-C 或异常退出)
-              </div>
-              <a class="btn btn-sm" href="/tasks?status=interrupted&platform={{ request.state.current_platform }}">处理中断 →</a>
-            </div>
-          {% endif %}
-
-          {% if backlog > 0 %}
-            <div class="health-item">
-              <div class="health-item-text">
-                历史积压 <strong>{{ backlog }}</strong> 条 — 执行日期早于今天但仍未完成的任务
-              </div>
-              <a class="btn btn-sm" href="/tasks?backlog=1&platform={{ request.state.current_platform }}">处理积压 →</a>
-            </div>
-          {% endif %}
-
+  {# 正在发布 #}
+  <section class="card col-span-12 lg:col-span-4 overflow-hidden pop flex flex-col" style="animation-delay:.15s">
+    <div class="relative p-6 pb-5" style="background:radial-gradient(120% 90% at 0% 0%,#ede9fe 0%,transparent 60%),radial-gradient(120% 90% at 100% 0%,#fce7f3 0%,transparent 55%),#faf9ff">
+      {% if running %}
+      <div class="flex items-center justify-between mb-4">
+        <span class="chip bg-white/80 text-indigo-600 shadow-sm text-xs px-3 py-1.5"><span class="w-1.5 h-1.5 rounded-full bg-indigo-500 now"></span>正在发布</span>
+        <a href="/tasks/{{ running.id }}?platform={{ cur }}" class="text-xs text-gray-400 hover:text-gray-600">任务 #{{ running.id }}</a>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="relative w-[62px] h-[84px] rounded-2xl shrink-0 overflow-hidden shadow-lg shadow-fuchsia-500/20" style="background:linear-gradient(160deg,#a78bfa,#ec4899)">
+          <svg class="absolute inset-0 m-auto" width="18" height="18" viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="font-bold text-[17px] leading-snug line-clamp-2">{{ running.title or '（无标题）' }}</div>
+          <div class="text-sm text-gray-500 mt-1">{{ pf_label }} · {{ running.account }}</div>
+          <div class="text-sm text-gray-500">定时 {{ running.publish_at.strftime('%H:%M') }} 发出</div>
         </div>
       </div>
-    </div>
-  {% endif %}
-
-  {# ============ 今日进度 ============ #}
-  <div class="card">
-    <div class="card-header">
-      <h2>今日进度</h2>
-      <span class="card-meta">{{ today }}</span>
-    </div>
-    <div class="card-body">
-      {% if total_today == 0 %}
-        <div class="empty">
-          <div class="empty-title">今天还没有任务</div>
-          <div>飞书表里把"执行日期"设为今天,然后点右上角"同步飞书"即可</div>
-        </div>
+      <div class="mt-5 p-4 rounded-2xl bg-white shadow-sm">
+        <div class="flex items-baseline justify-between"><div class="font-bold" data-running-step="{{ running.id }}">{% if running_step %}当前步骤：{{ running_step }}{% else %}发布进行中{% endif %}</div><div class="text-xs text-gray-400">已用时 <b class="text-gray-900 tabular-nums" data-elapsed="{{ running.started_at.isoformat() if running.started_at else '' }}">—</b></div></div>
+        <div class="mt-3 h-2 rounded-full bg-indigo-50 overflow-hidden"><div class="h-full w-full rounded-full shimmer"></div></div>
+      </div>
       {% else %}
-        <div class="progress-label">
-          <span class="progress-num">{{ counts.success }} / {{ total_today }}</span>
-          <span>已完成 {{ ((counts.success / total_today) * 100) | round(0, 'floor') | int }}%</span>
-        </div>
-        <div class="progress {% if counts.success == total_today %}success{% endif %}">
-          <div class="progress-fill" style="width: {{ ((counts.success / total_today) * 100) | round(1) }}%;"></div>
-        </div>
-        <div class="stats mt-4">
-          <span class="stat-chip ok"><span class="stat-icon">✓</span><span class="stat-num">{{ counts.success }}</span><span class="stat-label">已发布</span></span>
-          <span class="stat-chip info"><span class="stat-icon">◐</span><span class="stat-num">{{ counts.running }}</span><span class="stat-label">发布中</span></span>
-          <span class="stat-chip"><span class="stat-icon">⏱</span><span class="stat-num">{{ counts.pending }}</span><span class="stat-label">待发布</span></span>
-          {% if counts.failed > 0 %}
-          <span class="stat-chip error"><span class="stat-icon">✕</span><span class="stat-num">{{ counts.failed }}</span><span class="stat-label">失败</span></span>
-          {% endif %}
-          {% if counts.interrupted > 0 %}
-          <span class="stat-chip warn"><span class="stat-icon">⏸</span><span class="stat-num">{{ counts.interrupted }}</span><span class="stat-label">已中断</span></span>
-          {% endif %}
-          {% if counts.skipped > 0 %}
-          <span class="stat-chip"><span class="stat-icon">↷</span><span class="stat-num">{{ counts.skipped }}</span><span class="stat-label">已跳过</span></span>
-          {% endif %}
-        </div>
+      <div class="flex items-center gap-2 mb-3"><span class="chip bg-white/80 text-gray-500 shadow-sm text-xs px-3 py-1.5">空闲</span></div>
+      <div class="font-bold text-lg">现在没有在发布的任务</div>
+      <div class="text-sm text-gray-500 mt-1">{% if upcoming %}下一条 {{ upcoming[0].publish_at.strftime('%H:%M') }} 发出，点「开始任务」会按顺序跑今天剩下的{% else %}今天待发布的都处理完了{% endif %}</div>
       {% endif %}
     </div>
-  </div>
-
-  {# ============ 账号卡片 ============ #}
-  <div class="card">
-    <div class="card-header">
-      <h2>账号 <span class="text-faint text-sm" style="font-weight:400;">({{ account_cards|length }})</span></h2>
-      <a class="btn btn-sm" href="/accounts?platform={{ request.state.current_platform }}">管理 →</a>
-    </div>
-    <div class="card-body">
-      {% if account_cards %}
-        <div class="account-grid">
-          {% for a in account_cards %}
-            {% set ac_total = a.today.pending + a.today.running + a.today.success + a.today.failed + a.today.skipped + a.today.interrupted %}
-            <div class="account-card">
-              <div class="ac-head">
-                <div>
-                  <div class="ac-name">{{ a.display_name }}
-                    {% if a.platform %}<span class="badge platform-badge">{{ platform_cn(a.platform) }}</span>{% endif %}
-                  </div>
-                  <div class="ac-meta">{{ a.id }}</div>
-                </div>
-                {% if a.cookie_status == "ok" %}
-                  <span class="badge ok">登录正常</span>
-                {% elif a.cookie_status == "warn" %}
-                  <span class="badge warn">即将过期</span>
-                {% elif a.cookie_status == "expired" %}
-                  <span class="badge error">已过期</span>
-                {% else %}
-                  <span class="badge mute">未知</span>
-                {% endif %}
-              </div>
-
-              {% if a.paused_until %}
-                <div class="badge warn mt-2">暂停至 {{ a.paused_until.strftime("%m-%d %H:%M") }}</div>
-              {% endif %}
-
-              <div class="ac-progress">
-                <div class="progress-label">
-                  <span>今日 {{ a.today.success }} / {{ a.daily_limit }}</span>
-                  <span class="text-xs">上限 {{ a.daily_limit }}</span>
-                </div>
-                <div class="progress {% if a.today.success >= a.daily_limit %}success{% endif %}">
-                  <div class="progress-fill" style="width: {{ ((a.today.success / a.daily_limit) * 100) | round(1) if a.daily_limit else 0 }}%;"></div>
-                </div>
-              </div>
-
-              {% if ac_total > 0 %}
-              <div class="ac-counts">
-                {% if a.today.success > 0 %}<span><span class="dot ok"></span>已发 {{ a.today.success }}</span>{% endif %}
-                {% if a.today.running > 0 %}<span><span class="dot warn"></span>发布中 {{ a.today.running }}</span>{% endif %}
-                {% if a.today.pending > 0 %}<span><span class="dot mute"></span>待发 {{ a.today.pending }}</span>{% endif %}
-                {% if a.today.failed > 0 %}<span><span class="dot error"></span>失败 {{ a.today.failed }}</span>{% endif %}
-              </div>
-              {% endif %}
-            </div>
-          {% endfor %}
-        </div>
+    <div class="px-6 pt-4 pb-2 flex-1">
+      <div class="text-xs text-gray-400 mb-2">接下来</div>
+      {% for u in upcoming %}
+      <div class="flex items-center gap-3 py-2">
+        <span class="w-12 shrink-0 text-sm font-bold tabular-nums">{{ u.publish_at.strftime('%H:%M') }}</span>
+        <div class="min-w-0"><div class="text-sm font-medium truncate">{{ u.title or '（无标题）' }}</div><div class="text-xs text-gray-400">{{ u.account }}</div></div>
+      </div>
       {% else %}
-        <div class="empty">
-          <div class="empty-title">还没有配置账号</div>
-          <div>到 <a href="/config?platform={{ request.state.current_platform }}">配置</a> 页添加你的第一个账号</div>
-        </div>
-      {% endif %}
+      <div class="text-sm text-gray-400 py-2">没有排队中的任务</div>
+      {% endfor %}
     </div>
-  </div>
+    <div class="flex items-center justify-between px-6 py-4 border-t border-gray-100 text-sm">
+      <span class="text-gray-500">今天剩 <b class="text-gray-900">{{ counts.pending }}</b> 条待发</span>
+      <a class="font-semibold text-indigo-600 hover:text-indigo-700" href="/tasks?platform={{ cur }}">全部任务 →</a>
+    </div>
+  </section>
 
-  {# ============ 最近事件 ============ #}
-  <div class="card">
-    <div class="card-header">
-      <h2>最近事件</h2>
-      <a class="btn btn-sm" href="/logs?platform={{ request.state.current_platform }}">查看实时日志 →</a>
+  {# 账号液体卡 #}
+  <section class="col-span-12">
+    <div class="flex items-end justify-between mb-4 px-2">
+      <div><h2 class="text-xl font-bold">账号</h2><div class="text-sm text-gray-500">水位是今天已发 / 今天计划，卡片角标是登录态</div></div>
+      <a class="text-sm font-semibold text-indigo-600 hover:text-indigo-700" href="/accounts?platform={{ cur }}">管理账号 →</a>
     </div>
-    <div class="card-body tight">
-      {% if recent_events %}
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 120px;">时间</th>
-            <th style="width: 70px;">级别</th>
-            <th style="width: 140px;">类型</th>
-            <th style="width: 80px;">任务</th>
-            <th style="width: 100px;">账号</th>
-            <th>信息</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for e in recent_events %}
-          <tr>
-            <td class="muted nowrap">{{ e.ts.strftime("%m-%d %H:%M:%S") }}</td>
-            <td>
-              {% if e.level == "info" %}<span class="badge ok">{{ level_cn(e.level) }}</span>
-              {% elif e.level == "warn" %}<span class="badge warn">{{ level_cn(e.level) }}</span>
-              {% else %}<span class="badge error">{{ level_cn(e.level) }}</span>{% endif %}
-            </td>
-            <td class="text-sm">{{ error_type_cn(e.type) }}</td>
-            <td>{% if e.task_id %}<a href="/tasks/{{ e.task_id }}?platform={{ request.state.current_platform }}">#{{ e.task_id }}</a>{% endif %}</td>
-            <td class="muted text-sm">{{ e.account_id or "—" }}</td>
-            <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ e.message }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-        <div class="empty">
-          <div class="empty-title">还没有任何事件</div>
-          <div>事件会在任务执行、Cookie 检查、风控触发时产生</div>
+    {% if account_cards %}
+    {% set palette = ['#10b981','#f59e0b','#f43f5e','#6366f1','#0ea5e9','#ec4899','#14b8a6','#8b5cf6'] %}
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-5">
+      {% for a in account_cards %}
+      {% set col = palette[loop.index0 % palette|length] %}
+      {% set plan = a.today.pending + a.today.running + a.today.success + a.today.failed + a.today.skipped + a.today.interrupted %}
+      {% set pct = ((a.today.success / plan) * 100) | round(0) | int if plan else 0 %}
+      {% if a.paused_until %}{% set badge = ('bg-gray-100 text-gray-600', '已暂停') %}
+      {% elif a.cookie_status == 'ok' %}{% set badge = ('bg-emerald-50 text-emerald-600', '正常') %}
+      {% elif a.cookie_status == 'warn' %}{% set badge = ('bg-amber-50 text-amber-700', '待续期') %}
+      {% elif a.cookie_status == 'expired' %}{% set badge = ('bg-rose-50 text-rose-600', '已失效') %}
+      {% else %}{% set badge = ('bg-gray-100 text-gray-500', '未扫码') %}{% endif %}
+      <div class="card tilt relative overflow-hidden p-6 h-52 pop" style="animation-delay:{{ 0.2 + loop.index0 * 0.05 }}s">
+        <div class="liquid" data-fill="{{ pct }}" style="height:0;background:{{ col }}1f"><svg class="wave" viewBox="0 0 200 20" preserveAspectRatio="none" aria-hidden="true"><path d="M0 10 Q25 0 50 10 T100 10 T150 10 T200 10 V20 H0z" fill="{{ col }}1f"/></svg></div>
+        <div class="relative flex items-start justify-between">
+          <div class="w-11 h-11 rounded-2xl grid place-items-center text-white font-black" style="background:{{ col }}">{{ a.display_name[:1] }}</div>
+          <span class="chip {{ badge[0] }}">{{ badge[1] }}</span>
         </div>
-      {% endif %}
+        <div class="relative mt-5 font-bold text-lg truncate">{{ a.display_name }}</div>
+        <div class="relative flex items-baseline gap-1"><span class="text-3xl font-black">{{ a.today.success }}</span><span class="text-sm text-gray-500">/ {{ plan }} 今天 · 上限 {{ a.daily_limit }}</span></div>
+        <div class="relative flex items-center justify-between mt-1 gap-2">
+          <span class="text-xs truncate {% if a.cookie_status == 'expired' %}text-rose-600 font-semibold{% elif a.cookie_status == 'warn' %}text-amber-700{% else %}text-gray-500{% endif %}">
+            {% if a.paused_until %}暂停至 {{ a.paused_until.strftime('%m-%d %H:%M') }}
+            {% elif a.cookie_status == 'expired' %}登录态失效
+            {% elif a.cookie_status == 'warn' %}建议扫码续期
+            {% elif a.cookie_last_active_at %}{{ a.cookie_last_active_at.strftime('%m-%d %H:%M') }} 活跃
+            {% else %}还没扫码登录{% endif %}
+          </span>
+          {% if a.cookie_status in ('expired', 'warn', 'unknown') and not a.paused_until %}<a class="btn btn-dark px-3 py-1.5 text-xs" href="/accounts?platform={{ cur }}">扫码</a>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
     </div>
-  </div>
+    {% else %}
+    <div class="card p-8 text-center text-gray-500">这个平台还没有账号，到 <a class="text-indigo-600 font-semibold" href="/config?platform={{ cur }}">配置</a> 页添加第一个</div>
+    {% endif %}
+  </section>
 
-  <script>
-    (function () {
-      const el = document.getElementById('dashClock');
-      if (!el) return;
-      function tick() {
-        const d = new Date();
-        const pad = (n) => String(n).padStart(2, '0');
-        el.textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-      }
-      tick();
-      setInterval(tick, 1000);
-    })();
-  </script>
+  {# 最近事件 #}
+  <section class="card col-span-12 p-7 pop" style="animation-delay:.3s">
+    <div class="flex items-center justify-between mb-4"><h2 class="text-xl font-bold">最近事件</h2><a class="text-sm font-semibold text-indigo-600 hover:text-indigo-700" href="/logs?platform={{ cur }}">查看实时日志 →</a></div>
+    {% if recent_events %}
+    <div class="grid md:grid-cols-3 gap-3">
+      {% for e in recent_events %}
+      {% set ic = {'info': ('bg-indigo-100 text-indigo-600','i'), 'warn': ('bg-amber-100 text-amber-600','!'), 'error': ('bg-rose-100 text-rose-600','×')}.get(e.level, ('bg-gray-100 text-gray-500','·')) %}
+      <div class="note-in flex gap-3 p-4 rounded-2xl bg-gray-50" style="animation-delay:{{ loop.index0 * 0.04 }}s">
+        <span class="w-9 h-9 shrink-0 rounded-xl grid place-items-center font-bold {{ ic[0] }}">{{ ic[1] }}</span>
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-semibold truncate">{{ error_type_cn(e.type) }}{% if e.task_id %} <a class="text-indigo-600 font-normal" href="/tasks/{{ e.task_id }}?platform={{ cur }}">#{{ e.task_id }}</a>{% endif %}</div>
+          <div class="text-sm text-gray-500 truncate" title="{{ e.message }}">{{ e.message.splitlines()[0] if e.message else '' }}</div>
+        </div>
+        <span class="text-xs text-gray-400 whitespace-nowrap">{{ e.ts.strftime('%m-%d %H:%M') }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-sm text-gray-400 py-6 text-center">还没有任何事件</div>
+    {% endif %}
+  </section>
+
+  {# 今日发布时间轴 #}
+  <section class="card col-span-12 p-7 pop" style="animation-delay:.35s">
+    <div class="flex items-center justify-between mb-6">
+      <div><h2 class="text-xl font-bold">今日发布时间轴</h2><div class="text-sm text-gray-500">每个点是一条定时发布 · 悬停查看内容</div></div>
+      <div class="flex gap-4 text-xs text-gray-500"><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>已发布</span><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>发布中</span><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>失败</span><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-gray-300"></span>待发布</span></div>
+    </div>
+    {% if timeline %}
+    {% set S, E = 0, 24 %}
+    {% set nowh = now.hour + now.minute / 60 %}
+    <div class="relative h-28">
+      <div class="absolute left-0 right-0 top-1/2 h-[3px] rounded bg-gray-100"></div>
+      <div class="absolute top-1/2 h-[3px] rounded bg-gradient-to-r from-emerald-400 to-indigo-500" style="left:0;width:{{ (nowh - S) / (E - S) * 100 }}%"></div>
+      {% for h in range(0, 25, 3) %}<div class="absolute bottom-0 text-xs text-gray-400 -translate-x-1/2" style="left:{{ h / 24 * 100 }}%">{{ h }}:00</div>{% endfor %}
+      {% for x in timeline %}
+      {% set hh = x.publish_at.hour + x.publish_at.minute / 60 %}
+      {% set dot = {'success':'bg-emerald-500','running':'bg-indigo-500 now','failed':'bg-rose-500','interrupted':'bg-orange-500','skipped':'bg-amber-400'}.get(x.status, 'bg-gray-300') %}
+      <a href="/tasks/{{ x.id }}?platform={{ cur }}" class="group absolute -translate-x-1/2 -translate-y-1/2" style="left:{{ hh / 24 * 100 }}%;top:calc(50% + {{ ((loop.index0 % 3) - 1) * 26 }}px)">
+        <div class="w-3.5 h-3.5 rounded-full border-2 border-white shadow {{ dot }} group-hover:scale-150 transition"></div>
+        <div class="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-6 whitespace-nowrap px-3 py-1.5 rounded-xl bg-gray-900 text-white text-xs opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition">{{ x.publish_at.strftime('%H:%M') }} {{ x.title }} · {{ status_cn(x.status) }}</div>
+      </a>
+      {% endfor %}
+      <div class="absolute top-0 bottom-5 w-px bg-indigo-500" style="left:{{ nowh / 24 * 100 }}%"><div class="absolute -top-1 -translate-x-1/2 px-2 py-0.5 rounded-full bg-indigo-500 text-white text-[10px]">现在</div></div>
+    </div>
+    {% else %}
+    <div class="text-sm text-gray-400 py-6 text-center">今天还没有定时发布的任务</div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // 正在发布:每 2 秒刷新当前步骤;任务结束(库里不再 running)就整页刷新回到空闲
+  (function () {
+    const el = document.querySelector('[data-running-step]');
+    if (!el) return;
+    const url = `/api/running-step?platform={{ request.state.current_platform }}&task_id=${el.dataset.runningStep}`;
+    const timer = setInterval(async () => {
+      try {
+        const r = await (await fetch(url)).json();
+        if (!r.running) { clearInterval(timer); location.reload(); return; }
+        el.textContent = r.step ? `当前步骤：${r.step}` : '发布进行中';
+      } catch (_) { /* 服务重启中,下一轮再试 */ }
+    }, 2000);
+  })();
+
+  // 正在发布:已用时
+  document.querySelectorAll('[data-elapsed]').forEach((el) => {
+    if (!el.dataset.elapsed) return;
+    const t0 = new Date(el.dataset.elapsed).getTime();
+    const tick = () => { const s = Math.max(0, Math.floor((Date.now() - t0) / 1000)); el.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+    tick(); setInterval(tick, 1000);
+  });
+</script>
 {% endblock %}

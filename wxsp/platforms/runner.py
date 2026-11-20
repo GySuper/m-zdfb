@@ -18,13 +18,17 @@ import json as _json
 import random
 import time
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from patchright.sync_api import Page
 from sqlalchemy.engine import Engine
 from sqlmodel import Session
+
+if TYPE_CHECKING:  # patchright 只在开发环境(旧平台)有,安装包里不带
+    from patchright.sync_api import Page
 
 from wxsp.browser import browser_context
 from wxsp.config import Settings
@@ -32,10 +36,13 @@ from wxsp.db import claim_task, get_engine, init_db, session_scope, transition_t
 from wxsp.errors import PublisherError, classify
 from wxsp.feishu import FeishuApiError, make_client, writeback_row
 from wxsp.human_input import block_user_input, unblock_user_input
+from wxsp.managed_chrome import ExtensionSession, extension_session
 from wxsp.models import Account, Task, Video
 from wxsp.nas import cleanup_tmp, stage_to_tmp
-from wxsp.notify import NotifyEvent, error_type_cn, notify, step_cn
+from wxsp.notify import NotifyEvent, describe_failure, notify
+from wxsp.platform_meta import get_meta
 from wxsp.platforms.base import (
+    RUNNING_STEPS,
     AlreadyClaimed,
     PlatformSpec,
     PublishContext,
@@ -43,13 +50,12 @@ from wxsp.platforms.base import (
     TaskBundle,
 )
 
-# error_type → (notify type, level, 中文标题)。element_not_found 的标题在派发时
-# 会用 step + 平台名重写,所以这里它的标题串只是占位(只取 type / level)。
-_NOTIFY_BY_ERROR: dict[str, tuple[str, str, str]] = {
-    "cookie_expired": ("cookie_expired", "error", "登录态失效,等待扫码"),
-    "risk_control": ("risk_control", "error", "风控触发,账号已暂停 24 小时"),
-    "element_not_found": ("element_not_found", "warn", "页面元素未找到,可能改版"),
-    "nas_unreachable": ("nas_unreachable", "error", "存储不可达"),
+# error_type → (事件 type, level);其余失败记 task_failed / error
+_NOTIFY_BY_ERROR: dict[str, tuple[str, str]] = {
+    "cookie_expired": ("cookie_expired", "error"),
+    "risk_control": ("risk_control", "error"),
+    "element_not_found": ("element_not_found", "warn"),
+    "nas_unreachable": ("nas_unreachable", "error"),
 }
 
 
@@ -57,7 +63,7 @@ _NOTIFY_BY_ERROR: dict[str, tuple[str, str, str]] = {
 
 
 def screenshot(
-    page: Page,
+    page: Page | ExtensionSession,
     *,
     task_id: int,
     step: str,
@@ -115,10 +121,12 @@ def load_task_bundle(session: Session, task_id: int) -> TaskBundle:
         product_ids_json=video.product_ids_json or "[]",
         declaration=getattr(video, "declaration", None),
         ai_optimize=getattr(video, "ai_optimize", False),
+        detail_float=video.detail_float,
+        store_feed=video.store_feed,
     )
 
 
-def _capture_error_artifacts(page: Page, ctx: PublishContext) -> None:
+def _capture_error_artifacts(page: Page | ExtensionSession, ctx: PublishContext) -> None:
     """趁 page 还活着:截图 err_{last_step}.png + 落一份同名 .html,失败不外抛。"""
     if not ctx.settings.publisher.screenshot_on_error:
         return
@@ -211,18 +219,25 @@ def run_publish(
         ctx.last_step = "stage"
         staged = stage_to_tmp(bundle.video_file_path, task_id=task_id, tmp_root=tmp_root)
 
-        # [2] 启浏览器(带账号指纹避免"同设备多账号"风控)
+        # [2] 启浏览器:patchright(带账号指纹避免"同设备多账号"风控)或托管 Chrome + 插件
         ctx.last_step = "browser"
-        with browser_context(
-            bundle.user_data_dir,
-            headless=settings.publisher.headless,
-            account_id=bundle.account_id,
-            platform=spec.platform_key,
-        ) as page:
+        extension_driver = get_meta(spec.platform_key).driver == "extension"
+        if extension_driver:
+            session_cm: AbstractContextManager[Any] = extension_session(bundle.user_data_dir)
+        else:
+            session_cm = browser_context(
+                bundle.user_data_dir,
+                headless=settings.publisher.headless,
+                account_id=bundle.account_id,
+                platform=spec.platform_key,
+            )
+        with session_cm as page:
             # 禁用真实键盘/鼠标输入:浏览器已激活,物理操作(上传/填表/发布)开始前
             # 锁定,防人碰键盘鼠标打乱 pyautogui 屏幕坐标操作。锁不影响 pyautogui
             # (SendInput 注入不被 BlockInput 拦),任何路径都在 finally 解锁。
-            block_user_input()
+            # 插件走 chrome.debugger 注入输入,不受人碰键鼠影响,不锁。
+            if not extension_driver:
+                block_user_input()
             try:
                 spec.pre_publish(page, bundle, staged, ctx)
 
@@ -264,7 +279,10 @@ def run_publish(
         return result
     finally:
         unblock_user_input()  # 任何路径(成功/失败/中断)都恢复输入,防锁死
-        _finalize(engine, settings, ctx, bundle, spec)
+        try:
+            _finalize(engine, settings, ctx, bundle, spec)
+        finally:
+            RUNNING_STEPS.pop(task_id, None)
 
 
 def _finalize(
@@ -332,6 +350,14 @@ def _finalize(
                 account_now.paused_until = datetime.now() + timedelta(hours=24)
                 logger.warning(f"风控触发,账号 {account_id} 暂停 24h")
 
+        # 账密自动登录成功过 → 登录态回到 ok(哪怕后面步骤失败,登录本身是成功的)
+        if result.relogged_in:
+            account_now = session.get(Account, account_id)
+            if account_now is not None:
+                account_now.cookie_status = "ok"
+                account_now.cookie_last_active_at = datetime.now()
+                logger.info(f"账号 {account_id} 已用账号密码自动登录,cookie_status → ok")
+
         # 登录态失效 → 回写 Account.cookie_status=expired(UI + scheduler pre-flight 用)
         if result.error_type == "cookie_expired":
             account_now = session.get(Account, account_id)
@@ -339,36 +365,28 @@ def _finalize(
                 account_now.cookie_status = "expired"
                 logger.warning(f"登录态失效,账号 {account_id} cookie_status → expired")
 
-        # 失败派 NotifyEvent(dry-run 不告警;同账号同类失败由 halt 机制去重)
+        # 失败只写 Event(工作台「最近事件」用),不推送:每轮结束由 run_summary 统一汇总,
+        # 避免多个失败刷屏(2026-11-19 运营要求)
         if not result.ok and not result.dry_run:
             error_type = result.error_type or "unknown"
-            notify_type, level, title = _NOTIFY_BY_ERROR.get(
-                error_type,
-                ("task_failed", "error", f"任务失败:{error_type_cn(error_type)}"),
-            )
-            # element_not_found 给 title 拼上"在哪一步 + 平台名",运营一眼看到改版位置
-            if error_type == "element_not_found":
-                step_zh = step_cn(ctx.last_step)
-                title = f"元素未找到 · {step_zh} —— {spec.display_name}可能改版"
+            notify_type, level = _NOTIFY_BY_ERROR.get(error_type, ("task_failed", "error"))
+            reason, action = describe_failure(error_type, result.error_msg)
             account_cfg = settings.accounts.get(account_id)
-            display_name = account_cfg.display_name if account_cfg else None
             notify(
                 NotifyEvent(
                     type=notify_type,
                     level=level,
-                    title=title,
-                    content=result.error_msg or "(无错误信息)",
-                    context={
-                        "错误类型": error_type_cn(error_type),
-                        "最近步骤": step_cn(ctx.last_step),
-                    },
+                    title="发布失败",
+                    content=reason,
+                    context={"处理": action},
                     task_id=task_id,
                     account_id=account_id,
-                    account_display_name=display_name,
+                    account_display_name=account_cfg.display_name if account_cfg else None,
                     platform=bundle.platform,
                 ),
                 session=session,
                 settings=settings,
+                dispatch=False,
             )
 
     # 终态回写飞书(HTTP 调用放 session_scope 之外,不持 DB 事务)

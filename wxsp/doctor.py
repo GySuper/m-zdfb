@@ -143,6 +143,27 @@ class NasCheckRow(NamedTuple):
     detail: str
 
 
+# ============== 系统 Chrome ==============
+
+
+class ChromeCheckRow(NamedTuple):
+    ok: bool
+    detail: str
+
+
+def check_chrome() -> ChromeCheckRow:
+    """插件版平台(拼多多)用电脑上装的 Google Chrome;安装包不再自带浏览器。"""
+    import wxsp.browser
+
+    try:
+        path = wxsp.browser._system_chrome_path()
+    except FileNotFoundError:
+        return ChromeCheckRow(
+            False, "没找到 Google Chrome,请到 https://www.google.com/chrome/ 下载安装"
+        )
+    return ChromeCheckRow(True, str(path))
+
+
 # ============== 飞书 API 健康检查 ==============
 
 
@@ -162,31 +183,15 @@ def _default_feishu_prober(config: Settings) -> None:
 
     任何异常(网络 / 401 / 404 / app_token 错)向上冒泡给 `check_feishu` 翻译。
     """
-    import lark_oapi as lark  # type: ignore[import-untyped]
-    from lark_oapi.api.bitable.v1 import (  # type: ignore[import-untyped]
-        SearchAppTableRecordRequest,
-        SearchAppTableRecordRequestBody,
-    )
+    from wxsp.feishu import make_client
 
-    from wxsp.feishu import FeishuApiError
-
-    client = (
-        lark.Client.builder()
-        .app_id(config.feishu.app_id)
-        .app_secret(config.feishu.app_secret)
-        .build()
+    make_client(config.feishu.app_id, config.feishu.app_secret).request(
+        "POST",
+        f"/bitable/v1/apps/{config.feishu.bitable.app_token}"
+        f"/tables/{config.feishu.bitable.table_id}/records/search",
+        params={"page_size": 1},
+        body={},
     )
-    req = (
-        SearchAppTableRecordRequest.builder()
-        .app_token(config.feishu.bitable.app_token)
-        .table_id(config.feishu.bitable.table_id)
-        .page_size(1)
-        .request_body(SearchAppTableRecordRequestBody.builder().build())
-        .build()
-    )
-    response = client.bitable.v1.app_table_record.search(req)
-    if not response.success():
-        raise FeishuApiError(f"飞书 API 错误 code={response.code} msg={response.msg}")
 
 
 def check_feishu(config: Settings, *, prober: FeishuProber | None = None) -> FeishuCheckRow:

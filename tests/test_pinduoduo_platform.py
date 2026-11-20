@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -69,6 +69,8 @@ def test_pinduoduo_registered_in_registry() -> None:
         "cover": "封面文件",
         "declaration": "内容声明",
         "product_ids": "商品ID",
+        "detail_float": "商详悬浮窗",
+        "store_feed": "同步店铺动态",
     }
     # 登录态:goto SSO 入口,已登录跳 home(含 fragment),未登录停 mms/login → logged_in_url 正面判
     assert m.login_meta["mode"] == "logged_in_url"
@@ -110,225 +112,215 @@ def test_pinduoduo_routing_returns_pinduoduo_publisher() -> None:
 
 
 def test_pinduoduo_spec_wiring() -> None:
+    from wxsp.platform_meta import get_meta
     from wxsp.platforms.pinduoduo import PINDUODUO_SPEC, _post_publish, _pre_publish
 
     assert PINDUODUO_SPEC.platform_key == "pinduoduo"
     assert PINDUODUO_SPEC.display_name == "拼多多"
+    assert get_meta("pinduoduo").driver == "extension"
     assert PINDUODUO_SPEC.pre_publish is _pre_publish
     assert PINDUODUO_SPEC.post_publish is _post_publish
 
 
-def test_pinduoduo_add_tags_types_space_after_fixed_wait() -> None:
-    from wxsp.platforms import pinduoduo_selectors as sel
-    from wxsp.platforms.pinduoduo import _add_tags
+class _ScriptedSession:
+    """按顺序回放插件消息;耗尽后模拟插件无响应。"""
 
-    page = MagicMock()
-    editor = MagicMock()
-    editor.first = editor
-    page.locator.return_value = editor
-    events: list[tuple[str, str | int]] = []
-    page.keyboard.type.side_effect = lambda value: events.append(("type", value))
-    page.wait_for_timeout.side_effect = lambda value: events.append(("wait", value))
-    page.keyboard.press.side_effect = lambda value: events.append(("press", value))
+    def __init__(self, *msgs: dict[str, object]) -> None:
+        self.msgs = list(msgs)
 
-    _add_tags(page, ["早餐", "豆浆"])
-
-    page.locator.assert_called_once_with(sel.DESC_EDITOR)
-    editor.click.assert_called_once_with()
-    assert events == [
-        ("type", "#早餐"),
-        ("wait", 1500),
-        ("press", "Space"),
-        ("type", "#豆浆"),
-        ("wait", 1500),
-        ("press", "Space"),
-    ]
+    def next_message(self, timeout: float) -> dict[str, object]:
+        if not self.msgs:
+            raise TimeoutError
+        return self.msgs.pop(0)
 
 
-def _entry_dialog(*, has_close: bool = True) -> tuple[MagicMock, MagicMock]:
-    dialog = MagicMock()
-    close = MagicMock()
-    close.first = close
-    close.count.return_value = int(has_close)
-    dialog.locator.return_value = close
-    return dialog, close
-
-
-def _entry_popup_page(*dialogs: MagicMock) -> MagicMock:
-    from wxsp.platforms import pinduoduo_selectors as sel
-
-    page = MagicMock()
-    pending = list(dialogs)
-
-    def locate(selector: str) -> MagicMock:
-        matches = MagicMock()
-        if selector == sel.ENTRY_DIALOG:
-            if pending:
-                matches.count.return_value = 1
-                matches.last = pending.pop(0)
-            else:
-                matches.count.return_value = 0
-        elif selector == sel.ENTRY_DIALOG_CLOSE:
-            matches.count.return_value = 0
-        else:
-            raise AssertionError(f"unexpected selector: {selector}")
-        return matches
-
-    page.locator.side_effect = locate
-    return page
-
-
-def test_pinduoduo_dismisses_stacked_entry_popups_by_close_control() -> None:
-    from wxsp.platforms import pinduoduo_selectors as sel
-    from wxsp.platforms.pinduoduo import _dismiss_entry_popups
-
-    first_dialog, first_close = _entry_dialog()
-    second_dialog, second_close = _entry_dialog()
-    page = _entry_popup_page(first_dialog, second_dialog)
-
-    with patch("wxsp.platforms.pinduoduo._wait_for_entry_popup_count_drop", return_value=True):
-        _dismiss_entry_popups(page)
-
-    for dialog, close in ((first_dialog, first_close), (second_dialog, second_close)):
-        dialog.locator.assert_called_once_with(sel.ENTRY_DIALOG_CLOSE)
-        close.click.assert_called_once_with(timeout=2_000)
-    page.keyboard.press.assert_not_called()
-
-
-def test_pinduoduo_dismisses_entry_popup_with_escape_when_no_close() -> None:
-    from wxsp.platforms.pinduoduo import _dismiss_entry_popups
-
-    dialog, _close = _entry_dialog(has_close=False)
-    page = _entry_popup_page(dialog)
-
-    with patch("wxsp.platforms.pinduoduo._wait_for_entry_popup_count_drop", return_value=True):
-        _dismiss_entry_popups(page)
-
-    page.keyboard.press.assert_called_once_with("Escape")
-
-
-def test_pinduoduo_entry_popup_fails_closed_when_escape_does_not_close() -> None:
-    from wxsp.platforms.pinduoduo import _dismiss_entry_popups
-
-    dialog, _close = _entry_dialog(has_close=False)
-    page = _entry_popup_page(dialog)
-
-    with (
-        patch("wxsp.platforms.pinduoduo._wait_for_entry_popup_count_drop", return_value=False),
-        pytest.raises(ElementNotFound, match="无法安全关闭"),
-    ):
-        _dismiss_entry_popups(page)
-
-    page.keyboard.press.assert_called_once_with("Escape")
-
-
-def test_pinduoduo_dismisses_standalone_promo_popup_from_real_dom() -> None:
-    """真实商品推广浮层无 dialog 容器,仅有全局可见 beast close SVG。"""
-    from wxsp.platforms import pinduoduo_selectors as sel
-    from wxsp.platforms.pinduoduo import _dismiss_entry_popups
-
-    page = MagicMock()
-    close = MagicMock()
-    visible = True
-
-    def click(*_args, **_kwargs) -> None:
-        nonlocal visible
-        visible = False
-
-    close.click.side_effect = click
-
-    def locate(selector: str) -> MagicMock:
-        matches = MagicMock()
-        if selector == sel.ENTRY_DIALOG:
-            matches.count.return_value = 0
-        elif selector == sel.ENTRY_DIALOG_CLOSE:
-            matches.count.return_value = int(visible)
-            matches.last = close
-        else:
-            raise AssertionError(f"unexpected selector: {selector}")
-        return matches
-
-    page.locator.side_effect = locate
-    _dismiss_entry_popups(page)
-
-    assert 'data-testid="beast-core-icon-close"' in sel.ENTRY_DIALOG_CLOSE
-    close.click.assert_called_once_with(timeout=2_000)
-    page.keyboard.press.assert_not_called()
-
-
-def test_pinduoduo_clears_entry_popups_before_upload() -> None:
-    from wxsp.platforms.pinduoduo import _pre_publish
-
-    bundle = MagicMock()
-    bundle.video_cover_path = None
-    bundle.description = None
-    bundle.tags_json = "[]"
-    bundle.product_ids_json = '["123"]'
-    bundle.publish_at = datetime(2026, 8, 12, 18, 30)
-    bundle.declaration = None
-
+def _ctx() -> MagicMock:
     ctx = MagicMock()
-    ctx.step_pause = (0.0, 0.0)
-    ctx.settings.publisher.upload_timeout_seconds = 60
-
-    calls: list[str] = []
-    fakes = {
-        "_open_publish_page": lambda *a, **kw: calls.append("open"),
-        "_verify_logged_in": lambda *a, **kw: calls.append("verify"),
-        "_dismiss_entry_popups": lambda *a, **kw: calls.append("popups"),
-        "_upload_video": lambda *a, **kw: calls.append("upload"),
-        "_fill_description": lambda *a, **kw: None,
-        "_add_tags": lambda *a, **kw: None,
-        "_add_products": lambda *a, **kw: None,
-        "_set_cover": lambda *a, **kw: None,
-        "_set_schedule": lambda *a, **kw: None,
-        "_select_declaration": lambda *a, **kw: None,
-        "_risk_control_probe": lambda *a, **kw: None,
-        "random_pause": lambda *a, **kw: None,
-    }
-    with (
-        patch("wxsp.platforms.pinduoduo.wxsp.apc.check_pass", return_value=True),
-        patch.multiple("wxsp.platforms.pinduoduo", **fakes),
-    ):
-        _pre_publish(MagicMock(), bundle, Path("video.mp4"), ctx)
-
-    assert calls[:4] == ["open", "verify", "popups", "upload"]
+    ctx.task_id = 7
+    ctx.last_step = "browser"
+    return ctx
 
 
-def test_pinduoduo_schedule_date_failure_fails_closed() -> None:
-    from wxsp.platforms.pinduoduo import _set_schedule
+def test_pump_tracks_steps_until_gate() -> None:
+    from wxsp.platforms.pinduoduo import _pump
 
-    page, cell, _confirm = _schedule_page()
-    cell.click.side_effect = RuntimeError("date missing")
-
-    with (
-        patch("wxsp.platforms.pinduoduo._wait"),
-        pytest.raises(ElementNotFound, match="日历"),
-    ):
-        _set_schedule(page, datetime(2026, 8, 12, 18, 30))
-
-
-def test_pinduoduo_schedule_incomplete_time_fails_closed() -> None:
-    from wxsp.platforms.pinduoduo import _set_schedule
-
-    page, _cell, _confirm = _schedule_page()
-    page.evaluate.return_value = {"colCount": 3, "clicked": ["18", "30"]}
-
-    with (
-        patch("wxsp.platforms.pinduoduo._wait"),
-        pytest.raises(ElementNotFound, match="时间滚轮"),
-    ):
-        _set_schedule(page, datetime(2026, 8, 12, 18, 30))
+    ctx = _ctx()
+    session = _ScriptedSession(
+        {"type": "step", "step": "open_publish"},
+        {"type": "step", "step": "verify_login"},
+        {"type": "gate"},
+        {"type": "step", "step": "never_read"},
+    )
+    assert _pump(session, ctx, "gate", timeout=1) == {"type": "gate"}  # type: ignore[arg-type]
+    assert ctx.last_step == "verify_login"
 
 
-def test_pinduoduo_schedule_confirm_failure_fails_closed() -> None:
-    from wxsp.platforms.pinduoduo import _set_schedule
+@pytest.mark.parametrize(
+    ("kind", "exc_name"),
+    [
+        ("cookie_expired", "CookieExpired"),
+        ("risk_control", "RiskControl"),
+        ("element_not_found", "ElementNotFound"),
+        ("upload_failed", "UploadFailed"),
+        ("product_not_found", "ProductNotFound"),
+        ("network", "NetworkError"),
+        ("something_new", "UnknownError"),
+    ],
+)
+def test_pump_maps_extension_errors_to_publisher_errors(kind: str, exc_name: str) -> None:
+    import wxsp.errors
+    from wxsp.platforms.pinduoduo import _pump
 
-    page, _cell, confirm = _schedule_page()
-    confirm.click.side_effect = RuntimeError("confirm missing")
+    ctx = _ctx()
+    session = _ScriptedSession({"type": "error", "kind": kind, "step": "upload", "message": "坏了"})
+    with pytest.raises(getattr(wxsp.errors, exc_name), match="坏了"):
+        _pump(session, ctx, "gate", timeout=1)  # type: ignore[arg-type]
+    assert ctx.last_step == "upload"
 
-    with (
-        patch("wxsp.platforms.pinduoduo._wait"),
-        pytest.raises(ElementNotFound, match="确认按钮"),
-    ):
-        _set_schedule(page, datetime(2026, 8, 12, 18, 30))
+
+def test_pump_returns_on_halted_and_times_out_when_silent() -> None:
+    from wxsp.platforms.pinduoduo import _pump
+
+    halted = {"type": "halted", "step": "upload"}
+    assert _pump(_ScriptedSession(halted), _ctx(), "gate", timeout=1) == halted  # type: ignore[arg-type]
+    with pytest.raises(ElementNotFound, match="没有任何进展"):
+        _pump(_ScriptedSession(), _ctx(), "gate", timeout=1)  # type: ignore[arg-type]
+
+
+def test_pre_publish_hands_absolute_file_paths_to_the_extension(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """配置里 data_dir 是相对路径(./data)时暂存路径也是相对的;Chrome 是另一个进程,
+    按相对路径找不到文件,拼多多提示「已过滤空文件」(2026-11-19 任务 58)。"""
+    from wxsp.platforms import pinduoduo
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("wxsp.apc.check_pass", lambda: True)
+    monkeypatch.setattr(pinduoduo, "stage_to_tmp", lambda *a, **k: Path("data/tmp/58/c.png"))
+    bundle = MagicMock(
+        product_ids_json='["1"]',
+        video_cover_path=Path("/nas/c.png"),
+        tags_json="[]",
+        description="d",
+        publish_at=datetime(2026, 12, 1, 10, 30),
+        declaration=None,
+        detail_float=None,
+        store_feed=None,
+        account_id="a",
+    )
+    ctx = MagicMock()
+    ctx.settings.accounts = {}
+    ctx.settings.publisher.upload_timeout_seconds = 600
+    ctx.step_pause = (0, 0)
+    session = MagicMock()
+    session.next_message.return_value = {"type": "gate"}
+
+    pinduoduo._pre_publish(session, bundle, Path("data/tmp/58/v.mp4"), ctx)
+
+    job = session.start_job.call_args[0][0]
+    assert job["video_path"] == str(tmp_path / "data/tmp/58/v.mp4")
+    assert job["cover_path"] == str(tmp_path / "data/tmp/58/c.png")
+
+
+# ---- 发布前暂时性错误自动重跑整轮(新标签页从头来;点发布之后绝不重试)----
+
+
+class _RoundsSession:
+    """每次 start_job 开一轮,按轮回放插件消息。"""
+
+    def __init__(self, *rounds: list[dict[str, object]]) -> None:
+        self.rounds = list(rounds)
+        self.jobs: list[dict[str, object]] = []
+        self.msgs: list[dict[str, object]] = []
+
+    def start_job(self, job: dict[str, object]) -> None:
+        self.jobs.append(job)
+        self.msgs = list(self.rounds.pop(0))
+
+    def next_message(self, timeout: float) -> dict[str, object]:
+        if not self.msgs:
+            raise TimeoutError
+        return self.msgs.pop(0)
+
+
+def _err(kind: str) -> dict[str, object]:
+    return {"type": "error", "kind": kind, "step": "upload", "message": "坏了"}
+
+
+def _run_pre(monkeypatch: pytest.MonkeyPatch, session: _RoundsSession) -> MagicMock:
+    from wxsp.platforms import pinduoduo
+
+    monkeypatch.setattr("wxsp.apc.check_pass", lambda: True)
+    monkeypatch.setattr(pinduoduo.time, "sleep", lambda s: None)
+    monkeypatch.setattr(pinduoduo, "screenshot", lambda *a, **k: Path("shot.png"))
+    bundle = MagicMock(
+        product_ids_json='["1"]',
+        video_cover_path=None,
+        tags_json="[]",
+        description="d",
+        publish_at=datetime(2026, 12, 1, 10, 30),
+        declaration=None,
+        detail_float=None,
+        store_feed=None,
+        account_id="a",
+    )
+    ctx = MagicMock()
+    ctx.settings.accounts = {}
+    ctx.settings.publisher.upload_timeout_seconds = 600
+    ctx.step_pause = (0, 0)
+    ctx.result.screenshots = []
+    pinduoduo._pre_publish(session, bundle, Path("/v.mp4"), ctx)  # type: ignore[arg-type]
+    return ctx
+
+
+def test_pre_publish_reruns_after_transient_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _RoundsSession([_err("network")], [{"type": "gate"}])
+    ctx = _run_pre(monkeypatch, session)
+    assert len(session.jobs) == 2
+    assert ctx.result.screenshots == ["shot.png"]  # 失败那一轮留截图
+
+
+@pytest.mark.parametrize("kind", ["cookie_expired", "risk_control", "product_not_found"])
+def test_pre_publish_does_not_rerun_hopeless_errors(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    from wxsp.errors import PublisherError
+
+    session = _RoundsSession([_err(kind)], [{"type": "gate"}])
+    with pytest.raises(PublisherError):
+        _run_pre(monkeypatch, session)
+    assert len(session.jobs) == 1
+
+
+def test_pre_publish_rerun_budget_per_kind_and_total(monkeypatch: pytest.MonkeyPatch) -> None:
+    from wxsp.errors import ElementNotFound, NetworkError
+
+    # element_not_found 只重跑 1 次
+    session = _RoundsSession(
+        [_err("element_not_found")], [_err("element_not_found")], [{"type": "gate"}]
+    )
+    with pytest.raises(ElementNotFound):
+        _run_pre(monkeypatch, session)
+    assert len(session.jobs) == 2
+    # 网络错误预算 3 次,但总共最多 3 轮
+    session = _RoundsSession(*[[_err("network")]] * 4)
+    with pytest.raises(NetworkError):
+        _run_pre(monkeypatch, session)
+    assert len(session.jobs) == 3
+
+
+def test_publish_unconfirmed_is_its_own_error() -> None:
+    from wxsp.errors import PublishUnconfirmed, classify
+    from wxsp.platforms.pinduoduo import _pump
+
+    session = _ScriptedSession(
+        {
+            "type": "error",
+            "kind": "publish_unconfirmed",
+            "step": "wait_success",
+            "message": "可能已发出",
+        }
+    )
+    with pytest.raises(PublishUnconfirmed) as exc:
+        _pump(session, _ctx(), "done", timeout=1)  # type: ignore[arg-type]
+    assert classify(exc.value) == "publish_unconfirmed"

@@ -22,6 +22,7 @@ from wxsp.notify import (
     _format_markdown,
     _format_plain,
     build_notifiers_from_settings,
+    describe_failure,
     lark_sign,
     notify,
     step_cn,
@@ -140,63 +141,52 @@ def test_wecom_notifier_send_invalid_json_response_returns_false() -> None:
 # ============== _format_markdown ==============
 
 
-def test_format_markdown_includes_title_content_task_account_context() -> None:
+G = "\u3000"  # 字段名与值之间的全角空格
+
+
+def test_format_markdown_title_status_fields_and_footer() -> None:
     event = NotifyEvent(
         type="risk_control",
         level="error",
-        title="风控触发",
-        content="账号 a 命中关键词:请稍后",
-        context={"关键词": "请稍后", "步骤": "风控探测"},
+        title="账号触发平台风控",
+        status="需要处理",
+        content="",
+        context={"平台提示": "操作过于频繁", "处理": "已自动暂停 24 小时"},
         task_id=42,
         account_id="account_a",
         account_display_name="美食号",
     )
-    md = _format_markdown(event)
-    assert "风控触发" in md
-    assert "请稍后" in md
-    # 字段名 + level 标签都是中文,账号显示 display_name 而非 ID
-    assert "任务编号:42" in md
-    assert "账号:美食号" in md
-    assert "account_a" not in md
-    assert "关键词" in md and "步骤" in md
+    lines = _format_markdown(event).splitlines()
+    assert lines[0] == '**视频号 · 账号触发平台风控** <font color="warning">需要处理</font>'
+    assert f"> 账号{G}美食号" in lines  # 显示中文名,不显示账号 ID
+    assert f"> 平台提示{G}操作过于频繁" in lines
+    assert lines[-1].startswith('<font color="comment">任务 #42 · ')
+    md = "\n".join(lines)
+    assert "account_a" not in md and "[错误]" not in md and "##" not in md
 
 
 def test_format_markdown_falls_back_to_account_id_when_no_display_name() -> None:
-    """没传 display_name 时回退到 account_id —— 兼容老调用方。"""
-    event = NotifyEvent(
-        type="info",
-        level="info",
-        title="x",
-        content="y",
-        account_id="account_a",
+    md = _format_markdown(
+        NotifyEvent(type="x", level="info", title="t", content="", account_id="acc")
     )
-    md = _format_markdown(event)
-    assert "账号:account_a" in md
+    assert f"> 账号{G}acc" in md
 
 
-def test_format_markdown_minimal_event_omits_optional_lines() -> None:
-    event = NotifyEvent(type="info", level="info", title="Hi", content="body")
-    md = _format_markdown(event)
-    assert "Hi" in md
-    assert "body" in md
-    assert "任务编号" not in md
-    assert "账号:" not in md
+def test_format_markdown_minimal_event_has_no_fields_or_task() -> None:
+    md = _format_markdown(NotifyEvent(type="info", level="info", title="Hi", content="body"))
+    assert md.splitlines()[:2] == ["**视频号 · Hi**", "body"]
+    assert "> " not in md and "任务 #" not in md
 
 
-def test_format_markdown_includes_platform_tag_and_chinese_level() -> None:
-    """所有推送的标题前面都要带 [视频号] + 中文 level 标签(信息/警告/错误)。"""
-    event = NotifyEvent(type="info", level="info", title="今日发布汇总", content="x")
-    md = _format_markdown(event)
-    first_line = md.splitlines()[0]
-    assert first_line.startswith("## [视频号] [信息]")
-    assert "今日发布汇总" in first_line
-
-
-def test_format_markdown_translates_level_warn_and_error() -> None:
-    md_warn = _format_markdown(NotifyEvent(type="x", level="warn", title="t", content=""))
-    md_err = _format_markdown(NotifyEvent(type="x", level="error", title="t", content=""))
-    assert "[警告]" in md_warn and "WARN" not in md_warn
-    assert "[错误]" in md_err and "ERROR" not in md_err
+def test_format_markdown_status_color_follows_level() -> None:
+    ok = _format_markdown(
+        NotifyEvent(type="x", level="info", title="t", content="", status="全部成功")
+    )
+    bad = _format_markdown(
+        NotifyEvent(type="x", level="warn", title="t", content="", status="需要处理")
+    )
+    assert '<font color="info">全部成功</font>' in ok
+    assert '<font color="warning">需要处理</font>' in bad
 
 
 # ============== LarkNotifier ==============
@@ -208,25 +198,56 @@ def test_lark_sign_matches_feishu_algorithm() -> None:
 
 
 def test_format_plain_has_no_markdown_symbols() -> None:
-    """飞书文本消息不渲染 markdown,排版里不能出现 ## / ** / > 这些裸符号。"""
+    """飞书文本消息不渲染 markdown:同一份内容去掉颜色 / 加粗 / 引用符号。"""
     event = NotifyEvent(
-        type="task_failed",
-        level="error",
-        title="任务失败",
-        content="上传中断",
+        type="run_summary",
+        level="warn",
+        title="本轮发布完成",
+        status="1 条需要处理",
+        content='成功 <font color="info">1</font> · 失败 1\n> **1. 早餐豆浆**',
         task_id=7,
         account_id="acc_x",
         account_display_name="美食号",
-        context={"错误类型": "上传失败"},
     )
     text = _format_plain(event)
-    assert "##" not in text
-    assert "**" not in text
-    assert "> " not in text
-    assert text.splitlines()[0] == "【视频号】[错误] 任务失败"
-    assert "任务编号:7" in text
-    assert "账号:美食号" in text
-    assert "错误类型:上传失败" in text
+    assert "**" not in text and "<font" not in text and "\n> " not in text
+    assert text.splitlines()[0] == "视频号 · 本轮发布完成 1 条需要处理"
+    assert "成功 1 · 失败 1" in text
+    assert "1. 早餐豆浆" in text
+    assert f"账号{G}美食号" in text
+
+
+# ============== describe_failure:原因 / 处理办法,不让代码穿透 ==============
+
+
+def test_describe_failure_strips_step_prefix_and_gives_action() -> None:
+    reason, action = describe_failure(
+        "product_not_found", "step=products: 商品已下架(商品 ID 858612559443)"
+    )
+    assert reason == "商品问题:商品已下架(商品 ID 858612559443)"
+    assert "待入库" in action
+
+
+def test_describe_failure_names_the_step_for_page_changes() -> None:
+    reason, action = describe_failure("element_not_found", "step=cover: 编辑封面未找到(等了 10 秒)")
+    assert reason == "发布页可能改版,卡在「设置封面」:编辑封面未找到(等了 10 秒)"
+    assert "技术" in action
+
+
+@pytest.mark.parametrize(
+    ("error_type", "msg", "expected"),
+    [
+        ("unknown", "step=upload: CdpError: Runtime.evaluate timed out", "未知问题"),
+        ("network", "step=open_publish: Page.navigate net::ERR_TIMED_OUT", "网络不稳定"),
+        ("brand_new_type", "boom", "未知问题"),
+        (None, None, "未知问题"),
+    ],
+)
+def test_describe_failure_never_leaks_code(
+    error_type: str | None, msg: str | None, expected: str
+) -> None:
+    reason, _ = describe_failure(error_type, msg)
+    assert reason == expected
 
 
 def test_lark_notifier_send_success_text_no_sign() -> None:

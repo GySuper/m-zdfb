@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block page_title %}工作台{% endblock %} · {{ platform_cn(request.state.current_platform) }} · Auto</title>
+  <link rel="stylesheet" href="/static/fonts/misans/MiSans-Regular.min.css">
+  <link rel="stylesheet" href="/static/fonts/misans/MiSans-Medium.min.css">
+  <link rel="stylesheet" href="/static/fonts/misans/MiSans-Semibold.min.css">
+  <link rel="stylesheet" href="/static/fonts/misans/MiSans-Bold.min.css">
+  <link rel="stylesheet" href="/static/fonts/misans/MiSans-Heavy.min.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ wxsp_version }}">
+  <script src="/static/vendor/htmx.min.js"></script>
+  <script src="/static/vendor/htmx-sse.js"></script>
+</head>
+<body class="min-h-screen">
+<div class="max-w-[1400px] mx-auto p-5">
+
+  {% block hero %}
+  {# 默认:紧凑横幅(其他页面) #}
+  <section class="relative rounded-[32px] min-h-[168px] mb-5 pop" style="z-index:20">
+    <div class="absolute inset-0 overflow-hidden rounded-[32px]">
+      <canvas data-silk class="absolute inset-0 w-full h-full" aria-hidden="true"></canvas>
+      <div class="absolute inset-0 bg-gradient-to-r from-black/35 via-black/5 to-transparent"></div>
+    </div>
+    <div class="relative z-10 h-full flex flex-col gap-6 p-7 text-white">
+      {% include "_topbar.html" %}
+      <div class="flex items-end justify-between gap-6">
+        <div>
+          <h1 class="text-3xl font-black tracking-tight">{% block heading %}{% endblock %}</h1>
+          {% block subheading %}{% endblock %}
+        </div>
+        <div class="flex items-center gap-3">{% block hero_actions %}{% endblock %}</div>
+      </div>
+    </div>
+  </section>
+  {% endblock %}
+
+  <div id="op-status">{% block op_status %}{% endblock %}</div>
+
+  <main>{% block content %}{% endblock %}</main>
+
+  <footer class="text-center text-xs text-gray-400 pt-8 pb-3 tracking-wide">Auto · 数智部研发 · v{{ wxsp_version }}</footer>
+</div>
+
+<dialog id="op-modal" class="rounded-[24px] p-0 w-[min(480px,92vw)] shadow-2xl backdrop:bg-black/30">
+  <div class="p-6">
+    <div class="flex items-center gap-3 mb-2"><span class="w-9 h-9 rounded-xl grid place-items-center bg-rose-50 text-rose-600 font-bold">!</span><span class="font-bold text-lg" id="op-modal-title">操作失败</span></div>
+    <div class="text-sm text-gray-600 whitespace-pre-wrap break-words" id="op-modal-detail"></div>
+    <div class="mt-5 text-right"><button type="button" class="btn btn-dark" onclick="document.getElementById('op-modal').close()">知道了</button></div>
+  </div>
+</dialog>
+
+<script src="/static/ui.js?v={{ wxsp_version }}" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -220,3 +220,56 @@ def test_untrusted_host_is_rejected(client: TestClient) -> None:
         headers={"Host": "evil.example"},
     )
     assert response.status_code == 400
+
+
+def _seed_running(tmp_path: Path) -> int:
+    engine = get_engine(tmp_path / "db.sqlite")
+    with session_scope(engine) as s:
+        s.add(Account(id="account_a", display_name="美食号", user_data_dir="a", daily_limit=20))
+        s.add(
+            Video(id="rec_r", file_path="/x/v.mp4", title="跑着的视频", ingested_at=datetime.now())
+        )
+        task = Task(
+            video_id="rec_r",
+            account_id="account_a",
+            execute_date=date.today(),
+            publish_at=datetime.now(),
+            status="running",
+        )
+        s.add(task)
+        s.flush()
+        assert task.id is not None
+        return task.id
+
+
+def test_dashboard_running_card_shows_current_step(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from wxsp.platforms.base import RUNNING_STEPS
+
+    task_id = _seed_running(tmp_path)
+    monkeypatch.setitem(RUNNING_STEPS, task_id, "upload")
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "上传视频" in r.text
+
+
+def test_running_step_api_follows_the_task(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from wxsp.platforms.base import RUNNING_STEPS
+
+    task_id = _seed_running(tmp_path)
+    monkeypatch.setitem(RUNNING_STEPS, task_id, "schedule")
+    r = client.get(f"/api/running-step?platform=tencent_channel&task_id={task_id}")
+    assert r.json() == {"running": True, "step": "定时发布"}
+    # 别的进程(如命令行)在跑:库里 running 但本进程没有步骤 → 仍算在跑,不让页面反复刷新
+    RUNNING_STEPS.pop(task_id)
+    r = client.get(f"/api/running-step?platform=tencent_channel&task_id={task_id}")
+    assert r.json() == {"running": True, "step": None}
+    with session_scope(get_engine(tmp_path / "db.sqlite")) as s:
+        task = s.get(Task, task_id)
+        assert task is not None
+        task.status = "success"
+    r = client.get(f"/api/running-step?platform=tencent_channel&task_id={task_id}")
+    assert r.json() == {"running": False, "step": None}

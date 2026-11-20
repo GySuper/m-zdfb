@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import random
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pyautogui  # type: ignore[import-untyped]
 from loguru import logger
-from patchright.sync_api import Locator, Page
+
+if TYPE_CHECKING:  # patchright 只在开发环境(旧平台)有,安装包里不带
+    from patchright.sync_api import Locator, Page
 
 # pyautogui 安全保护:鼠标移到屏幕左上角 (0,0) 时中止(防失控)。FAILSAFE 可能和
 # 窗口最大化冲突(鼠标自然到 0,0),生产环境关闭。改成用 pyautogui.FAILSAFE = False。

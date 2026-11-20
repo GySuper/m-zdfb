@@ -1,0 +1,58 @@
+{# 新版顶栏:品牌、页面导航、平台切换、日期。被 base_v2.html 的两种横幅共用 #}
+{% set cur = request.state.current_platform %}
+{% set plats = request.state.platforms or {} %}
+{% set brand = platform_brand.get(cur, platform_brand['tencent_channel']) %}
+<div class="flex items-center gap-6">
+  <a href="/?platform={{ cur }}" class="flex items-center gap-2 font-bold text-lg whitespace-nowrap" aria-label="Auto 首页">
+    <span class="w-8 h-8 rounded-full bg-white text-black grid place-items-center text-sm font-black">A</span>Auto
+  </a>
+  <nav class="flex gap-1 p-1 rounded-full bg-white/15 backdrop-blur text-sm" aria-label="主导航">
+    {% for key, label, href in [('dashboard','工作台','/'),('tasks','任务','/tasks'),('accounts','账号','/accounts'),('plans','计划','/plans'),('logs','日志','/logs'),('config','配置','/config')] %}
+    <a href="{{ href }}?platform={{ cur }}" class="px-4 py-1.5 rounded-full whitespace-nowrap transition {% if active == key %}bg-white text-black font-medium{% else %}hover:bg-white/15{% endif %}"{% if active == key %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <div class="flex-1"></div>
+  <div class="relative z-30">
+    <button id="pfBtn" type="button" class="group flex items-center gap-3 pl-1.5 pr-4 py-1.5 rounded-2xl bg-white text-gray-900 shadow-xl shadow-black/20 hover:shadow-black/30 hover:-translate-y-0.5 transition" aria-haspopup="true" aria-expanded="false">
+      <span class="w-9 h-9 rounded-xl grid place-items-center shrink-0" style="background:{{ brand.bg }}"><img src="/static/icons/{{ cur }}.svg" alt="" class="w-5 h-5" style="{{ brand.fx }}"></span>
+      <span class="text-[15px] font-bold">{{ plats[cur].label if plats.get(cur) else platform_cn(cur) }}</span>
+      <span class="ml-1 w-7 h-7 rounded-full bg-gray-100 grid place-items-center group-hover:bg-gray-200 transition"><svg id="pfChev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="transition:transform .2s" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></span>
+    </button>
+    {% set ov = platform_overview() %}
+    <div id="pfMenu" hidden class="menu absolute right-0 mt-3 w-[460px] p-5 rounded-[28px] bg-white text-gray-900 shadow-2xl shadow-black/25 ring-1 ring-black/5">
+      <div class="flex items-end justify-between px-1 mb-4">
+        <div><div class="text-lg font-bold">切换平台</div><div class="text-xs text-gray-400 mt-0.5">每个平台的任务、账号和配置相互独立</div></div>
+        <span class="text-xs text-gray-400">{{ plats|length }} 个平台</span>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        {% for pk, pi in plats.items() %}
+        {% set b = platform_brand.get(pk, platform_brand['tencent_channel']) %}
+        {% set o = ov.get(pk, {'done':0,'total':0,'accounts':0,'issues':0}) %}
+        {% if pi.locked %}
+        <button type="button" data-locked="{{ pi.label }}" data-hint="{{ locked_hint }}" class="relative block w-full text-left p-4 rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 transition hover:bg-gray-100">
+        {% else %}
+        <a href="{{ request.url.path }}?platform={{ pk }}" class="relative block p-4 rounded-2xl border transition {% if pk == cur %}border-transparent ring-2 ring-indigo-500 bg-indigo-50/40{% else %}border-gray-100 hover:border-gray-200 hover:bg-gray-50 hover:-translate-y-0.5{% endif %}">
+        {% endif %}
+          <div class="flex items-center gap-3">
+            <span class="w-10 h-10 rounded-xl grid place-items-center shrink-0 shadow-md {% if pi.locked %}grayscale opacity-50{% endif %}" style="background:{{ b.bg }}"><img src="/static/icons/{{ pk }}.svg" alt="" class="w-[55%] h-[55%]" style="{{ b.fx }}"></span>
+            <div class="min-w-0">
+              <div class="font-bold {% if pi.locked %}text-gray-400{% endif %}">{{ pi.label }}</div>
+              <div class="text-[11px] text-gray-400 whitespace-nowrap">
+                {% if pi.locked %}<span class="inline-flex items-center gap-1"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>暂未开放</span>
+                {% elif not pi.configured %}还没配置
+                {% else %}{{ o.accounts }} 个账号 · {% if o.issues %}<span class="text-rose-600">{{ o.issues }} 个要扫码</span>{% else %}正常{% endif %}{% endif %}
+              </div>
+            </div>
+            {% if pk == cur %}<span class="ml-auto w-5 h-5 rounded-full bg-indigo-500 grid place-items-center"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg></span>{% endif %}
+          </div>
+          {% if not pi.locked %}
+          <div class="flex items-baseline justify-between mt-3 text-xs"><span class="text-gray-400">今日进度</span><span class="font-semibold tabular-nums">{{ o.done }}<span class="text-gray-400">/{{ o.total }}</span></span></div>
+          <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden"><div class="h-full rounded-full" style="width:{{ (o.done / o.total * 100) | round(1) if o.total else 0 }}%;background:{{ b.bar }}"></div></div>
+          {% endif %}
+        {% if pi.locked %}</button>{% else %}</a>{% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="text-sm text-white/80 whitespace-nowrap">{{ today_label() }}</div>
+</div>
